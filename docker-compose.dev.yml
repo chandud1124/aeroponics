@@ -1,0 +1,27 @@
+services:
+  dev:
+    image: node:20-alpine
+    container_name: smart-tower-garden-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.local
+    environment:
+      HOST: 0.0.0.0
+      # Pass Supabase env vars explicitly
+      VITE_SUPABASE_URL: "${VITE_SUPABASE_URL:-http://localhost:3000}"
+      VITE_SUPABASE_PUBLISHABLE_KEY: "${VITE_SUPABASE_PUBLISHABLE_KEY:-}"
+      SUPABASE_URL: "${SUPABASE_URL:-http://localhost:3000}"
+      SUPABASE_PUBLISHABLE_KEY: "${SUPABASE_PUBLISHABLE_KEY:-}"
+    networks:
+      - tower-network
+    command: sh -c "cat .env.local && npm install && npm run dev"
+    restart: unless-stopped
+
+networks:
+  tower-network:
+    driver: bridge

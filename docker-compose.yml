@@ -1,0 +1,28 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-tower-garden
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.local
+    environment:
+      # Pass Supabase env vars explicitly
+      VITE_SUPABASE_URL: "${VITE_SUPABASE_URL:-http://localhost:3000}"
+      VITE_SUPABASE_PUBLISHABLE_KEY: "${VITE_SUPABASE_PUBLISHABLE_KEY:-}"
+      SUPABASE_URL: "${SUPABASE_URL:-http://localhost:3000}"
+      SUPABASE_PUBLISHABLE_KEY: "${SUPABASE_PUBLISHABLE_KEY:-}"
+    networks:
+      - tower-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  tower-network:
+    driver: bridge

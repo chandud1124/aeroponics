@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lettuce Nutrition & Indoor Tower Guide — Aeroponics Karnataka</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f0fdf4;color:#111;font-size:14px;line-height:1.6}
+
+/* ── NAV ── */
+.topbar{background:#14532d;padding:0 16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.topbar-title{font-size:13px;font-weight:700;color:#bbf7d0;padding:12px 0;white-space:nowrap;margin-right:6px}
+.nb{font-size:11px;font-weight:600;padding:5px 12px;border-radius:16px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#d1fae5;cursor:pointer;margin:5px 2px;transition:all .15s;white-space:nowrap}
+.nb.on,.nb:hover{background:#fff;color:#14532d;border-color:#fff}
+
+/* ── LAYOUT ── */
+.pg{display:none;padding:20px 16px 48px;max-width:1060px;margin:0 auto}
+.pg.on{display:block}
+.ph h2{font-size:20px;font-weight:700;color:#14532d;margin-bottom:4px}
+.ph p{font-size:12px;color:#6b7280;margin-bottom:16px}
+.sh{font-size:15px;font-weight:700;color:#111;margin:20px 0 10px;padding-bottom:6px;border-bottom:2px solid #dcfce7}
+
+/* ── CARDS ── */
+.card{background:#fff;border:1px solid #d1fae5;border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.ct{font-size:13px;font-weight:700;margin-bottom:8px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:620px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+/* ── ALERTS ── */
+.tip{border-left:4px solid #22c55e;background:#f0fdf4;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#166534;margin:10px 0}
+.warn{border-left:4px solid #f59e0b;background:#fffbeb;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#92400e;margin:10px 0}
+.danger{border-left:4px solid #ef4444;background:#fef2f2;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#991b1b;margin:10px 0}
+.info{border-left:4px solid #3b82f6;background:#eff6ff;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#1d4ed8;margin:10px 0}
+
+/* ── TABLE ── */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#14532d;color:#fff;padding:8px 10px;text-align:left;font-weight:600}
+td{padding:7px 10px;border-bottom:1px solid #f0fdf4;color:#374151;vertical-align:middle}
+tr:nth-child(even) td{background:#f9fffe}
+td:first-child{font-weight:600;color:#111}
+.num{text-align:center;font-weight:700;font-size:13px}
+.good{color:#166534;font-weight:700}
+.warn-val{color:#92400e;font-weight:700}
+.bad{color:#991b1b;font-weight:700}
+
+/* ── BADGES ── */
+.bg{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#dcfce7;color:#166534}
+.ba{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#fef3c7;color:#92400e}
+.br{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#fee2e2;color:#991b1b}
+.bb{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#dbeafe;color:#1d4ed8}
+.bp{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#fae8ff;color:#7e22ce}
+
+/* ── STAGE TIMELINE ── */
+.timeline{display:flex;gap:0;margin:16px 0;overflow-x:auto;padding-bottom:6px}
+.stage{flex:1;min-width:130px;padding:12px 10px;text-align:center;border-right:2px solid #f0fdf4;cursor:pointer;transition:all .2s;border-top:4px solid transparent}
+.stage:last-child{border-right:none}
+.stage:hover,.stage.active{background:#f0fdf4;border-top-color:#14532d}
+.stage .s-name{font-size:12px;font-weight:700;color:#14532d;margin-bottom:4px}
+.stage .s-days{font-size:11px;color:#6b7280;margin-bottom:6px}
+.stage .s-ppm{font-size:14px;font-weight:700;color:#111}
+.stage .s-ph{font-size:11px;color:#374151;margin-top:2px}
+
+/* ── NUTRIENT DETAIL PANEL ── */
+.detail-panel{background:#fff;border:1px solid #d1fae5;border-radius:12px;padding:16px;margin:12px 0;display:none}
+.detail-panel.show{display:block}
+
+/* ── CHEMICAL BARS ── */
+.chem-row{display:flex;align-items:center;gap:10px;margin:6px 0}
+.chem-name{width:130px;font-size:12px;font-weight:600;flex-shrink:0}
+.chem-bar-wrap{flex:1;background:#f3f4f6;border-radius:4px;height:16px;overflow:hidden}
+.chem-bar{height:16px;border-radius:4px;display:flex;align-items:center;padding-left:6px;font-size:10px;font-weight:600;color:#fff;transition:width .4s ease}
+.chem-val{width:80px;font-size:12px;font-weight:700;text-align:right;flex-shrink:0}
+
+/* ── LED SPECTRUM VISUAL ── */
+.spectrum-bar{display:flex;height:28px;border-radius:8px;overflow:hidden;margin:8px 0}
+.spec-seg{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
+
+/* ── UNIT TAGS ── */
+.unit-row{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.unit-tag{background:var(--c,#f3f4f6);border:1px solid var(--bc,#e5e7eb);border-radius:8px;padding:6px 12px;text-align:center;font-size:12px;min-width:100px}
+.unit-tag .val{font-size:18px;font-weight:700;color:var(--vc,#111);display:block}
+.unit-tag .lbl{font-size:10px;color:#6b7280;display:block}
+
+/* ── MIST CYCLE VISUAL ── */
+.cycle-vis{display:flex;align-items:center;gap:4px;margin:4px 0}
+.c-on{background:#22c55e;border-radius:4px;height:20px;min-width:28px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;padding:0 4px}
+.c-off{background:#e5e7eb;border-radius:4px;height:20px;min-width:28px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#6b7280;padding:0 4px}
+
+/* ── COVER ── */
+.cover{background:linear-gradient(160deg,#052e16,#14532d,#166534);color:#fff;padding:28px 18px;text-align:center}
+.cover h1{font-size:22px;font-weight:800;margin-bottom:6px}
+.cover p{font-size:13px;opacity:.85;max-width:540px;margin:0 auto 12px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.tag{background:rgba(255,255,255,.15);padding:4px 11px;border-radius:12px;font-size:11px;font-weight:500;border:1px solid rgba(255,255,255,.25)}
+
+/* ── NUTRIENT DEFICIENCY CARD ── */
+.def-card{border-radius:10px;padding:12px 14px;margin-bottom:8px;border:1.5px solid}
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>Lettuce Nutrition Stage-by-Stage + Indoor Tower Setup</h1>
+  <p>Complete PPM, EC, pH, cc dosage changes from baby seedling to full harvest — plus LED lights, misting, and indoor configuration for Karnataka</p>
+  <div class="tags">
+    <span class="tag">Baby seedling → full harvest</span>
+    <span class="tag">PPM / EC / pH per stage</span>
+    <span class="tag">Exact cc dosage</span>
+    <span class="tag">Indoor LED hours & spectrum</span>
+    <span class="tag">Misting intervals indoors</span>
+    <span class="tag">Room temperature & humidity</span>
+  </div>
+</div>
+
+<div class="topbar">
+  <span class="topbar-title">Lettuce Guide</span>
+  <button class="nb on"  onclick="show('stages',this)">Nutrition Stages</button>
+  <button class="nb" onclick="show('chemicals',this)">Chemicals & Dosage</button>
+  <button class="nb" onclick="show('deficiency',this)">Deficiency Signs</button>
+  <button class="nb" onclick="show('indoor',this)">Indoor Setup</button>
+  <button class="nb" onclick="show('led',this)">LED Lights</button>
+  <button class="nb" onclick="show('mist',this)">Indoor Misting</button>
+  <button class="nb" onclick="show('daily',this)">Daily Log Sheet</button>
+</div>
+
+<!-- ══════════════════════════════════
+     PAGE 1 — NUTRITION STAGES
+══════════════════════════════════ -->
+<div id="p-stages" class="pg on">
+  <div class="ph">
+    <h2>Lettuce nutrition — complete stage-by-stage guide</h2>
+    <p>Click any stage below to see exact PPM, EC, pH, nutrient doses, and what to change at each transition</p>
+  </div>
+
+  <!-- STAGE TIMELINE -->
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="timeline">
+      <div class="stage active" id="st0" onclick="showStage(0)">
+        <div class="s-name">Seed Soak</div>
+        <div class="s-days">Day 0</div>
+        <div class="s-ppm">0 PPM</div>
+        <div class="s-ph">pH 5.5</div>
+      </div>
+      <div class="stage" id="st1" onclick="showStage(1)">
+        <div class="s-name">Germination</div>
+        <div class="s-days">Day 1–5</div>
+        <div class="s-ppm">100–200 PPM</div>
+        <div class="s-ph">pH 5.5–6.0</div>
+      </div>
+      <div class="stage" id="st2" onclick="showStage(2)">
+        <div class="s-name">Baby Seedling</div>
+        <div class="s-days">Day 5–10</div>
+        <div class="s-ppm">350–500 PPM</div>
+        <div class="s-ph">pH 5.5–6.0</div>
+      </div>
+      <div class="stage" id="st3" onclick="showStage(3)">
+        <div class="s-name">Young Plant</div>
+        <div class="s-days">Day 10–18</div>
+        <div class="s-ppm">560–700 PPM</div>
+        <div class="s-ph">pH 5.8–6.2</div>
+      </div>
+      <div class="stage" id="st4" onclick="showStage(4)">
+        <div class="s-name">Vegetative</div>
+        <div class="s-days">Day 18–28</div>
+        <div class="s-ppm">700–840 PPM</div>
+        <div class="s-ph">pH 5.8–6.0</div>
+      </div>
+      <div class="stage" id="st5" onclick="showStage(5)">
+        <div class="s-name">Pre-Harvest</div>
+        <div class="s-days">Day 28–35</div>
+        <div class="s-ppm">560–700 PPM</div>
+        <div class="s-ph">pH 5.5–6.0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAGE DETAIL PANELS -->
+  <div id="dp0" class="detail-panel show">
+    <div class="ct" style="color:#14532d;font-size:15px">Stage 0 — Seed Soak (Day 0, before planting)</div>
+    <div class="g2">
+      <div>
+        <div class="unit-row">
+          <div class="unit-tag" style="--c:#f0fdf4;--bc:#86efac;--vc:#14532d"><span class="val">0</span><span class="lbl">PPM / TDS</span></div>
+          <div class="unit-tag" style="--c:#eff6ff;--bc:#93c5fd;--vc:#1d4ed8"><span class="val">0.0</span><span class="lbl">EC (mS/cm)</span></div>
+          <div class="unit-tag" style="--c:#fffbeb;--bc:#fde68a;--vc:#92400e"><span class="val">5.5</span><span class="lbl">pH target</span></div>
+          <div class="unit-tag" style="--c:#fef2f2;--bc:#fca5a5;--vc:#991b1b"><span class="val">None</span><span class="lbl">Nutrients</span></div>
+        </div>
+        <div class="tip"><strong>What to do:</strong> Soak rockwool cubes in plain water adjusted to pH 5.5 for 1 hour. No nutrients at all. Rockwool ships at pH 7–8 — soaking brings it to correct range for seeds. Drain excess water — cubes should be moist, not dripping.</div>
+        <div class="warn"><strong>Why pH 5.5 for rockwool soak:</strong> Seeds germinate best between pH 5.5–6.0. High pH in rockwool (7–8) causes poor germination. One hour soak fixes this permanently.</div>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Checklist before planting</div>
+        <table>
+          <tr><td>Rockwool cube size</td><td>25–38mm (1–1.5 inch)</td></tr>
+          <tr><td>Soak duration</td><td>60 minutes minimum</td></tr>
+          <tr><td>Water pH for soak</td><td>5.5 exactly</td></tr>
+          <tr><td>Water PPM</td><td>Below 50 PPM (RO or filtered)</td></tr>
+          <tr><td>Seeds per cube</td><td>2 seeds per cube, 5mm deep</td></tr>
+          <tr><td>Temperature for germ.</td><td>20–24°C (lettuce prefers cool)</td></tr>
+          <tr><td>Light during germination</td><td>No direct light — keep dark or very dim</td></tr>
+          <tr><td>Moisture</td><td>Keep moist — spray twice daily with pH 5.5 water</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="dp1" class="detail-panel">
+    <div class="ct" style="color:#14532d;font-size:15px">Stage 1 — Germination (Day 1–5)</div>
+    <div class="g2">
+      <div>
+        <div class="unit-row">
+          <div class="unit-tag" style="--c:#f0fdf4;--bc:#86efac;--vc:#14532d"><span class="val">100–200</span><span class="lbl">PPM / TDS</span></div>
+          <div class="unit-tag" style="--c:#eff6ff;--bc:#93c5fd;--vc:#1d4ed8"><span class="val">0.2–0.3</span><span class="lbl">EC (mS/cm)</span></div>
+          <div class="unit-tag" style="--c:#fffbeb;--bc:#fde68a;--vc:#92400e"><span class="val">5.5–6.0</span><span class="lbl">pH range</span></div>
+          <div class="unit-tag" style="--c:#fae8ff;--bc:#d8b4fe;--vc:#7e22ce"><span class="val">Very low</span><span class="lbl">Nutrient dose</span></div>
+        </div>
+        <div class="sh" style="margin-top:8px">Nutrient dose (per 1 litre of spray water)</div>
+        <div class="chem-row">
+          <span class="chem-name">Part A nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:8%;background:#22c55e">0.5ml</div></div>
+          <span class="chem-val">0.5 ml/L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Part B nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:8%;background:#16a34a">0.5ml</div></div>
+          <span class="chem-val">0.5 ml/L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">pH adjust</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:5%;background:#f59e0b">tiny</div></div>
+          <span class="chem-val">as needed</span>
+        </div>
+        <div class="info" style="margin-top:8px">Use this dilute solution only to keep rockwool moist with a spray bottle. No tower misting at this stage — seeds are in nursery tray.</div>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">What to watch</div>
+        <table>
+          <tr><td>Germination speed</td><td>2–4 days for lettuce</td></tr>
+          <tr><td>Temperature</td><td>18–22°C for fast germ. (cooler = better lettuce)</td></tr>
+          <tr><td>Humidity</td><td>70–80% — use a humidity dome or cling wrap</td></tr>
+          <tr><td>Light</td><td>None or very dim — 100 lux max until sprout</td></tr>
+          <tr><td>Spray frequency</td><td>Twice daily with 0.5 ml/L solution</td></tr>
+          <tr><td>Check for</td><td>White root tip emerging from bottom of cube</td></tr>
+          <tr><td>Remove dome when</td><td>Cotyledons (seed leaves) open and stand up</td></tr>
+        </table>
+        <div class="warn">If seeds don't germinate by Day 5, check that cube pH was correctly lowered to 5.5–6.0 before seeding. High pH blocks water absorption by seeds.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dp2" class="detail-panel">
+    <div class="ct" style="color:#14532d;font-size:15px">Stage 2 — Baby Seedling (Day 5–10) — First true leaves</div>
+    <div class="g2">
+      <div>
+        <div class="unit-row">
+          <div class="unit-tag" style="--c:#f0fdf4;--bc:#86efac;--vc:#14532d"><span class="val">350–500</span><span class="lbl">PPM / TDS</span></div>
+          <div class="unit-tag" style="--c:#eff6ff;--bc:#93c5fd;--vc:#1d4ed8"><span class="val">0.5–0.7</span><span class="lbl">EC (mS/cm)</span></div>
+          <div class="unit-tag" style="--c:#fffbeb;--bc:#fde68a;--vc:#92400e"><span class="val">5.5–6.0</span><span class="lbl">pH range</span></div>
+          <div class="unit-tag" style="--c:#fae8ff;--bc:#d8b4fe;--vc:#7e22ce"><span class="val">¼ strength</span><span class="lbl">Nutrient dose</span></div>
+        </div>
+        <div class="sh" style="margin-top:8px">Nutrient dose (per litre of nursery tray solution)</div>
+        <div class="chem-row">
+          <span class="chem-name">Part A nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:15%;background:#22c55e">1–2ml</div></div>
+          <span class="chem-val">1–2 ml/L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Part B nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:15%;background:#16a34a">1–2ml</div></div>
+          <span class="chem-val">1–2 ml/L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Cal-Mag (optional)</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:8%;background:#0d9488">0.5ml</div></div>
+          <span class="chem-val">0.5 ml/L</span>
+        </div>
+        <div class="tip">Start LED grow light now at low intensity. Baby seedlings need light for photosynthesis but cannot handle full strength. Keep 18–24 inches from light. 14–16 hours light / 8–10 hours dark.</div>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Stage transition checklist</div>
+        <table>
+          <tr><td>Ready to move to Stage 3 when</td><td>2 true leaves visible (not cotyledons)</td></tr>
+          <tr><td>Root development</td><td>Roots visible at bottom of rockwool cube</td></tr>
+          <tr><td>Light intensity</td><td>2,000–5,000 lux (dim end of grow light)</td></tr>
+          <tr><td>Temperature</td><td>18–22°C (lettuce is a cool-season crop)</td></tr>
+          <tr><td>Humidity</td><td>60–70%</td></tr>
+          <tr><td>Thin to 1 seedling</td><td>If 2 germinated, cut weaker one at base with scissors</td></tr>
+          <tr><td>pH check</td><td>Check nursery tray solution daily — adjust with pH down/up</td></tr>
+        </table>
+        <div class="warn">Do NOT transplant into tower until roots are 1–2cm visible. Transplanting too early (Day 5–6) causes transplant shock and stalled growth for 5–7 extra days.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dp3" class="detail-panel">
+    <div class="ct" style="color:#14532d;font-size:15px">Stage 3 — Young Plant (Day 10–18) — Just transplanted to tower</div>
+    <div class="g2">
+      <div>
+        <div class="unit-row">
+          <div class="unit-tag" style="--c:#f0fdf4;--bc:#86efac;--vc:#14532d"><span class="val">560–700</span><span class="lbl">PPM / TDS</span></div>
+          <div class="unit-tag" style="--c:#eff6ff;--bc:#93c5fd;--vc:#1d4ed8"><span class="val">0.8–1.0</span><span class="lbl">EC (mS/cm)</span></div>
+          <div class="unit-tag" style="--c:#fffbeb;--bc:#fde68a;--vc:#92400e"><span class="val">5.8–6.2</span><span class="lbl">pH range</span></div>
+          <div class="unit-tag" style="--c:#fae8ff;--bc:#d8b4fe;--vc:#7e22ce"><span class="val">½ strength</span><span class="lbl">Nutrient dose</span></div>
+        </div>
+        <div class="sh" style="margin-top:8px">Nutrient dose (per 100 litres of reservoir)</div>
+        <div class="chem-row">
+          <span class="chem-name">Part A nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:25%;background:#22c55e">200ml</div></div>
+          <span class="chem-val">200 ml/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Part B nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:25%;background:#16a34a">200ml</div></div>
+          <span class="chem-val">200 ml/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Cal-Nitrate</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:12%;background:#0d9488">50g</div></div>
+          <span class="chem-val">50g/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Epsom salt (MgSO4)</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:8%;background:#7c3aed">30g</div></div>
+          <span class="chem-val">30g/100L</span>
+        </div>
+        <div class="tip"><strong>Transplant shock prevention:</strong> Add 1–2ml/L seaweed extract on Day 10–12 (transplant days) to reduce stress. Roots will adapt to tower misting environment within 48 hours.</div>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Key N-P-K ratio at this stage</div>
+        <div style="background:#f0fdf4;border-radius:8px;padding:10px;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:700;color:#14532d;margin-bottom:6px">N : P : K = 10 : 5 : 15</div>
+          <div style="font-size:12px;color:#374151">High nitrogen for leaf development. Low phosphorus — seedlings don't need much P. Moderate potassium for root establishment.</div>
+        </div>
+        <table>
+          <tr><td>Nitrogen (N) target</td><td>100–120 ppm</td></tr>
+          <tr><td>Phosphorus (P) target</td><td>30–40 ppm</td></tr>
+          <tr><td>Potassium (K) target</td><td>150–180 ppm</td></tr>
+          <tr><td>Calcium (Ca) target</td><td>80–100 ppm</td></tr>
+          <tr><td>Magnesium (Mg) target</td><td>25–35 ppm</td></tr>
+          <tr><td>Iron (Fe) target</td><td>2–3 ppm</td></tr>
+          <tr><td>Total TDS/PPM</td><td>560–700 ppm</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="dp4" class="detail-panel">
+    <div class="ct" style="color:#14532d;font-size:15px">Stage 4 — Vegetative Growth (Day 18–28) — Rapid leaf expansion</div>
+    <div class="g2">
+      <div>
+        <div class="unit-row">
+          <div class="unit-tag" style="--c:#f0fdf4;--bc:#86efac;--vc:#14532d"><span class="val">700–840</span><span class="lbl">PPM / TDS</span></div>
+          <div class="unit-tag" style="--c:#eff6ff;--bc:#93c5fd;--vc:#1d4ed8"><span class="val">1.0–1.2</span><span class="lbl">EC (mS/cm)</span></div>
+          <div class="unit-tag" style="--c:#fffbeb;--bc:#fde68a;--vc:#92400e"><span class="val">5.8–6.0</span><span class="lbl">pH range</span></div>
+          <div class="unit-tag" style="--c:#fae8ff;--bc:#d8b4fe;--vc:#7e22ce"><span class="val">Full dose</span><span class="lbl">Nutrient dose</span></div>
+        </div>
+        <div class="sh" style="margin-top:8px">Nutrient dose (per 100 litres of reservoir)</div>
+        <div class="chem-row">
+          <span class="chem-name">Part A nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:40%;background:#22c55e">350ml</div></div>
+          <span class="chem-val">350 ml/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Part B nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:40%;background:#16a34a">350ml</div></div>
+          <span class="chem-val">350 ml/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Cal-Nitrate</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:20%;background:#0d9488">80g</div></div>
+          <span class="chem-val">80g/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Epsom salt (MgSO4)</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:15%;background:#7c3aed">50g</div></div>
+          <span class="chem-val">50g/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Iron chelate (EDTA Fe)</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:5%;background:#b45309">5g</div></div>
+          <span class="chem-val">5g/100L</span>
+        </div>
+        <div class="danger"><strong>Tip burn prevention:</strong> At this stage, lettuce is most vulnerable to tip burn (brown edges). If any tip burn appears, add extra Cal-Nitrate (+20g/100L) and ensure fan airflow is blowing past leaves. EC must NEVER exceed 1.4 mS/cm for lettuce.</div>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Key N-P-K ratio at this stage</div>
+        <div style="background:#f0fdf4;border-radius:8px;padding:10px;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:700;color:#14532d;margin-bottom:6px">N : P : K = 8 : 15 : 36</div>
+          <div style="font-size:12px;color:#374151">Increased potassium drives rapid leaf cell expansion. Phosphorus increases for head formation. Maintain strong nitrogen for deep green colour.</div>
+        </div>
+        <table>
+          <tr><td>Nitrogen (N) target</td><td>120–150 ppm</td></tr>
+          <tr><td>Phosphorus (P) target</td><td>50–60 ppm</td></tr>
+          <tr><td>Potassium (K) target</td><td>200–250 ppm</td></tr>
+          <tr><td>Calcium (Ca) target</td><td>100–120 ppm</td></tr>
+          <tr><td>Magnesium (Mg) target</td><td>40–50 ppm</td></tr>
+          <tr><td>Iron (Fe) target</td><td>3–5 ppm</td></tr>
+          <tr><td>Total TDS/PPM</td><td>700–840 ppm</td></tr>
+        </table>
+        <div class="tip">This is peak growth phase. Lettuce should grow visibly each day. If growth stalls, check pH first (must be 5.8–6.0), then EC (must be 1.0–1.2).</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dp5" class="detail-panel">
+    <div class="ct" style="color:#14532d;font-size:15px">Stage 5 — Pre-Harvest (Day 28–35) — Finishing & flavour development</div>
+    <div class="g2">
+      <div>
+        <div class="unit-row">
+          <div class="unit-tag" style="--c:#f0fdf4;--bc:#86efac;--vc:#14532d"><span class="val">560–700</span><span class="lbl">PPM / TDS</span></div>
+          <div class="unit-tag" style="--c:#eff6ff;--bc:#93c5fd;--vc:#1d4ed8"><span class="val">0.8–1.0</span><span class="lbl">EC (mS/cm)</span></div>
+          <div class="unit-tag" style="--c:#fffbeb;--bc:#fde68a;--vc:#92400e"><span class="val">5.5–6.0</span><span class="lbl">pH range</span></div>
+          <div class="unit-tag" style="--c:#fae8ff;--bc:#d8b4fe;--vc:#7e22ce"><span class="val">Reduce 30%</span><span class="lbl">from Stage 4</span></div>
+        </div>
+        <div class="sh" style="margin-top:8px">Changes to make at Day 28</div>
+        <div class="chem-row">
+          <span class="chem-name">Part A nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:28%;background:#22c55e">250ml</div></div>
+          <span class="chem-val">250 ml/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Part B nutrient</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:28%;background:#16a34a">250ml</div></div>
+          <span class="chem-val">250 ml/100L</span>
+        </div>
+        <div class="chem-row">
+          <span class="chem-name">Cal-Nitrate</span>
+          <div class="chem-bar-wrap"><div class="chem-bar" style="width:15%;background:#0d9488">60g</div></div>
+          <span class="chem-val">60g/100L</span>
+        </div>
+        <div class="tip"><strong>Final flush option (Day 33–35):</strong> 3 days before harvest, some growers replace nutrient solution with clean pH 5.8 water only. This reduces salt taste in leaves and improves flavour. Completely optional — leaves still taste fine without flushing.</div>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Why reduce PPM before harvest?</div>
+        <div style="background:#f0fdf4;border-radius:8px;padding:10px;margin-bottom:8px;font-size:12px;color:#374151">
+          Reducing EC from 1.2 to 0.8–1.0 in the final week forces the plant to use stored nutrients from existing leaves. This concentrates flavour compounds, produces slightly crisper texture, and reduces bitterness. High EC lettuce at harvest can taste slightly bitter or metallic.
+        </div>
+        <table>
+          <tr><td>Harvest signal</td><td>Outer leaves large and full; inner leaves tight</td></tr>
+          <tr><td>Stop harvesting when</td><td>Any upright flower spike starts to form</td></tr>
+          <tr><td>Cut-and-come-again</td><td>Cut outer 4–6 leaves; inner centre regrows for 2–3 more harvests</td></tr>
+          <tr><td>Full head harvest</td><td>Pull entire net pot out; cut at base</td></tr>
+          <tr><td>Post-harvest tower clean</td><td>Soak tower with 3% H₂O₂ for 1 hour before replanting</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- MASTER COMPARISON TABLE -->
+  <div class="sh">Complete stage-by-stage comparison table</div>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table>
+      <tr>
+        <th>Stage</th><th>Days</th><th>PPM (TDS)</th><th>EC (mS/cm)</th><th>pH</th>
+        <th>Part A (per 100L)</th><th>Part B (per 100L)</th><th>Cal-Nitrate</th><th>Epsom Salt</th><th>N:P:K Ratio</th>
+      </tr>
+      <tr>
+        <td>Seed Soak</td><td class="num">Day 0</td>
+        <td class="num good">0</td><td class="num good">0.0</td><td class="num good">5.5</td>
+        <td class="num">None</td><td class="num">None</td><td class="num">None</td><td class="num">None</td><td class="num">—</td>
+      </tr>
+      <tr>
+        <td>Germination</td><td class="num">1–5</td>
+        <td class="num good">100–200</td><td class="num good">0.2–0.3</td><td class="num good">5.5–6.0</td>
+        <td class="num">0.5 ml/L spray</td><td class="num">0.5 ml/L spray</td><td class="num">None</td><td class="num">None</td><td class="num">Balanced</td>
+      </tr>
+      <tr>
+        <td>Baby Seedling</td><td class="num">5–10</td>
+        <td class="num good">350–500</td><td class="num good">0.5–0.7</td><td class="num good">5.5–6.0</td>
+        <td class="num">1–2 ml/L spray</td><td class="num">1–2 ml/L spray</td><td class="num">0.5 ml/L</td><td class="num">None</td><td class="num">10:5:15</td>
+      </tr>
+      <tr>
+        <td>Young Plant</td><td class="num">10–18</td>
+        <td class="num good">560–700</td><td class="num good">0.8–1.0</td><td class="num good">5.8–6.2</td>
+        <td class="num">200 ml</td><td class="num">200 ml</td><td class="num">50g</td><td class="num">30g</td><td class="num">10:5:15</td>
+      </tr>
+      <tr>
+        <td>Vegetative</td><td class="num">18–28</td>
+        <td class="num warn-val">700–840</td><td class="num warn-val">1.0–1.2</td><td class="num good">5.8–6.0</td>
+        <td class="num">350 ml</td><td class="num">350 ml</td><td class="num">80g</td><td class="num">50g</td><td class="num">8:15:36</td>
+      </tr>
+      <tr>
+        <td>Pre-Harvest</td><td class="num">28–35</td>
+        <td class="num good">560–700</td><td class="num good">0.8–1.0</td><td class="num good">5.5–6.0</td>
+        <td class="num">250 ml</td><td class="num">250 ml</td><td class="num">60g</td><td class="num">30g</td><td class="num">8:15:36</td>
+      </tr>
+    </table>
+  </div>
+  <div class="info">Conversion: 1 EC (mS/cm) ≈ 700 PPM (using 700 conversion factor standard). Example: EC 1.0 = 700 PPM. EC 1.2 = 840 PPM. EC 0.5 = 350 PPM.</div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAGE 2 — CHEMICALS & DOSAGE
+══════════════════════════════════ -->
+<div id="p-chemicals" class="pg">
+  <div class="ph">
+    <h2>Every chemical — what it is, what it does, exact dosage</h2>
+    <p>Ordered by priority. Start with the first 5 — add others as you scale.</p>
+  </div>
+
+  <table>
+    <tr><th>Chemical</th><th>What it is</th><th>What it does to lettuce</th><th>Stage 1–2 dose (100L)</th><th>Stage 3–4 dose (100L)</th><th>Stage 5 dose (100L)</th><th>Priority</th></tr>
+    <tr>
+      <td>Part A Nutrient<br><small style="color:#6b7280;font-weight:400">GroPower / Plagron / GHE Flora Micro</small></td>
+      <td>Concentrated liquid: Nitrogen, Calcium, Iron, Boron</td>
+      <td>Drives leaf growth, cell wall strength, chlorophyll production</td>
+      <td>200 ml</td><td>350 ml</td><td>250 ml</td>
+      <td><span class="br">Essential</span></td>
+    </tr>
+    <tr>
+      <td>Part B Nutrient<br><small style="color:#6b7280;font-weight:400">Same brand as A</small></td>
+      <td>Concentrated liquid: Phosphorus, Potassium, Magnesium, Sulfur, trace elements</td>
+      <td>Root development, disease resistance, leaf texture and flavour</td>
+      <td>200 ml</td><td>350 ml</td><td>250 ml</td>
+      <td><span class="br">Essential</span></td>
+    </tr>
+    <tr>
+      <td>pH Down<br><small style="color:#6b7280;font-weight:400">Phosphoric acid 35%</small></td>
+      <td>Strong acid solution: H₃PO₄</td>
+      <td>Keeps pH in 5.5–6.2 zone where lettuce absorbs all nutrients efficiently. Without this, nutrient lockout occurs.</td>
+      <td>1–2 ml at a time</td><td>1–2 ml at a time</td><td>1–2 ml at a time</td>
+      <td><span class="br">Essential</span></td>
+    </tr>
+    <tr>
+      <td>pH Up<br><small style="color:#6b7280;font-weight:400">Potassium hydroxide 25%</small></td>
+      <td>Strong alkali solution: KOH</td>
+      <td>Raises pH if it drops below 5.5. Less commonly needed for lettuce.</td>
+      <td>0.5 ml at a time</td><td>0.5 ml at a time</td><td>0.5 ml at a time</td>
+      <td><span class="br">Essential</span></td>
+    </tr>
+    <tr>
+      <td>Calcium Nitrate<br><small style="color:#6b7280;font-weight:400">Ca(NO₃)₂ — Haifa brand</small></td>
+      <td>White crystalline salt: 15.5% N, 19% Ca</td>
+      <td>CRITICAL for lettuce: prevents tip burn (brown edges). Calcium strengthens cell walls of leaf margins. Most common lettuce deficiency indoors.</td>
+      <td>50g</td><td>80g</td><td>60g</td>
+      <td><span class="br">Essential for lettuce</span></td>
+    </tr>
+    <tr>
+      <td>Magnesium Sulphate<br><small style="color:#6b7280;font-weight:400">MgSO₄·7H₂O — Epsom salt</small></td>
+      <td>White crystals: 10% Mg, 13% S</td>
+      <td>Magnesium is the central atom of every chlorophyll molecule. Without it, leaves turn yellow between veins (interveinal chlorosis). Most A+B formulas have some Mg but not enough for rapid lettuce growth.</td>
+      <td>30g</td><td>50g</td><td>30g</td>
+      <td><span class="ba">Recommended</span></td>
+    </tr>
+    <tr>
+      <td>Iron chelate (EDTA-Fe)<br><small style="color:#6b7280;font-weight:400">Fe-EDTA powder, 13% Fe</small></td>
+      <td>Chelated iron: stays soluble at pH 5.5–7.0</td>
+      <td>Iron deficiency causes yellowing of NEW leaves (young leaves yellow while old leaves stay green). Very common when pH drifts above 6.5 — iron becomes insoluble. Chelated form stays available even at slightly high pH.</td>
+      <td>2g</td><td>5g</td><td>3g</td>
+      <td><span class="ba">Recommended</span></td>
+    </tr>
+    <tr>
+      <td>Hydrogen Peroxide 3%<br><small style="color:#6b7280;font-weight:400">H₂O₂ pharmacy grade</small></td>
+      <td>Oxygen-releasing disinfectant</td>
+      <td>Kills Pythium root rot bacteria. Adds dissolved oxygen to root zone. Use PREVENTIVELY weekly, not just when disease appears.</td>
+      <td>3 ml/L (preventive weekly)</td><td>3 ml/L weekly</td><td>3 ml/L weekly</td>
+      <td><span class="ba">Recommended</span></td>
+    </tr>
+    <tr>
+      <td>Seaweed extract<br><small style="color:#6b7280;font-weight:400">Kelpak / Siapton / any brand</small></td>
+      <td>Auxins, cytokinins, alginic acid from seaweed</td>
+      <td>Reduces transplant shock. Stimulates root growth during establishment. Especially useful on Days 10–14 (transplant period). Not needed later.</td>
+      <td>1–2 ml/L on transplant days</td><td>Not needed</td><td>Not needed</td>
+      <td><span class="bb">Optional</span></td>
+    </tr>
+    <tr>
+      <td>Silica supplement<br><small style="color:#6b7280;font-weight:400">Potassium silicate solution</small></td>
+      <td>K₂SiO₃ — silicon source</td>
+      <td>Strengthens leaf cell walls — produces firmer lettuce with longer shelf life. Useful for commercial lettuce sold to restaurants. Add BEFORE nutrients as it raises pH.</td>
+      <td>0.5 ml/L</td><td>0.5–1 ml/L</td><td>0.5 ml/L</td>
+      <td><span class="bb">Optional</span></td>
+    </tr>
+    <tr>
+      <td>Citric acid powder<br><small style="color:#6b7280;font-weight:400">Food grade C₆H₈O₇</small></td>
+      <td>Organic acid — descaling agent</td>
+      <td>NOT a plant nutrient. Used to clean calcium mineral deposits from nozzles. Soak nozzles in 1g/L solution for 30 min weekly. Indoor water (RO) reduces scaling; tap water increases it.</td>
+      <td colspan="3" style="text-align:center">1g/L for nozzle soak — NOT added to reservoir</td>
+      <td><span class="ba">Recommended</span></td>
+    </tr>
+  </table>
+
+  <div class="sh">Quick dosage reference — cc (ml) per litre of reservoir water</div>
+  <div class="card">
+    <table>
+      <tr><th>Chemical</th><th>Day 0 (seed soak)</th><th>Day 1–10 (nursery spray)</th><th>Day 10–18 (young tower)</th><th>Day 18–28 (full growth)</th><th>Day 28–35 (pre-harvest)</th></tr>
+      <tr><td>Part A nutrient (ml/L)</td><td class="num">0</td><td class="num">0.5–1.0</td><td class="num">2.0</td><td class="num">3.5</td><td class="num">2.5</td></tr>
+      <tr><td>Part B nutrient (ml/L)</td><td class="num">0</td><td class="num">0.5–1.0</td><td class="num">2.0</td><td class="num">3.5</td><td class="num">2.5</td></tr>
+      <tr><td>Cal-Nitrate (g/L)</td><td class="num">0</td><td class="num">0</td><td class="num">0.5</td><td class="num">0.8</td><td class="num">0.6</td></tr>
+      <tr><td>Epsom salt (g/L)</td><td class="num">0</td><td class="num">0</td><td class="num">0.3</td><td class="num">0.5</td><td class="num">0.3</td></tr>
+      <tr><td>Iron chelate (g/L)</td><td class="num">0</td><td class="num">0</td><td class="num">0.02</td><td class="num">0.05</td><td class="num">0.03</td></tr>
+      <tr><td>H₂O₂ 3% (ml/L)</td><td class="num">0</td><td class="num">0</td><td class="num">3 (weekly)</td><td class="num">3 (weekly)</td><td class="num">3 (weekly)</td></tr>
+      <tr><td>Target EC (mS/cm)</td><td class="num good">0.0</td><td class="num good">0.2–0.3</td><td class="num good">0.8–1.0</td><td class="num warn-val">1.0–1.2</td><td class="num good">0.8–1.0</td></tr>
+      <tr><td>Target PPM</td><td class="num good">0</td><td class="num good">100–200</td><td class="num good">560–700</td><td class="num warn-val">700–840</td><td class="num good">560–700</td></tr>
+      <tr><td>Target pH</td><td class="num good">5.5</td><td class="num good">5.5–6.0</td><td class="num good">5.8–6.2</td><td class="num good">5.8–6.0</td><td class="num good">5.5–6.0</td></tr>
+    </table>
+  </div>
+  <div class="danger">Never add Part A and Part B concentrates directly together. Always add each separately into the water with mixing time between. Ca²⁺ (Part A) + PO₄³⁻ (Part B) = insoluble white calcium phosphate precipitate that cannot be redissolved.</div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAGE 3 — DEFICIENCY SIGNS
+══════════════════════════════════ -->
+<div id="p-deficiency" class="pg">
+  <div class="ph">
+    <h2>Deficiency signs — what to look for and exact fix</h2>
+    <p>Each deficiency has a characteristic visual pattern. Identify by WHERE on the plant the symptom appears.</p>
+  </div>
+
+  <div class="tip"><strong>Diagnosis rule:</strong> Old leaves (bottom) affected = mobile nutrient deficiency (N, P, K, Mg). New leaves (top) affected = immobile nutrient deficiency (Ca, Fe, Mn, B). pH wrong first = correct pH before adding any nutrients.</div>
+
+  <div class="sh">Visual deficiency identification</div>
+
+  <div class="def-card" style="background:#fef9f0;border-color:#fde68a">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">Nitrogen (N) deficiency — most common in lettuce</strong>
+      <span class="ba">Very Common</span>
+    </div>
+    <div class="g2">
+      <div>
+        <p style="font-size:12px;color:#374151;margin-bottom:6px"><strong>What you see:</strong> Uniform yellowing of OLDER (lower) leaves first. Starts at leaf tips and spreads inward. Plant looks pale overall. Growth slows dramatically. New top leaves stay green longer.</p>
+        <p style="font-size:12px;color:#374151"><strong>Why it happens:</strong> EC too low (below 0.8 mS/cm), pH too high (above 6.5 locks N uptake), or reservoir nutrient solution is exhausted and needs replacement.</p>
+      </div>
+      <div>
+        <table>
+          <tr><td>Immediate fix</td><td>Increase Part A dose by 20%. Check pH (must be below 6.5).</td></tr>
+          <tr><td>Increase EC to</td><td>1.0–1.2 mS/cm (700–840 PPM)</td></tr>
+          <tr><td>pH must be</td><td>5.8–6.2 for N absorption</td></tr>
+          <tr><td>Recovery time</td><td>4–7 days after correction</td></tr>
+          <tr><td>Prevention</td><td>Check EC daily. Never let EC drop below 0.7 mS/cm.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="def-card" style="background:#fef2f2;border-color:#fca5a5">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">Calcium (Ca) deficiency — tip burn — very common indoors</strong>
+      <span class="br">Very Common Indoor</span>
+    </div>
+    <div class="g2">
+      <div>
+        <p style="font-size:12px;color:#374151;margin-bottom:6px"><strong>What you see:</strong> Brown, dry, crispy edges on the NEWEST (inner) leaves. Tips and margins look burned. Outer leaves fine, inner leaves show the damage first. Sometimes entire leaf edge turns brown and papery.</p>
+        <p style="font-size:12px;color:#374151"><strong>Why it happens:</strong> Calcium is immobile — plant cannot move it from old to new cells. New growth cells have weak walls and collapse. Caused by: too high EC, poor airflow (Ca moves by transpiration), high humidity, or actual Ca deficiency in solution.</p>
+      </div>
+      <div>
+        <table>
+          <tr><td>Immediate fix</td><td>Add 20g/100L extra Cal-Nitrate. Turn on fan near plants.</td></tr>
+          <tr><td>Ca target in solution</td><td>100–150 ppm Ca²⁺</td></tr>
+          <tr><td>EC limit for lettuce</td><td>Never above 1.4 mS/cm — causes tip burn</td></tr>
+          <tr><td>Airflow</td><td>Fan blowing at 0.3–0.5 m/s across leaf canopy</td></tr>
+          <tr><td>Humidity</td><td>Keep below 70% — high humidity stops Ca movement</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="def-card" style="background:#f0f9ff;border-color:#7dd3fc">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">Iron (Fe) deficiency — interveinal chlorosis on new leaves</strong>
+      <span class="bb">Common</span>
+    </div>
+    <div class="g2">
+      <div>
+        <p style="font-size:12px;color:#374151;margin-bottom:6px"><strong>What you see:</strong> NEW (young) leaves turn yellow, but the VEINS remain distinctly green. The green vein pattern on a yellow background is a clear iron deficiency signature. Old leaves look fine initially.</p>
+        <p style="font-size:12px;color:#374151"><strong>Why it happens:</strong> Almost always pH too high (above 6.5). Iron becomes insoluble above pH 6.5 even if plenty is in solution. Real iron deficiency only when pH is correct.</p>
+      </div>
+      <div>
+        <table>
+          <tr><td>First check</td><td>pH — must be 5.5–6.2. Correct pH before adding iron.</td></tr>
+          <tr><td>If pH correct</td><td>Add 5g/100L chelated iron (Fe-EDTA)</td></tr>
+          <tr><td>Use chelated form</td><td>EDTA-Fe or DTPA-Fe stays available at pH up to 6.5</td></tr>
+          <tr><td>Recovery time</td><td>5–10 days — new growth will appear green</td></tr>
+          <tr><td>Old yellow leaves</td><td>Will not recover — trim them off</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="def-card" style="background:#faf5ff;border-color:#d8b4fe">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">Magnesium (Mg) deficiency — interveinal chlorosis on OLD leaves</strong>
+      <span class="bp">Moderate</span>
+    </div>
+    <div class="g2">
+      <div>
+        <p style="font-size:12px;color:#374151;margin-bottom:6px"><strong>What you see:</strong> OLDER (lower) leaves turn yellow between the veins. Veins stay green on old leaves — opposite of iron deficiency which affects new leaves. Leaves may also develop reddish or purplish tinge in severe cases.</p>
+        <p style="font-size:12px;color:#374151"><strong>Why it happens:</strong> Magnesium is mobile — plant pulls it from old leaves to feed new growth. Most common when using A+B nutrients without supplemental Epsom salt, or when reservoir solution is old and Mg depleted.</p>
+      </div>
+      <div>
+        <table>
+          <tr><td>Immediate fix</td><td>Add 50g/100L Epsom salt (MgSO₄) to reservoir</td></tr>
+          <tr><td>Foliar spray</td><td>3g Epsom salt per litre — spray directly on leaves for fast recovery</td></tr>
+          <tr><td>Mg target in solution</td><td>40–60 ppm Mg²⁺</td></tr>
+          <tr><td>Prevention</td><td>Always add Epsom salt at every reservoir refill</td></tr>
+          <tr><td>Recovery time</td><td>3–5 days with foliar spray, 7 days via root uptake</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="def-card" style="background:#fef9f0;border-color:#fde68a">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">Potassium (K) deficiency — brown leaf margins starting from older leaves</strong>
+      <span class="ba">Less Common</span>
+    </div>
+    <div class="g2">
+      <div>
+        <p style="font-size:12px;color:#374151;margin-bottom:6px"><strong>What you see:</strong> Leaf edges turn yellow then brown starting at the tips and margins of OLDER leaves. Unlike Ca tip burn (crispy and inner leaves), K deficiency creates a scorched margin pattern around the full leaf perimeter. Stems become weak and floppy.</p>
+        <p style="font-size:12px;color:#374151"><strong>Why it happens:</strong> Not enough potassium in Part B solution, or reservoir is old and K depleted.</p>
+      </div>
+      <div>
+        <table>
+          <tr><td>Fix</td><td>Increase Part B dose by 20%. Do full reservoir change.</td></tr>
+          <tr><td>K target</td><td>200–250 ppm K⁺</td></tr>
+          <tr><td>Use 8:15:36 formula</td><td>High K ratio specifically for leafy greens</td></tr>
+          <tr><td>Don't confuse with</td><td>Ca tip burn (Ca = inner new leaves; K = outer old leaves)</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="def-card" style="background:#fef2f2;border-color:#fca5a5">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">Root rot (Pythium) — brown/slimy roots, wilting despite misting</strong>
+      <span class="br">Emergency</span>
+    </div>
+    <div class="g2">
+      <div>
+        <p style="font-size:12px;color:#374151;margin-bottom:6px"><strong>What you see:</strong> Plant wilts even though misting is running. Pull the net pot — roots are brown, slimy, and smell bad. Healthy roots are WHITE and firm. Brown roots = early stage. Black slimy roots = advanced stage.</p>
+        <p style="font-size:12px;color:#374151"><strong>Causes:</strong> Water temperature above 24°C, insufficient dissolved oxygen in reservoir, Pythium spores in contaminated water or growing media, or waterlogged net pots from wrong hole angle.</p>
+      </div>
+      <div>
+        <table>
+          <tr><td>Immediate action</td><td>Add 5 ml/L H₂O₂ 3% to reservoir. Cool water below 22°C.</td></tr>
+          <tr><td>Remove affected plants</td><td>Trim brown roots. Treat with dilute H₂O₂. Replant.</td></tr>
+          <tr><td>Reduce misting</td><td>Overwatering = root rot. Try 3 min ON / 8 min OFF.</td></tr>
+          <tr><td>Add Trichoderma</td><td>1g/10L at next reservoir change — beneficial fungi protection</td></tr>
+          <tr><td>Water temp target</td><td>Keep below 22°C. Above 26°C = Pythium grows rapidly.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAGE 4 — INDOOR SETUP
+══════════════════════════════════ -->
+<div id="p-indoor" class="pg">
+  <div class="ph">
+    <h2>Indoor tower configuration — complete setup guide</h2>
+    <p>When moving the tower indoors (any room in Karnataka), these are the exact configuration changes needed vs outdoor setup</p>
+  </div>
+
+  <div class="sh">Indoor vs outdoor — key differences</div>
+  <table>
+    <tr><th>Parameter</th><th>Outdoor (Karnataka terrace)</th><th>Indoor (controlled room)</th><th>Why it changes indoors</th></tr>
+    <tr><td>Light source</td><td>Free sun — 6–10 hrs</td><td>LED grow lights — 14–16 hrs</td><td>Sun provides full spectrum; LEDs must compensate with longer hours</td></tr>
+    <tr><td>Temperature</td><td>Variable 18–42°C</td><td>Controlled 18–24°C (ideal)</td><td>Indoor AC/fan keeps temps stable — lettuce loves this</td></tr>
+    <tr><td>Humidity</td><td>45–90% (seasonal)</td><td>50–70% (maintain with humidity)</td><td>Too high = tip burn and fungal; too low = stunted growth</td></tr>
+    <tr><td>Airflow</td><td>Natural wind provides airflow</td><td>Dedicated fan mandatory</td><td>No natural wind indoors — fan prevents tip burn and CO₂ stagnation</td></tr>
+    <tr><td>CO₂ levels</td><td>Outdoor ambient ~400 ppm</td><td>Room air can drop to 200 ppm</td><td>Open window or CO₂ enrichment needed for indoor grows</td></tr>
+    <tr><td>Misting cycle</td><td>Adjusted by temperature</td><td>Fixed 2 min ON / 8 min OFF</td><td>Stable temp indoors = stable fixed misting schedule</td></tr>
+    <tr><td>Reservoir cooling</td><td>Insulation + shade needed</td><td>Room AC cools reservoir naturally</td><td>Indoor room temperature keeps water cool without extra effort</td></tr>
+    <tr><td>Pest pressure</td><td>High (aphids, mites, whitefly)</td><td>Very low if room is clean</td><td>Controlled environment blocks most outdoor insects</td></tr>
+    <tr><td>Nutrient strength</td><td>Same PPM but higher evaporation</td><td>Slightly lower EC (less transpiration)</td><td>Cooler temps = less evaporation = more stable EC</td></tr>
+    <tr><td>Growth speed</td><td>28–35 days (Karnataka summer slower)</td><td>21–28 days (optimal conditions)</td><td>Stable temp + proper light hours = faster, more predictable growth</td></tr>
+  </table>
+
+  <div class="sh">Room requirements for indoor tower</div>
+  <div class="g3">
+    <div class="card" style="border-top:3px solid #14532d">
+      <div class="ct">Room size & layout</div>
+      <table>
+        <tr><td>Min room size (1 tower)</td><td>1m × 1m × 2.5m ceiling</td></tr>
+        <tr><td>Recommended (4 towers)</td><td>3m × 3m × 2.5m ceiling</td></tr>
+        <tr><td>Floor protection</td><td>Plastic sheet — water will drip</td></tr>
+        <tr><td>Wall distance</td><td>60cm from any wall minimum</td></tr>
+        <tr><td>Door gap</td><td>Keep some air exchange — don't seal room</td></tr>
+        <tr><td>Dark period</td><td>Room must be DARK for 8 hrs — cover windows</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #3b82f6">
+      <div class="ct">Temperature targets</div>
+      <table>
+        <tr><td>Day temperature</td><td>18–22°C <span class="bg">Ideal</span></td></tr>
+        <tr><td>Night temperature</td><td>15–18°C <span class="bg">Good</span></td></tr>
+        <tr><td>Maximum day temp</td><td>26°C <span class="ba">Upper limit</span></td></tr>
+        <tr><td>If above 26°C</td><td>Run AC or turn off lights mid-day</td></tr>
+        <tr><td>Reservoir water temp</td><td>18–22°C target</td></tr>
+        <tr><td>AC setting</td><td>20–22°C room temperature</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #7c3aed">
+      <div class="ct">Humidity & airflow</div>
+      <table>
+        <tr><td>Target humidity</td><td>55–65% <span class="bg">Ideal</span></td></tr>
+        <tr><td>Maximum humidity</td><td>70% <span class="ba">Risk of fungal</span></td></tr>
+        <tr><td>Minimum humidity</td><td>45% <span class="ba">Risk of tip burn</span></td></tr>
+        <tr><td>Fan size (1 tower)</td><td>6-inch table fan on low</td></tr>
+        <tr><td>Fan size (4 towers)</td><td>12-inch stand fan oscillating</td></tr>
+        <tr><td>Fan position</td><td>Blow across leaves, not directly at them</td></tr>
+        <tr><td>Air speed at canopy</td><td>0.3–0.5 m/s gentle movement</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="sh">Indoor tower placement diagram (top view)</div>
+  <div class="card">
+    <svg width="100%" viewBox="0 0 500 260">
+      <!-- Room outline -->
+      <rect x="20" y="20" width="460" height="220" rx="8" fill="none" stroke="#374151" stroke-width="2"/>
+      <text x="250" y="15" text-anchor="middle" font-size="11" fill="#6b7280">Room (3m × 3m example)</text>
+
+      <!-- Towers -->
+      <circle cx="130" cy="110" r="22" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+      <text x="130" y="107" text-anchor="middle" font-size="10" fill="#14532d" font-weight="700">Tower</text>
+      <text x="130" y="119" text-anchor="middle" font-size="10" fill="#14532d">1</text>
+
+      <circle cx="220" cy="110" r="22" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+      <text x="220" y="107" text-anchor="middle" font-size="10" fill="#14532d" font-weight="700">Tower</text>
+      <text x="220" y="119" text-anchor="middle" font-size="10" fill="#14532d">2</text>
+
+      <circle cx="310" cy="110" r="22" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+      <text x="310" y="107" text-anchor="middle" font-size="10" fill="#14532d" font-weight="700">Tower</text>
+      <text x="310" y="119" text-anchor="middle" font-size="10" fill="#14532d">3</text>
+
+      <!-- LED light bar (overhead) -->
+      <rect x="90" y="58" width="260" height="14" rx="4" fill="#fef08a" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="220" y="67" text-anchor="middle" font-size="10" fill="#92400e" font-weight="700">LED grow light bar (45–60cm above canopy top)</text>
+
+      <!-- Reservoir -->
+      <rect x="380" y="80" width="80" height="60" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="420" y="106" text-anchor="middle" font-size="10" fill="#1d4ed8" font-weight="700">Reservoir</text>
+      <text x="420" y="120" text-anchor="middle" font-size="10" fill="#1d4ed8">200L</text>
+
+      <!-- Fan -->
+      <circle cx="420" cy="190" r="18" fill="#f3f4f6" stroke="#374151" stroke-width="1.5"/>
+      <text x="420" y="186" text-anchor="middle" font-size="10" fill="#374151" font-weight="700">FAN</text>
+      <text x="420" y="198" text-anchor="middle" font-size="9" fill="#6b7280">12-inch</text>
+
+      <!-- Fan airflow arrows -->
+      <line x1="402" y1="190" x2="342" y2="165" stroke="#7c3aed" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#fa)"/>
+      <line x1="402" y1="188" x2="342" y2="135" stroke="#7c3aed" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#fa)"/>
+      <line x1="402" y1="192" x2="342" y2="110" stroke="#7c3aed" stroke-width="1" stroke-dasharray="3 2" marker-end="url(#fa)"/>
+      <defs><marker id="fa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#7c3aed" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+      <text x="365" y="222" text-anchor="middle" font-size="9" fill="#7c3aed">gentle airflow across canopy</text>
+
+      <!-- Spacing arrows -->
+      <line x1="130" y1="140" x2="130" y2="152" stroke="#9ca3af" stroke-width="0.8"/>
+      <line x1="220" y1="140" x2="220" y2="152" stroke="#9ca3af" stroke-width="0.8"/>
+      <line x1="130" y1="148" x2="220" y2="148" stroke="#9ca3af" stroke-width="0.8"/>
+      <text x="175" y="163" text-anchor="middle" font-size="9" fill="#9ca3af">60–80cm spacing</text>
+
+      <!-- Wall distance -->
+      <line x1="108" y1="110" x2="22" y2="110" stroke="#9ca3af" stroke-width="0.5" stroke-dasharray="2 1"/>
+      <text x="65" y="105" text-anchor="middle" font-size="9" fill="#9ca3af">60cm min</text>
+      <text x="65" y="116" text-anchor="middle" font-size="9" fill="#9ca3af">from wall</text>
+
+      <!-- Light height -->
+      <line x1="78" y1="65" x2="78" y2="88" stroke="#9ca3af" stroke-width="0.8"/>
+      <line x1="73" y1="65" x2="83" y2="65" stroke="#9ca3af" stroke-width="0.8"/>
+      <line x1="73" y1="88" x2="83" y2="88" stroke="#9ca3af" stroke-width="0.8"/>
+      <text x="62" y="79" text-anchor="middle" font-size="9" fill="#9ca3af" transform="rotate(-90 62 79)">45–60cm</text>
+    </svg>
+  </div>
+
+  <div class="sh">Indoor nutrient adjustments (vs outdoor)</div>
+  <div class="card">
+    <table>
+      <tr><th>Parameter</th><th>Outdoor target</th><th>Indoor target</th><th>Reason for difference</th></tr>
+      <tr><td>EC / PPM (vegetative)</td><td>1.0–1.2 mS/cm (700–840 PPM)</td><td>0.8–1.0 mS/cm (560–700 PPM)</td><td>Cooler indoor temps = slower transpiration = lower nutrient demand. High EC indoors causes tip burn faster.</td></tr>
+      <tr><td>pH</td><td>5.8–6.2</td><td>5.8–6.0</td><td>Slightly tighter range indoors for best LED-driven growth</td></tr>
+      <tr><td>Cal-Nitrate dose</td><td>80g/100L</td><td>100g/100L (increase!)</td><td>Tip burn is MORE common indoors due to low airflow. Extra calcium is critical.</td></tr>
+      <tr><td>Water temp</td><td>Need active cooling</td><td>18–20°C naturally (if AC at 20°C)</td><td>Room AC keeps reservoir cool without frozen bottles</td></tr>
+      <tr><td>Dissolved oxygen</td><td>Aeration pump optional</td><td>Aeration pump recommended</td><td>Less natural aeration indoors — add 12W aquarium air pump to reservoir</td></tr>
+      <tr><td>H₂O₂ treatment</td><td>3ml/L weekly preventive</td><td>3ml/L every 10 days</td><td>Cooler water = less Pythium risk indoors</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAGE 5 — LED LIGHTS
+══════════════════════════════════ -->
+<div id="p-led" class="pg">
+  <div class="ph">
+    <h2>LED grow lights — complete indoor tower specification</h2>
+    <p>How long, how bright, what spectrum, how far, and what to buy in India</p>
+  </div>
+
+  <div class="sh">LED hours per day — by stage</div>
+  <div class="card">
+    <table>
+      <tr><th>Stage</th><th>Days</th><th>Light hours/day</th><th>Dark hours/day</th><th>Why</th><th>Timer setting</th></tr>
+      <tr><td>Germination</td><td>1–5</td><td class="num">0–6 hrs very dim</td><td class="num">18–24 hrs</td><td>Seeds don't need light. Cotyledons need a little once sprouted.</td><td>OFF or 6 hrs dim</td></tr>
+      <tr><td>Baby seedling</td><td>5–10</td><td class="num good">14 hrs</td><td class="num">10 hrs</td><td>Establishing first true leaves. Good light drives root growth.</td><td>6am–8pm ON</td></tr>
+      <tr><td>Young plant (tower)</td><td>10–18</td><td class="num good">16 hrs</td><td class="num">8 hrs</td><td>Post-transplant establishment. 16 hrs speeds recovery and root development.</td><td>5am–9pm ON</td></tr>
+      <tr><td>Vegetative growth</td><td>18–28</td><td class="num warn-val">16–18 hrs</td><td class="num">6–8 hrs</td><td>Peak growth phase. More light = faster growth. <strong>Never exceed 18 hrs</strong> — lettuce needs 6+ hrs dark minimum.</td><td>5am–11pm ON</td></tr>
+      <tr><td>Pre-harvest</td><td>28–35</td><td class="num good">14–16 hrs</td><td class="num">8–10 hrs</td><td>Reduce light slightly to prevent bolting (premature flowering). Longer dark = better flavour development.</td><td>6am–10pm ON</td></tr>
+    </table>
+    <div class="danger"><strong>Never run LEDs 24 hours/day for lettuce.</strong> Lettuce is a long-day plant but still needs a dark period for proper cellular respiration and nutrient uptake. Continuous light causes leaf edge whitening and premature bolting. Minimum 6 hours dark daily.</div>
+  </div>
+
+  <div class="sh">LED spectrum — what colour ratio to use</div>
+  <div class="card">
+    <div class="ct">Best spectrum for indoor lettuce aeroponics</div>
+    <div class="spectrum-bar">
+      <div class="spec-seg" style="width:20%;background:#4f46e5">Blue 450nm (20%)</div>
+      <div class="spec-seg" style="width:15%;background:#6366f1">Blue 470nm (15%)</div>
+      <div class="spec-seg" style="width:25%;background:#16a34a">Green 530nm (25%)</div>
+      <div class="spec-seg" style="width:30%;background:#dc2626">Red 660nm (30%)</div>
+      <div class="spec-seg" style="width:10%;background:#9f1239">Far-Red 730nm (10%)</div>
+    </div>
+    <div class="g2" style="margin-top:10px">
+      <div>
+        <table>
+          <tr><td><strong>Blue 450–470nm (35% of spectrum)</strong></td><td>Compact growth, thick leaves, deep green colour, prevents stretching</td></tr>
+          <tr><td><strong>Green 520–560nm (25% of spectrum)</strong></td><td>Penetrates canopy — lower leaves also get light. Improves visual inspection.</td></tr>
+          <tr><td><strong>Red 630–660nm (30% of spectrum)</strong></td><td>Primary driver of photosynthesis — leaf area expansion, rapid biomass</td></tr>
+          <tr><td><strong>Far-Red 730nm (10% of spectrum)</strong></td><td>Extension growth reflex — slightly larger leaves, speeds harvest by 10–20%</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="tip"><strong>Best choice for India:</strong> "Full spectrum white LED" + extra blue supplement. White LED (4000–6500K) has all colours. Add blue LED strip for extra blue fraction. Avoid pure red/blue "blurple" lights — they make it hard to spot deficiencies.</div>
+        <table>
+          <tr><td>Color temperature</td><td>4000–6500K (cool white / daylight)</td></tr>
+          <tr><td>CRI (Color Rendering)</td><td>80+ minimum for correct deficiency diagnosis</td></tr>
+          <tr><td>Light intensity (PPFD)</td><td>150–250 µmol/m²/s for lettuce</td></tr>
+          <tr><td>Lux equivalent</td><td>15,000–25,000 lux at canopy top</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="sh">LED wattage and distance guide</div>
+  <div class="card">
+    <table>
+      <tr><th>Setup size</th><th>Recommended wattage</th><th>Distance from plant top</th><th>Coverage area</th><th>India cost</th><th>Where to buy</th></tr>
+      <tr><td>1 tower (20 plants)</td><td>45–65W full spectrum LED panel</td><td>45–55 cm above canopy</td><td>60×60 cm</td><td>₹1,500–3,500</td><td>Amazon.in, Udaan</td></tr>
+      <tr><td>2 towers (40 plants)</td><td>100–120W LED bar or 2× 60W panels</td><td>50–60 cm above canopy</td><td>120×60 cm</td><td>₹3,000–7,000</td><td>Amazon.in, IndiaMART</td></tr>
+      <tr><td>4 towers (80 plants)</td><td>240W LED bar or 4× 65W panels</td><td>50–60 cm above canopy</td><td>180×60 cm spread</td><td>₹6,000–15,000</td><td>Amazon.in, LYCOS LED</td></tr>
+      <tr><td>10+ towers (commercial)</td><td>500W+ commercial LED fixtures</td><td>60 cm above tallest plant</td><td>Full row</td><td>₹25,000+</td><td>IndiaMART commercial</td></tr>
+    </table>
+    <div class="warn">LED heat: Place your hand at plant canopy level under the light. If it feels hot after 30 seconds, the light is too close or too powerful for that distance. Lettuce leaf temperature must stay below 28°C directly under the light.</div>
+  </div>
+
+  <div class="sh">Daily light integral (DLI) targets for lettuce</div>
+  <div class="card">
+    <table>
+      <tr><th>Growth target</th><th>DLI (mol/m²/day)</th><th>PPFD needed</th><th>Hours needed</th><th>Result</th></tr>
+      <tr><td>Minimum (survival)</td><td>6 mol/m²/day</td><td>100 µmol/m²/s</td><td>16 hours</td><td>Slow growth — 40+ days to harvest</td></tr>
+      <tr><td>Standard indoor</td><td>12–14 mol/m²/day</td><td>200 µmol/m²/s</td><td>16 hours</td><td>Normal growth — 28–32 days to harvest</td></tr>
+      <tr><td>Optimal / commercial</td><td>17 mol/m²/day</td><td>300 µmol/m²/s</td><td>16 hours</td><td>Fast growth — 21–24 days to harvest</td></tr>
+      <tr><td>Maximum useful</td><td>22 mol/m²/day</td><td>400 µmol/m²/s</td><td>15 hours</td><td>Fastest — but increases tip burn risk</td></tr>
+    </table>
+    <div class="tip"><strong>Simple rule:</strong> 200W LED bar at 50cm height over a 1m² area gives approximately 200–250 µmol/m²/s — enough for the standard 28-day cycle. Run 16 hours per day. This is the sweet spot for home/small commercial indoor tower farms.</div>
+  </div>
+
+  <div class="sh">LED electricity cost (Karnataka)</div>
+  <div class="card">
+    <table>
+      <tr><th>LED wattage</th><th>Hours/day</th><th>Units/day (kWh)</th><th>Units/month</th><th>Cost/month (₹6/unit)</th><th>Covers</th></tr>
+      <tr><td>60W (1 tower)</td><td>16 hrs</td><td class="num">0.96</td><td class="num">29</td><td class="num good">₹174/month</td><td>1 tower, 20 plants</td></tr>
+      <tr><td>120W (2 towers)</td><td>16 hrs</td><td class="num">1.92</td><td class="num">58</td><td class="num good">₹346/month</td><td>2 towers, 40 plants</td></tr>
+      <tr><td>240W (4 towers)</td><td>16 hrs</td><td class="num">3.84</td><td class="num">115</td><td class="num warn-val">₹692/month</td><td>4 towers, 80 plants</td></tr>
+      <tr><td>480W (8 towers)</td><td>16 hrs</td><td class="num">7.68</td><td class="num">230</td><td class="num warn-val">₹1,382/month</td><td>8 towers, 160 plants</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAGE 6 — INDOOR MISTING
+══════════════════════════════════ -->
+<div id="p-mist" class="pg">
+  <div class="ph">
+    <h2>Indoor misting intervals — stable controlled environment</h2>
+    <p>Indoor conditions are stable, so misting cycles are more predictable than outdoors. Fixed timer works well.</p>
+  </div>
+
+  <div class="sh">Indoor misting cycle by stage</div>
+  <div class="card">
+    <table>
+      <tr><th>Stage</th><th>Days</th><th>ON time</th><th>OFF time</th><th>Cycle period</th><th>Visual</th><th>Reason</th></tr>
+      <tr>
+        <td>Germination (nursery)</td><td>1–10</td>
+        <td>Manual spray</td><td>—</td><td>Twice daily by hand</td>
+        <td><div class="cycle-vis"><div class="c-off" style="width:120px">No tower misting</div></div></td>
+        <td>Seeds in nursery tray — hand spray only</td>
+      </tr>
+      <tr>
+        <td>Young plant (just transplanted)</td><td>10–15</td>
+        <td>2 min</td><td>8 min</td><td>Every 10 min</td>
+        <td><div class="cycle-vis"><div class="c-on">2m</div><div class="c-off" style="width:88px">8 min OFF</div></div></td>
+        <td>Roots adjusting to aeroponics — gentle, frequent misting</td>
+      </tr>
+      <tr>
+        <td>Vegetative (18–22°C room)</td><td>15–28</td>
+        <td>2 min</td><td>10 min</td><td>Every 12 min</td>
+        <td><div class="cycle-vis"><div class="c-on">2m</div><div class="c-off" style="width:108px">10 min OFF</div></div></td>
+        <td>Standard indoor cycle at ideal temperature</td>
+      </tr>
+      <tr>
+        <td>Vegetative (room above 26°C)</td><td>15–28</td>
+        <td>3 min</td><td>6 min</td><td>Every 9 min</td>
+        <td><div class="cycle-vis"><div class="c-on">3m</div><div class="c-off" style="width:66px">6m OFF</div></div></td>
+        <td>Warm room — more frequent misting needed</td>
+      </tr>
+      <tr>
+        <td>Night (lights off, 15–20°C)</td><td>All</td>
+        <td>2 min</td><td>18 min</td><td>Every 20 min</td>
+        <td><div class="cycle-vis"><div class="c-on">2m</div><div class="c-off" style="width:175px">18 min OFF</div></div></td>
+        <td>Cool night = less evaporation from roots. Reduce misting to prevent root rot.</td>
+      </tr>
+      <tr>
+        <td>Pre-harvest</td><td>28–35</td>
+        <td>2 min</td><td>10 min</td><td>Every 12 min</td>
+        <td><div class="cycle-vis"><div class="c-on">2m</div><div class="c-off" style="width:108px">10 min OFF</div></div></td>
+        <td>Same as standard — continue until harvest</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="sh">Recommended ESP32 timer settings for indoor tower</div>
+  <div class="card" style="background:#1a2e1a;border-color:#14532d">
+    <div style="font-size:12px;color:#86efac;font-weight:600;margin-bottom:8px">ESP32 code constants for indoor setup (edit in firmware)</div>
+    <pre style="background:#0f1f0f;padding:12px;border-radius:8px;overflow-x:auto;font-size:12px;color:#86efac;line-height:1.8">
+// ── INDOOR LETTUCE MISTING CONSTANTS ──────────────────────────
+// Change these based on room temperature
+
+// Standard indoor (18–22°C) — Day cycle
+const unsigned long DAY_PUMP_ON_MS    = 120000UL;  // 2 minutes ON
+const unsigned long DAY_PUMP_OFF_MS   = 600000UL;  // 10 minutes OFF
+
+// Standard indoor (18–22°C) — Night cycle (lights off)
+const unsigned long NIGHT_PUMP_ON_MS  = 120000UL;  // 2 minutes ON
+const unsigned long NIGHT_PUMP_OFF_MS = 1080000UL; // 18 minutes OFF
+
+// Warm indoor (22–26°C) — increase frequency
+const unsigned long WARM_PUMP_ON_MS   = 180000UL;  // 3 minutes ON
+const unsigned long WARM_PUMP_OFF_MS  = 360000UL;  // 6 minutes OFF
+
+// Safety limits (do not change)
+const unsigned long FLOW_VERIFY_MS    = 5000UL;    // Must detect flow in 5s
+const unsigned long PUMP_MAX_RUN_MS   = 180000UL;  // Never run more than 3 min
+
+// Indoor schedule window (lights off = night mode)
+const int LIGHT_ON_HOUR  = 5;   // 5am lights on
+const int LIGHT_OFF_HOUR = 21;  // 9pm lights off (16hr photoperiod)
+    </pre>
+  </div>
+
+  <div class="sh">Indoor vs outdoor misting comparison</div>
+  <div class="g2">
+    <div class="card" style="border-top:3px solid #22c55e">
+      <div class="ct">Indoor advantages for misting</div>
+      <table>
+        <tr><td>Temperature stable</td><td>Single misting cycle works all day</td></tr>
+        <tr><td>No rain flooding tower</td><td>Removes monsoon emergency risk</td></tr>
+        <tr><td>No UV degradation</td><td>Nozzles and tubing last 2–3× longer</td></tr>
+        <tr><td>Lower evaporation</td><td>Reservoir lasts 3–5 days longer before top-up</td></tr>
+        <tr><td>No wind disturbance</td><td>Mist cloud stays in root zone longer</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #f59e0b">
+      <div class="ct">Indoor misting risks to watch</div>
+      <table>
+        <tr><td>High humidity risk</td><td>Check humidity daily — keep below 70%</td></tr>
+        <tr><td>Root rot in warm room</td><td>Keep water below 22°C — use small aquarium chiller if needed</td></tr>
+        <tr><td>Algae risk</td><td>Even indoor light can cause algae — all holes must be sealed</td></tr>
+        <tr><td>CO₂ depletion</td><td>Open window briefly during lights-on period daily</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     PAGE 7 — DAILY LOG SHEET
+══════════════════════════════════ -->
+<div id="p-daily" class="pg">
+  <div class="ph">
+    <h2>Daily monitoring log sheet — print and use</h2>
+    <p>Check these measurements every morning. Takes 10 minutes. Catches problems before plants show symptoms.</p>
+  </div>
+
+  <div class="sh">Morning checklist (7:00–7:30 AM daily)</div>
+  <div class="card">
+    <table>
+      <tr><th>Time</th><th>What to measure</th><th>How to measure</th><th>Target (lettuce indoor)</th><th>Action if wrong</th></tr>
+      <tr><td>7:00 AM</td><td>Reservoir pH</td><td>pH pen meter — dip 10 sec</td><td>5.8–6.0 <span class="bg">target</span></td><td>Add pH Down (1ml at a time) or pH Up (0.5ml). Wait 5 min. Recheck.</td></tr>
+      <tr><td>7:05 AM</td><td>EC / PPM</td><td>EC pen meter — dip 5 sec</td><td>0.8–1.2 mS/cm = 560–840 PPM</td><td>Low EC: add nutrients. High EC: add plain pH-adjusted water to dilute.</td></tr>
+      <tr><td>7:10 AM</td><td>Water level in reservoir</td><td>Look at visual indicator or float</td><td>Above 50% capacity</td><td>Top up with plain pH 5.8 water (no nutrients when topping up)</td></tr>
+      <tr><td>7:15 AM</td><td>Water temperature</td><td>Thermometer in reservoir</td><td>18–22°C</td><td>Above 24°C: add frozen 500ml PET bottle. Below 16°C: rare indoors.</td></tr>
+      <tr><td>7:20 AM</td><td>Visual plant check</td><td>Look at all plants</td><td>Green, upright, no drooping</td><td>Wilting: check mist running. Yellow lower leaves: check N. Brown tips: check Ca.</td></tr>
+      <tr><td>7:25 AM</td><td>Check misting is running</td><td>Watch during pump ON cycle</td><td>All nozzles misting visibly</td><td>Clogged nozzle: soak in citric acid. Pump not running: check timer.</td></tr>
+      <tr><td>7:30 AM</td><td>Room temperature & humidity</td><td>Digital thermohygrometer</td><td>18–22°C, 55–65% RH</td><td>Too hot: lower AC. Too humid: improve ventilation. Fan always running.</td></tr>
+    </table>
+  </div>
+
+  <div class="sh">Weekly actions (every 7 days)</div>
+  <div class="g2">
+    <div class="card">
+      <div class="ct">Every 7 days — chemical actions</div>
+      <table>
+        <tr><td>Partial reservoir change</td><td>Remove 30% of solution, replace with fresh nutrient mix</td></tr>
+        <tr><td>H₂O₂ treatment</td><td>Add 3ml/L hydrogen peroxide to reservoir — kills bacteria</td></tr>
+        <tr><td>Nozzle soak</td><td>Remove nozzles, soak 30 min in 1g/L citric acid, rinse with water</td></tr>
+        <tr><td>pH/EC sensor calibration</td><td>Use buffer solutions to verify meter accuracy</td></tr>
+        <tr><td>Root inspection</td><td>Pull one net pot — check roots are white and healthy</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="ct">Every 14–21 days — full reset</div>
+      <table>
+        <tr><td>Full reservoir drain</td><td>Empty completely. Wash with 3% H₂O₂. Rinse twice with clean water.</td></tr>
+        <tr><td>Mix fresh nutrient solution</td><td>Follow stage-appropriate dosage from Stage chart above</td></tr>
+        <tr><td>Y-filter clean</td><td>Remove screen, backflush under tap, replace</td></tr>
+        <tr><td>Check all pipe joints</td><td>Inspect for algae, mineral deposits, or leaks</td></tr>
+        <tr><td>Tower interior inspection</td><td>Open top cap, shine torch inside — check for algae or root tangle</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="sh">PPM & pH adjustment cheat sheet</div>
+  <div class="g2">
+    <div class="card">
+      <div class="ct">If PPM / EC is wrong</div>
+      <table>
+        <tr><th>Reading</th><th>Problem</th><th>Exact fix</th></tr>
+        <tr><td class="num" style="color:#dc2626">Below 350 PPM (EC &lt;0.5)</td><td>Starvation</td><td>Add 100ml Part A + 100ml Part B per 100L. Recheck EC.</td></tr>
+        <tr><td class="num" style="color:#92400e">350–560 PPM (EC 0.5–0.8)</td><td>Slightly low</td><td>Add 50ml A + 50ml B per 100L. Good for seedlings only.</td></tr>
+        <tr><td class="num" style="color:#166534">560–840 PPM (EC 0.8–1.2)</td><td>Perfect range</td><td>No action — maintain this range</td></tr>
+        <tr><td class="num" style="color:#92400e">840–1000 PPM (EC 1.2–1.4)</td><td>Slightly high</td><td>Add 10L plain pH-adjusted water. Dilutes without wasting nutrients.</td></tr>
+        <tr><td class="num" style="color:#dc2626">Above 1000 PPM (EC &gt;1.4)</td><td>Tip burn risk</td><td>Drain 20% of reservoir. Replace with plain pH water. Do NOT add more nutrients until EC drops.</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="ct">If pH is wrong</div>
+      <table>
+        <tr><th>Reading</th><th>Effect on lettuce</th><th>Fix</th></tr>
+        <tr><td class="num" style="color:#dc2626">Below 5.0</td><td>Root acid burn, heavy metal toxicity</td><td>Add pH Up 0.5ml. Wait 5 min. Repeat if needed.</td></tr>
+        <tr><td class="num" style="color:#92400e">5.0–5.5</td><td>Slightly acidic — OK for short term</td><td>Small dose pH Up. Monitor closely.</td></tr>
+        <tr><td class="num" style="color:#166534">5.5–6.0</td><td>PERFECT for lettuce</td><td>No action — this is ideal</td></tr>
+        <tr><td class="num" style="color:#92400e">6.0–6.5</td><td>Acceptable — slight iron reduction</td><td>Small dose pH Down if drifting toward 6.5</td></tr>
+        <tr><td class="num" style="color:#dc2626">Above 6.5</td><td>Iron/Mn lockout — new yellow leaves</td><td>Add pH Down 1ml. Wait 5 min. Repeat until 6.0. Check Fe-EDTA dose.</td></tr>
+        <tr><td class="num" style="color:#dc2626">Above 7.0</td><td>Multiple nutrient lockouts — plant failure</td><td>Emergency: add pH Down 2ml, wait 10 min, recheck. Do partial reservoir change if persistent.</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function show(id, btn){
+  document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
+  document.getElementById('p-'+id).classList.add('on');
+  btn.classList.add('on');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function showStage(n){
+  for(let i=0;i<6;i++){
+    document.getElementById('st'+i).classList.remove('active');
+    document.getElementById('dp'+i).classList.remove('show');
+  }
+  document.getElementById('st'+n).classList.add('active');
+  document.getElementById('dp'+n).classList.add('show');
+}
+</script>
+</body>
+</html>

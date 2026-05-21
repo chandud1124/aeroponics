@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Tower Garden">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1f8a5b"/>
+      <stop offset="100%" stop-color="#0f3d2e"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#g)"/>
+  <path d="M32 12c4 7 12 13 12 22 0 8-5 14-12 18-7-4-12-10-12-18 0-9 8-15 12-22Z" fill="#d7f7e3"/>
+  <path d="M32 20v26" stroke="#0f3d2e" stroke-width="4" stroke-linecap="round"/>
+  <path d="M22 30c7-1 14-5 18-10-1 7-4 13-10 18-3-5-5-7-8-8Z" fill="#2dcf7d" opacity="0.9"/>
+  <circle cx="49" cy="48" r="4" fill="#fff7cc"/>
+</svg>
