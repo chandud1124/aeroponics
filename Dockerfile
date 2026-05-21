@@ -34,15 +34,13 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install serve to run the built app
-RUN npm install -g serve
-
-# Copy built files from builder
+# Copy built files and the node adapter from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/server.mjs ./server.mjs
 
 # Expose port
 EXPOSE 8080
 
-# Start command
-CMD ["serve", "-s", "dist/client", "-l", "8080"]
+# Start the TanStack Start server bundle via a tiny Node HTTP adapter.
+CMD ["node", "server.mjs"]

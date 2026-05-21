@@ -157,7 +157,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse(status ?? null);
     }
 
-    if (request.method === "PATCH") {
+    if (request.method === "PATCH" || request.method === "PUT") {
       // Require device authentication for status updates
       const deviceIdHeader = request.headers.get("x-device-id");
       const deviceKeyHeader = request.headers.get("x-api-key");

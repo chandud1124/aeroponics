@@ -1,6 +1,13 @@
 node_modules
 dist
 .git
+.env
+.env.local
+.DS_Store
+coverage
+*.lognode_modules
+dist
+.git
 .gitignore
 README.md
 .env

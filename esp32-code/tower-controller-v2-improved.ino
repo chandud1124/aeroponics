@@ -82,8 +82,8 @@ const char* API_BASE_URL = "http://192.168.0.229:8080";
 // Paste the backend-generated values here after creating the device in Admin UI.
 // DEVICE_ID must match the deviceId returned by the backend.
 // DEVICE_SECRET is the one-time secret returned by the backend and shown only once.
-const char* DEVICE_ID     = "PASTE_BACKEND_DEVICE_ID_HERE";
-const char* DEVICE_SECRET = "PASTE_BACKEND_DEVICE_SECRET_HERE";
+const char* DEVICE_ID     = "device-gwusft";
+const char* DEVICE_SECRET = "bd111a764bf9d9108c386645ab0fb4a95896601cd17bb5c5";
 
 const int PIN_DHT_DATA     = 16;
 const int PIN_LDR_SENSOR   = 36;
@@ -121,9 +121,10 @@ const unsigned long API_TIMEOUT_MS    = 8000UL;
 // Main loop intervals
 const unsigned long IV_SENSOR         = 30000UL;
 const unsigned long IV_SCHEDULE       = 60000UL;
-const unsigned long IV_STATUS_POST    = 30000UL;
+const unsigned long IV_STATUS_POST    = 10000UL;
 const unsigned long IV_WIFI_CHECK     = 10000UL;
-const unsigned long IV_WDT_FEED       = 15000UL;
+// Feed the watchdog well below the core's active TWDT window.
+const unsigned long IV_WDT_FEED       = 2000UL;
 const unsigned long IV_LOG_FLUSH      = 60000UL;
 
 // [IMP-4] Offline scheduling failsafe: if offline >48h without a run, force pump anyway
@@ -137,6 +138,7 @@ const char* NVS_SCHED_SH    = "schedSH";
 const char* NVS_SCHED_EH    = "schedEH";
 const char* NVS_SCHED_EN    = "schedEn";
 const char* NVS_LAST_RUN    = "lastRun";
+const char* NVS_LAST_FAULT  = "lastFault";
 const char* NVS_LOG_COUNT   = "logCount";
 const char* NVS_TIME_CACHE  = "timeCache";
 const char* NVS_TIME_VALID  = "timeValid";  // [IMP-5] Track if NTP succeeded
@@ -212,6 +214,7 @@ unsigned long lastFlowCheckMs      = 0;
 
 unsigned long faultStartMs         = 0;
 String        faultCode            = "OK";
+String        lastFaultCode        = "NONE";
 
 unsigned long tsLastSensor         = 0;
 unsigned long tsLastScheduleFetch  = 0;
@@ -396,6 +399,18 @@ void saveTimeValidFlagToNVS(bool valid) {  // [IMP-5]
   prefs.end();
 }
 
+void saveLastFaultToNVS(const char* code) {
+  prefs.begin(NVS_NS, false);
+  prefs.putString(NVS_LAST_FAULT, code ? code : "NONE");
+  prefs.end();
+}
+
+void loadLastFaultFromNVS() {
+  prefs.begin(NVS_NS, true);
+  lastFaultCode = prefs.getString(NVS_LAST_FAULT, "NONE");
+  prefs.end();
+}
+
 // ─── Offline Log Queue with Error Checking ────────────────────────────
 
 int getOfflineLogCount() {
@@ -484,8 +499,12 @@ void flushOfflineLogQueue() {
 
 void initWiFi() {
   WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);
+  WiFi.setSleep(false);
   WiFi.setAutoReconnect(false);
+  esp_task_wdt_reset();
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+  esp_task_wdt_reset();
   tsLastWifiAttempt = millis();
   Serial.printf("[WiFi] Connecting to '%s' (async)...\n", WIFI_SSID);
 }
@@ -502,6 +521,7 @@ void maintainWiFi(unsigned long now) {
     Serial.print("[WiFi] Connected: ");
     Serial.println(WiFi.localIP());
     syncTimeNTP();
+    tsLastStatusPost = 0;
   } else if (!connected && wifiConnected) {
     wifiConnected = false;
     Serial.println("[WiFi] Disconnected — offline mode");
@@ -509,7 +529,9 @@ void maintainWiFi(unsigned long now) {
 
   if (!connected && (now - tsLastWifiAttempt >= wifiBackoffMs)) {
     Serial.printf("[WiFi] Reconnecting (backoff: %lums)...\n", wifiBackoffMs);
-    WiFi.disconnect(true);
+    esp_task_wdt_reset();
+    WiFi.disconnect(false, false);
+    esp_task_wdt_reset();
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     tsLastWifiAttempt = now;
     wifiBackoffMs = min(wifiBackoffMs * 2, WIFI_BACKOFF_MAX);
@@ -571,12 +593,10 @@ void setup() {
   unsigned long t0 = millis();
   while (millis() - t0 < 300) yield();
 
-  Serial.printf("[BOOT] Reset reason: %s\n", resetReasonToString(esp_reset_reason()));
-
   esp_log_level_set("task_wdt", ESP_LOG_NONE);
 
   esp_task_wdt_config_t wdt_config = {
-    .timeout_ms = 45000,
+    .timeout_ms = 120000,
     .idle_core_mask = (1 << 0) | (1 << 1),
     .trigger_panic = true
   };
@@ -588,6 +608,13 @@ void setup() {
   esp_err_t wdtAddResult = esp_task_wdt_add(NULL);
   if (wdtAddResult != ESP_OK) {
     Serial.printf("[WDT] Task registration failed: %s\n", esp_err_to_name(wdtAddResult));
+  }
+
+  loadLastFaultFromNVS();
+  esp_reset_reason_t resetReason = esp_reset_reason();
+  Serial.printf("[BOOT] Reset reason: %s | Last fault: %s\n", resetReasonToString(resetReason), lastFaultCode.c_str());
+  if (resetReason == ESP_RST_TASK_WDT && lastFaultCode != "NONE") {
+    Serial.printf("[BOOT] Previous fault before watchdog reset: %s\n", lastFaultCode.c_str());
   }
 
   pinMode(PIN_PUMP_RELAY, OUTPUT);
@@ -845,6 +872,8 @@ void enterFault(unsigned long now, const char* code) {
   faultCode    = code;
   status.fault = String(code);
   faultStartMs = now;
+  lastFaultCode = code;
+  saveLastFaultToNVS(code);
   curState     = STATE_FAULT;
   Serial.printf("[FAULT] → %s\n", code);
 }
@@ -962,6 +991,7 @@ int httpRequest(const char* method, const char* path,
                 const String& body = "", int* respCode = nullptr) {
   if (!wifiConnected) return -1;
 
+  esp_task_wdt_reset();
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
   http.begin(String(API_BASE_URL) + path);
@@ -977,6 +1007,7 @@ int httpRequest(const char* method, const char* path,
   if (respCode) *respCode = code;
 
   http.end();
+  esp_task_wdt_reset();
   return code;
 }
 
@@ -986,6 +1017,7 @@ void fetchSchedule() {
     return;
   }
 
+  esp_task_wdt_reset();
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
   http.begin(String(API_BASE_URL) + "/api/schedule");
@@ -1044,6 +1076,7 @@ void fetchSchedule() {
     Serial.printf("[API] Backend unreachable: schedule fetch failed (HTTP %d)\n", code);
   }
   http.end();
+  esp_task_wdt_reset();
 }
 
 void postStatus() {
@@ -1064,6 +1097,7 @@ void postStatus() {
   body += "\"wifiConnected\":"    + String(wifiConnected ? "true" : "false");
   body += "}";
 
+  esp_task_wdt_reset();
   int code = httpRequest("PUT", "/api/status", body);
   if (code != 200 && code != 204) {
     Serial.printf("[API] Backend unreachable: status update failed (HTTP %d)\n", code);
@@ -1096,6 +1130,7 @@ bool postLogEntryToAPI(const LogEntry& entry) {
   body += "\"fault\":\""          + String(entry.fault) + "\"";
   body += "}";
 
+  esp_task_wdt_reset();
   int code = httpRequest("POST", "/api/pump-log", body);
   if (code == 200 || code == 201) {
     return true;

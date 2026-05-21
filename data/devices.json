@@ -1,11 +1,11 @@
 [
   {
-    "id": "1779347253412-2gpxn2",
-    "name": "acac",
-    "deviceId": "device-bc5v09",
-    "secretHash": "c30060a63153e1ca9d191b7db3076208449f1912a6ee68dbd9cf8338fa4a9c2a",
-    "macAddress": "adcacascwecasdc",
-    "ipAddress": null,
-    "createdAt": "2026-05-21T07:07:33.415Z"
+    "id": "1779353770650-oqd4lp",
+    "name": "esp32",
+    "deviceId": "device-gwusft",
+    "secretHash": "974f6231161891c5e5bfbee0b8bd1fea240e5b8e11a39f14c8e5beba77ac36c2",
+    "macAddress": "C0:CD:D6:8E:73:4C",
+    "ipAddress": "192.168.0.244",
+    "createdAt": "2026-05-21T08:56:10.654Z"
   }
 ]
