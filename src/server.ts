@@ -179,6 +179,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       const payload = (await request.json()) as {
         pumpOn?: boolean;
         flowing?: boolean;
+        pumpState?: string;
+        state?: string;
         humidityPct?: number | null;
         reservoirTempC?: number;
         lightLux?: number | null;
@@ -217,7 +219,13 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       const updated = updateStatus({
         pumpOn: payload.pumpOn,
         flowing: payload.flowing,
-        pumpState: payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE,
+        pumpState: (() => {
+          const rawState = payload.pumpState ?? payload.state;
+          if (typeof rawState === "string" && Object.values(PumpState).includes(rawState as PumpState)) {
+            return rawState as PumpState;
+          }
+          return payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE;
+        })(),
         humidityPct: payload.humidityPct ?? undefined,
         lightLux: payload.lightLux ?? undefined,
         reservoirTempC: payload.reservoirTempC ?? undefined,

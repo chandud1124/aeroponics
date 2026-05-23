@@ -81,6 +81,9 @@ export type LiveStatus = {
   dhtOk?: boolean;
   reservoirDsOk?: boolean;
   towerDsOk?: boolean;
+  cycleMode?: "DAY" | "NIGHT";
+  cycleOnDurationSeconds?: number;
+  cycleOffIntervalMinutes?: number;
   resetReason?: string | null;
   lastBootFault?: string | null;
   uptimeSec?: number | null;
@@ -149,7 +152,7 @@ export type AnalyticsSummary = {
 };
 
 export const defaultSchedule: Schedule = {
-  planName: "3 on / 7 off (10m cycle)",
+  planName: "3 on / 7 off (safe day cycle)",
   intervalMinutes: 10,
   durationSeconds: 180, // 3 minutes
   startHour: 0,
@@ -158,7 +161,7 @@ export const defaultSchedule: Schedule = {
   lightEnabled: true,
   lightStartHour: 5,
   lightEndHour: 21,
-  dayIntervalMinutes: 10,
+  dayIntervalMinutes: 7,
   dayDurationSeconds: 180,
   nightIntervalMinutes: 10,
   nightDurationSeconds: 180,

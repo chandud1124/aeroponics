@@ -61,6 +61,8 @@
 #include <HTTPClient.h>
 #include <DHT.h>
 #include <Preferences.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #include <time.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>   // [FIX-6] Watchdog
@@ -110,6 +112,9 @@ const char* DEVICE_SECRET = "bd111a764bf9d9108c386645ab0fb4a95896601cd17bb5c5";
 
 // GPIO
 const int PIN_DHT_DATA           = 16;
+const int PIN_FLOW_SENSOR        = 32; // pulse-output flow sensor (optional)
+const int PIN_RESERVOIR_TEMP     = 14; // DS18B20 data pin for reservoir (optional)
+const int PIN_TOWER_TEMP         = 13; // DS18B20 data pin for tower (optional)
 const int PIN_LDR_SENSOR         = 36;
 const int PIN_MOTOR_BUTTON       = 19;
 const int PIN_LIGHT_BUTTON       = 23;
@@ -134,8 +139,12 @@ const unsigned long BUTTON_DEBOUNCE_MS = 50UL;
 const float TEMP_AIR_MAX_C    = 42.0f;   // Alert if room > 42°C
 const float HUMIDITY_MAX_PCT  = 85.0f;   // Alert if humidity > 85%
 
+// Flow sensor calibration: pulses per liter (default, calibrate for your sensor)
+const float PULSES_PER_LITER = 450.0f;
+
 // Pump timing
 const unsigned long PUMP_MAX_RUN_MS  = 120000UL; // 2 min hard cap
+const unsigned long PUMP_FLOW_VERIFY_MS = 3000UL; // flow must appear quickly after pump starts
 const unsigned long FAULT_RETRY_MS   = 30000UL;  // 30 s before recovery
 
 // Battery charge window defaults (overridden by backend if provided)
@@ -168,6 +177,8 @@ const char* NVS_LAST_FAULT = "lastFault";
 const char* NVS_LOG_COUNT  = "logCount";
 const char* NVS_TIME_CACHE = "timeCache";
 const char* NVS_TIME_VALID = "timeValid";
+const char* NVS_PLAN_NAME  = "planName";
+const char* NVS_SCHED_APPLIED = "schedApplied";
 
 const int OFFLINE_LOG_MAX  = 20;
 
@@ -193,6 +204,7 @@ struct SensorData {
 
 struct SystemStatus {
   bool   pumpOn           = false;
+  bool   flowing          = false;
   bool   lightOn          = false;
   bool   batteryChargeOn  = false;
   bool   dhtOk            = false;
@@ -200,6 +212,10 @@ struct SystemStatus {
   float  airTempC         = 0.0f;  // [FIX-9]
   int    lightRaw         = 0;
   bool   lightDark        = false; // [FIX-7] Renamed from lightLux
+  float  reservoirTempC   = NAN;
+  float  towerTempC       = NAN;
+  float  flowRateLpm      = 0.0f;
+  bool   sensorDataOk     = false;
   String fault            = "OK";
   time_t lastRunEpoch     = 0;
 };
@@ -210,6 +226,9 @@ struct LogEntry {
   bool     flowed;
   char     fault[16];
 };
+
+String appliedPlanName = "";
+time_t scheduleAppliedAt = 0;
 
 // Manual mode enum
 enum ManualMode : uint8_t {
@@ -230,6 +249,27 @@ struct ButtonState {
 
 DHT         dht(PIN_DHT_DATA, DHT22);
 Preferences prefs;
+
+// Flow sensor + DS18B20
+volatile unsigned long flowPulseCount = 0;
+volatile unsigned long lastFlowPulseMs = 0;
+unsigned long tsLastFlowSampleMs = 0;
+unsigned long lastFlowSampleCount = 0;
+float flowRateLpm = 0.0f;
+
+OneWire oneWireReservoir(PIN_RESERVOIR_TEMP);
+DallasTemperature resTempSensor(&oneWireReservoir);
+OneWire oneWireTower(PIN_TOWER_TEMP);
+DallasTemperature towerTempSensor(&oneWireTower);
+float reservoirTempC = NAN;
+float towerTempC = NAN;
+// DS18B20 non-blocking conversion state
+unsigned long tsTempRequestMs = 0;
+bool pendingTempRequest = false;
+unsigned long ds18b20RetryAfterMs = 0;
+uint8_t ds18b20FailureStreak = 0;
+bool reservoirDsMissingLogged = false;
+bool towerDsMissingLogged = false;
 
 PumpState curState  = STATE_IDLE;
 PumpState prevState = STATE_IDLE;
@@ -419,6 +459,20 @@ void saveLastFaultToNVS(const char* code) {
   prefs.end();
 }
 
+void savePlanNameToNVS(const String& name) {
+  prefs.begin(NVS_NS, false);
+  prefs.putString(NVS_PLAN_NAME, name);
+  prefs.putUInt(NVS_SCHED_APPLIED, (uint32_t)scheduleAppliedAt);
+  prefs.end();
+}
+
+void loadPlanNameFromNVS() {
+  prefs.begin(NVS_NS, true);
+  appliedPlanName = prefs.getString(NVS_PLAN_NAME, "");
+  scheduleAppliedAt = (time_t)prefs.getUInt(NVS_SCHED_APPLIED, 0);
+  prefs.end();
+}
+
 void loadLastFaultFromNVS() {
   prefs.begin(NVS_NS, true);
   lastFaultCode = prefs.getString(NVS_LAST_FAULT, "NONE");
@@ -514,6 +568,11 @@ void initWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   tsLastWifiAttempt = millis();
   Serial.printf("[WiFi] Connecting to '%s'...\n", WIFI_SSID);
+}
+
+void IRAM_ATTR flowPulseISR() {
+  flowPulseCount++;
+  lastFlowPulseMs = millis();
 }
 
 void maintainWiFi(unsigned long now) {
@@ -634,6 +693,101 @@ void readSensors() {
   status.airTempC    = sensors.airTempC;    // [FIX-9]
   status.lightRaw    = sensors.lightRaw;
   status.lightDark   = sensors.isDark;      // [FIX-7]
+
+  // ── DS18B20 non-blocking conversion ─────────────────────────────
+  unsigned long nowMs = millis();
+  if (!pendingTempRequest && nowMs >= ds18b20RetryAfterMs) {
+    // Request conversion on both sensors (non-blocking)
+    resTempSensor.requestTemperatures();
+    towerTempSensor.requestTemperatures();
+    pendingTempRequest = true;
+    tsTempRequestMs = nowMs;
+  } else if (pendingTempRequest) {
+    if (nowMs - tsTempRequestMs > 2500UL) {
+      pendingTempRequest = false;
+      ds18b20FailureStreak++;
+      if (!reservoirDsMissingLogged || !towerDsMissingLogged || ds18b20FailureStreak == 1) {
+        Serial.println("[SENSOR] DS18B20 conversion timed out; retrying later");
+      }
+      if (ds18b20FailureStreak >= 3) {
+        ds18b20RetryAfterMs = nowMs + 300000UL;
+        ds18b20FailureStreak = 0;
+        Serial.println("[SENSOR] DS18B20 unavailable; pausing retries for 5 minutes");
+      }
+    } else if (nowMs - tsTempRequestMs >= 700UL) {
+      float r = resTempSensor.getTempCByIndex(0);
+      float t = towerTempSensor.getTempCByIndex(0);
+
+      if (r != DEVICE_DISCONNECTED_C) {
+        reservoirTempC = r;
+        if (reservoirDsMissingLogged) {
+          Serial.println("[SENSOR] Reservoir DS18B20 recovered");
+          reservoirDsMissingLogged = false;
+        }
+      } else {
+        if (!reservoirDsMissingLogged) {
+          Serial.println("[SENSOR] Reservoir DS18B20 missing or unreadable; continuing");
+          reservoirDsMissingLogged = true;
+        }
+        reservoirTempC = NAN;
+      }
+
+      if (t != DEVICE_DISCONNECTED_C) {
+        towerTempC = t;
+        if (towerDsMissingLogged) {
+          Serial.println("[SENSOR] Tower DS18B20 recovered");
+          towerDsMissingLogged = false;
+        }
+      } else {
+        if (!towerDsMissingLogged) {
+          Serial.println("[SENSOR] Tower DS18B20 missing or unreadable; continuing");
+          towerDsMissingLogged = true;
+        }
+        towerTempC = NAN;
+      }
+
+      if (r == DEVICE_DISCONNECTED_C && t == DEVICE_DISCONNECTED_C) {
+        ds18b20FailureStreak++;
+        if (ds18b20FailureStreak >= 3) {
+          ds18b20RetryAfterMs = nowMs + 300000UL;
+          ds18b20FailureStreak = 0;
+          Serial.println("[SENSOR] DS18B20 unavailable; pausing retries for 5 minutes");
+        }
+      } else {
+        ds18b20FailureStreak = 0;
+      }
+
+      pendingTempRequest = false;
+    }
+  }
+
+  // ── Flow sensor sampling (compute LPM)
+  unsigned long sampleNow = millis();
+  if (tsLastFlowSampleMs == 0) {
+    tsLastFlowSampleMs = sampleNow;
+    lastFlowSampleCount = flowPulseCount;
+  } else if (sampleNow - tsLastFlowSampleMs >= 5000) {
+    unsigned long deltaCount = flowPulseCount - lastFlowSampleCount;
+    unsigned long deltaMs = sampleNow - tsLastFlowSampleMs;
+    if (deltaMs > 0) {
+      flowRateLpm = ((float)deltaCount * 60000.0f) / (PULSES_PER_LITER * (float)deltaMs);
+    } else {
+      flowRateLpm = 0.0f;
+    }
+    lastFlowSampleCount = flowPulseCount;
+    tsLastFlowSampleMs = sampleNow;
+  }
+
+  bool flowRecent = (lastFlowPulseMs > 0) && (sampleNow - lastFlowPulseMs <= 3000UL);
+  status.flowing = status.pumpOn && (flowRecent || flowPulseCount > 0);
+
+  status.reservoirTempC = reservoirTempC;
+  status.towerTempC = towerTempC;
+  status.flowRateLpm = flowRateLpm;
+  status.sensorDataOk = dhtOk || (!isnan(reservoirTempC) && !isnan(towerTempC));
+  if (!status.sensorDataOk) {
+    status.fault = "OK";
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -730,6 +884,10 @@ void handleManualButtons(unsigned long now) {
 void checkSafety(unsigned long now) {
   if (!sensors.valid) return;
 
+  // Keep the flow truth tied to the active pump cycle.
+  bool flowDetected = (status.pumpOn && lastFlowPulseMs > 0 && (now - lastFlowPulseMs <= PUMP_FLOW_VERIFY_MS));
+  status.flowing = flowDetected;
+
   // High temperature alert
   if (sensors.airTempC > TEMP_AIR_MAX_C) {
     Serial.printf("[SAFETY] Air temp %.1f°C exceeds %.1f°C limit\n",
@@ -761,6 +919,16 @@ void checkSafety(unsigned long now) {
     setRelayState(PIN_PUMP_RELAY, false);
     status.pumpOn = false;
     enterFault(now, "PUMP_TIMEOUT");
+    return;
+  }
+
+  // No-flow protection: if the relay is on but no pulse arrives quickly,
+  // stop the pump rather than letting the backend show a false running state.
+  if (status.pumpOn && (now - pumpStartMs >= PUMP_FLOW_VERIFY_MS) && !flowDetected) {
+    Serial.println("[SAFETY] Pump started but no flow detected — emergency stop");
+    setRelayState(PIN_PUMP_RELAY, false);
+    status.pumpOn = false;
+    enterFault(now, "NO_FLOW");
   }
 }
 
@@ -831,6 +999,11 @@ void statePumpOn(unsigned long now) {
   Serial.printf("[PUMP] Starting — duration %ds\n", schedule.durationSeconds);
   setRelayState(PIN_PUMP_RELAY, true);
   status.pumpOn          = true;
+  status.flowing         = false;
+  flowPulseCount         = 0;
+  lastFlowPulseMs        = 0;
+  lastFlowSampleCount    = 0;
+  tsLastFlowSampleMs     = now;
   pumpScheduledEndMs     = pumpStartMs + (unsigned long)(schedule.durationSeconds * 1000UL);
   curState               = STATE_RUNNING;
 }
@@ -857,8 +1030,9 @@ void stateStopping(unsigned long now) {
     saveLastRunToNVS(epochNow);
   }
 
-  // Log cycle (no flow sensor in this build — flowed=false)
-  logPumpCycle(durMs / 1000.0f, false, status.fault);
+  // Log cycle using the actual flow sensor state and pulse-derived volume.
+  bool flowed = flowPulseCount > 0 || status.flowing;
+  logPumpCycle(durMs / 1000.0f, flowed, status.fault);
 
   // Clear transient fault if pump stopped cleanly
   if (status.fault == "OK" || status.fault.length() == 0) {
@@ -1056,8 +1230,29 @@ void fetchScheduleAndSync() {
           }
         }
 
+        // Parse optional planName and scheduleAppliedAt
+        String planName = extractJsonString(resp, "planName");
+        if (planName.length() > 0 && planName != appliedPlanName) {
+          appliedPlanName = planName;
+          scheduleAppliedAt = (time_t)extractJsonInt(resp, "scheduleAppliedAt");
+        }
+
         if (changed) {
+          scheduleAppliedAt = getCurrentEpoch();
           saveScheduleToNVS();
+          savePlanNameToNVS(appliedPlanName);
+          if (scheduleAppliedAt > 0 && wifiConnected) {
+            String ack = "{";
+            ack += "\"scheduleAppliedAt\":" + String((uint32_t)scheduleAppliedAt);
+            if (appliedPlanName.length() > 0) {
+              ack += ",\"planName\":\"" + appliedPlanName + "\"";
+            }
+            ack += "}";
+            int ackCode = httpRequest("PUT", "/api/status", ack);
+            if (ackCode != 200 && ackCode != 204) {
+              Serial.printf("[API] Failed to notify backend of applied schedule (HTTP %d)\n", ackCode);
+            }
+          }
           Serial.printf("[API] Schedule updated: every %dmin for %ds (%02d:00–%02d:00)\n",
                         ni, nd, ns, ne);
         }
@@ -1085,6 +1280,8 @@ void fetchScheduleAndSync() {
 
       String pm = extractJsonString(resp, "motorManualMode");
       String lm = extractJsonString(resp, "lightManualMode");
+      // Parse retry hint from server (in seconds)
+      int retryIn = extractJsonInt(resp, "retryNextCycleIn");
 
       if (pm.length() > 0) {
         ManualMode newMotor = manualModeFromString(pm);
@@ -1100,6 +1297,15 @@ void fetchScheduleAndSync() {
           Serial.printf("[API] Remote light mode: %s\n", manualModeToString(lightManualMode));
         }
       }
+      // If a retry is requested within the next couple seconds, trigger immediate cycle
+      if (retryIn >= 0 && retryIn <= 2) {
+        Serial.printf("[API] Retry requested in %ds\n", retryIn);
+        if (curState == STATE_IDLE && motorManualMode == MANUAL_AUTO && schedule.enabled) {
+          Serial.println("[API] Triggering immediate retry cycle");
+          pumpStartMs = millis();
+          curState = STATE_CHECK_WATER; // state machine will validate and start pump
+        }
+      }
     }
     http.end();
   }
@@ -1108,8 +1314,13 @@ void fetchScheduleAndSync() {
 void postStatus() {
   if (!wifiConnected) return;
 
+  String reportedState = (status.pumpOn && !status.flowing)
+    ? String("VERIFYING_FLOW")
+    : String(STATE_NAMES[curState]);
+
   String body = "{";
   body += "\"pumpOn\":"           + String(status.pumpOn        ? "true" : "false") + ",";
+  body += "\"flowing\":"          + String(status.flowing       ? "true" : "false") + ",";
   body += "\"lightOn\":"          + String(status.lightOn       ? "true" : "false") + ",";
   body += "\"batteryChargeOn\":"  + String(status.batteryChargeOn ? "true" : "false") + ",";
   body += "\"humidityPct\":"      + String(status.humidityPct, 1) + ",";
@@ -1118,7 +1329,7 @@ void postStatus() {
   body += "\"lightDark\":"        + String(status.lightDark ? "true" : "false") + ","; // [FIX-7]
   body += "\"dhtOk\":"            + String(status.dhtOk ? "true" : "false") + ",";
   body += "\"fault\":\""          + status.fault + "\",";
-  body += "\"state\":\""          + String(STATE_NAMES[curState]) + "\",";
+  body += "\"state\":\""          + reportedState + "\",";
   body += "\"motorManualMode\":\"" + String(manualModeToString(motorManualMode)) + "\",";
   body += "\"lightManualMode\":\"" + String(manualModeToString(lightManualMode)) + "\",";
   body += "\"resetReason\":\""    + bootResetReason + "\",";
@@ -1126,6 +1337,17 @@ void postStatus() {
   body += "\"uptimeSec\":"        + String((uint32_t)(millis() / 1000UL)) + ",";
   body += "\"pendingLogs\":"      + String(getOfflineLogCount()) + ",";
   body += "\"wifiConnected\":"    + String(wifiConnected ? "true" : "false");
+  // Optional fields
+  if (appliedPlanName.length() > 0) {
+    body += ",\"appliedPlanName\":\"" + appliedPlanName + "\"";
+  }
+  if (scheduleAppliedAt > 0) {
+    body += ",\"scheduleAppliedAt\":" + String((uint32_t)scheduleAppliedAt);
+  }
+  body += ",\"reservoirTempC\":" + String(status.reservoirTempC, 1);
+  body += ",\"towerTempC\":" + String(status.towerTempC, 1);
+  body += ",\"flowRateLpm\":" + String(status.flowRateLpm, 2);
+  body += ",\"sensorDataOk\":" + String(status.sensorDataOk ? "true" : "false");
   body += "}";
 
   int code = httpRequest("PUT", "/api/status", body);
@@ -1198,6 +1420,13 @@ void setup() {
 
   // ── Sensors ───────────────────────────────────────────────────────
   dht.begin();
+  // DS18B20 sensors
+  resTempSensor.begin();
+  towerTempSensor.begin();
+
+  // Flow sensor wiring
+  pinMode(PIN_FLOW_SENSOR, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_FLOW_SENSOR), flowPulseISR, RISING);
 
   // ── [FIX-6] Watchdog init ─────────────────────────────────────────
   esp_task_wdt_config_t wdtCfg = {
@@ -1211,6 +1440,7 @@ void setup() {
 
   // ── NVS load ──────────────────────────────────────────────────────
   loadScheduleFromNVS();
+  loadPlanNameFromNVS();
 
   // ── WiFi (async — completes in loop) ──────────────────────────────
   initWiFi();
@@ -1280,7 +1510,8 @@ void loop() {
   runStateMachine(now);
 
   // ── 10. Status post to backend ────────────────────────────────────
-  if (now - tsLastStatusPost >= IV_STATUS_POST) {
+  unsigned long statusPostInterval = status.pumpOn ? 3000UL : IV_STATUS_POST;
+  if (now - tsLastStatusPost >= statusPostInterval) {
     postStatus();
     tsLastStatusPost = now;
   }

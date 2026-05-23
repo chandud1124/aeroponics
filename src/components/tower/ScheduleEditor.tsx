@@ -57,7 +57,7 @@ export function ScheduleEditor() {
 
   const activeWindowHours = Math.max(0, s.endHour - s.startHour);
   const inactiveWindowHours = Math.max(0, 24 - activeWindowHours);
-  const dayRestMinutes = s.dayIntervalMinutes ?? s.intervalMinutes;
+  const dayRestMinutes = Math.min(s.dayIntervalMinutes ?? s.intervalMinutes, 7);
   const nightRestMinutes = s.nightIntervalMinutes ?? Math.max(s.intervalMinutes, 15);
   const dayRunSeconds = s.dayDurationSeconds ?? s.durationSeconds;
   const nightRunSeconds = s.nightDurationSeconds ?? Math.max(15, Math.round(s.durationSeconds * 0.75));
@@ -73,7 +73,7 @@ export function ScheduleEditor() {
       <div className="mb-4">
         <h3 className="text-lg font-semibold">Watering plan</h3>
         <p className="text-sm text-muted-foreground">
-          Set pump timing in plain language. A 10 minute plan means the pump rests for 10 minutes between runs.
+          Set pump timing in plain language. Daytime rest is capped at 7 minutes for safety, even if a longer value is entered.
         </p>
       </div>
 

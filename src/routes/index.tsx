@@ -161,7 +161,7 @@ function Index() {
                     <ManualControlPanel status={currentStatus} />
 
                     <div className="grid gap-4 xl:grid-cols-2">
-                      <RelayStatesCard status={currentStatus} online={true} />
+                      <RelayStatesCard status={currentStatus} online={telemetryFresh} />
                       <NextCyclePanel status={currentStatus} schedule={schedule} />
                     </div>
 

@@ -259,6 +259,12 @@ function isFresh(timestamp: number | null | undefined, staleMs = TELEMETRY_STALE
   return timestamp != null && Date.now() - timestamp <= staleMs;
 }
 
+function getLatestDeviceSignalAt(status: LiveStatus | null | undefined): number | null {
+  const timestamps = [status?.heartbeatUpdatedAt, status?.telemetryUpdatedAt]
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return timestamps.length > 0 ? Math.max(...timestamps) : null;
+}
+
 function getModeForNow(now = new Date()): "DAY" | "NIGHT" {
   const hour = now.getHours();
   return hour >= schedule.startHour && hour < schedule.endHour ? "DAY" : "NIGHT";
@@ -303,6 +309,7 @@ function shouldLightBeOnBySchedule(now = new Date()): boolean {
 export function getCycleProfile(now = new Date()) {
   const mode = getModeForNow(now);
   const isDay = mode === "DAY";
+  const safeDayIntervalMinutes = Math.min(schedule.dayIntervalMinutes ?? schedule.intervalMinutes, 7);
 
   return {
     mode,
@@ -310,7 +317,7 @@ export function getCycleProfile(now = new Date()) {
       ? schedule.dayDurationSeconds ?? schedule.durationSeconds
       : schedule.nightDurationSeconds ?? Math.max(15, Math.round(schedule.durationSeconds * 0.75)),
     offIntervalMinutes: isDay
-      ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes
+      ? safeDayIntervalMinutes
       : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15),
   };
 }
@@ -469,8 +476,8 @@ function syncScheduledState(now = new Date()) {
     const turnPumpOn = () => {
       const startedAtMs = now.getTime();
       nextStatus.pumpOn = true;
-      nextStatus.flowing = true;
-      nextStatus.pumpState = PumpState.RUNNING;
+      nextStatus.flowing = false;
+      nextStatus.pumpState = PumpState.VERIFYING_FLOW;
       nextStatus.motorManualMode = "AUTO";
       nextStatus.lastRunISO = new Date(startedAtMs).toISOString();
 
@@ -523,8 +530,7 @@ function syncScheduledState(now = new Date()) {
       if (elapsedMs >= onDurationMs) {
         turnPumpOff();
       } else {
-        nextStatus.pumpState = PumpState.RUNNING;
-        nextStatus.flowing = true;
+        nextStatus.pumpState = nextStatus.flowing ? PumpState.RUNNING : PumpState.VERIFYING_FLOW;
       }
     } else if (elapsedMs >= onDurationMs + offIntervalMs) {
       turnPumpOn();
@@ -559,8 +565,10 @@ export function getStatus() {
   // Calculate next cycle and update status
   const plannedNextCycle = calculatePlannedNextCycle();
   const retryCycle = calculateRetryCycle(currentStatus);
+  const cycleProfile = getCycleProfile();
   const heartbeatUpdatedAt = currentStatus.heartbeatUpdatedAt ?? null;
-  const isOnline = isFresh(heartbeatUpdatedAt);
+  const deviceSignalUpdatedAt = getLatestDeviceSignalAt(currentStatus);
+  const isOnline = isFresh(deviceSignalUpdatedAt);
   
   // Compute pumpEndISO when pump is running
   let pumpEndISO: string | null = null;
@@ -584,6 +592,9 @@ export function getStatus() {
     plannedNextCycleIn: plannedNextCycle.nextCycleIn,
     retryNextCycleISO: retryCycle.retryNextCycleISO,
     retryNextCycleIn: retryCycle.retryNextCycleIn,
+    cycleMode: cycleProfile.mode,
+    cycleOnDurationSeconds: cycleProfile.onDurationSeconds,
+    cycleOffIntervalMinutes: cycleProfile.offIntervalMinutes,
     isOnline,
     pumpEndISO,
     heartbeatUpdatedAt,
@@ -604,7 +615,7 @@ export function updateStatus(
   const source = options.source ?? "server";
   const telemetryUpdatedAt = source === "esp32" ? Date.now() : status?.telemetryUpdatedAt ?? null;
   const heartbeatUpdatedAt = status?.heartbeatUpdatedAt ?? null;
-  const isOnline = isFresh(heartbeatUpdatedAt);
+  const isOnline = isFresh(getLatestDeviceSignalAt(status));
 
   status = {
     ...createBaseStatus(),
@@ -652,7 +663,7 @@ export function touchStatus(options: { source?: "esp32" | "server" } = {}) {
 
   const telemetryUpdatedAt = source === "esp32" ? Date.now() : status.telemetryUpdatedAt ?? null;
   const heartbeatUpdatedAt = source === "esp32" ? Date.now() : status.heartbeatUpdatedAt ?? null;
-  const isOnline = isFresh(heartbeatUpdatedAt);
+  const isOnline = isFresh(getLatestDeviceSignalAt({ ...status, telemetryUpdatedAt, heartbeatUpdatedAt }));
 
   status = {
     ...status,

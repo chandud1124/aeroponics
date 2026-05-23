@@ -202,15 +202,14 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
   }
 
   const nextDate = new Date(status.nextCycleISO);
-  const hour = new Date().getHours();
-  const isDayMode = hour >= schedule.startHour && hour < schedule.endHour;
+  const isDayMode = (status.cycleMode ?? "DAY") === "DAY";
   const modeLabel = isDayMode ? "DAY MODE" : "NIGHT MODE";
-  const expectedDuration = isDayMode
+  const expectedDuration = status.cycleOnDurationSeconds ?? (isDayMode
     ? schedule.dayDurationSeconds ?? schedule.durationSeconds
-    : schedule.nightDurationSeconds ?? Math.max(15, Math.round((schedule.durationSeconds * 0.75) || 30));
-  const expectedOff = isDayMode
-    ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes
-    : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15);
+    : schedule.nightDurationSeconds ?? Math.max(15, Math.round((schedule.durationSeconds * 0.75) || 30)));
+  const expectedOff = status.cycleOffIntervalMinutes ?? (isDayMode
+    ? Math.min(schedule.dayIntervalMinutes ?? schedule.intervalMinutes, 7)
+    : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15));
   const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
   const lightEndHour = schedule.lightEndHour ?? schedule.endHour;
   const timeStr = nextDate.toLocaleTimeString("en-US", {
@@ -231,13 +230,11 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
     : null;
   const appliedAtStr = appliedAtMs ? new Date(appliedAtMs).toLocaleString() : null;
   const appliedPlanName = (status as any).appliedPlanName as string | undefined;
-  const plannedNextCycle = (status.plannedNextCycleISO ?? status.nextCycleISO) ? new Date(status.plannedNextCycleISO ?? status.nextCycleISO!) : null;
+  const plannedNextCycle = status.plannedNextCycleISO ? new Date(status.plannedNextCycleISO) : new Date(status.nextCycleISO);
 
   const timetable: Array<{ label: string; time: string }> = [];
   if (plannedNextCycle && !Number.isNaN(plannedNextCycle.getTime())) {
-    const intervalMinutes = isDayMode
-      ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes
-      : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15);
+    const intervalMinutes = status.cycleOffIntervalMinutes ?? expectedOff;
     const slotCount = 4;
     for (let index = 0; index < slotCount; index += 1) {
       const slot = new Date(plannedNextCycle.getTime() + index * intervalMinutes * 60 * 1000);
