@@ -15,6 +15,7 @@ import {
   getFaultHistory,
   getSensorHistory,
   getAnalyticsSummary,
+  getCycleProfile,
   touchStatus,
   updateSchedule,
   updateStatus,

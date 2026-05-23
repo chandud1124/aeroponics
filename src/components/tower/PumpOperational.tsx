@@ -379,7 +379,7 @@ export function LiveCycleHistoryPanel() {
                   <div className="text-xs text-muted-foreground">
                       {row.durationSeconds}s ON · {ok ? "Success" : row.fault ?? "Skipped"}
                       {row.volumeLiters != null && (
-                        <span> · {row.volumeLiters.toFixed(2)} L</span>
+                        <span> · {Number(row.volumeLiters).toFixed(2)} L</span>
                       )}
                   </div>
                 </div>

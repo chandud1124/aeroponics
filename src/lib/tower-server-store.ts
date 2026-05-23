@@ -195,7 +195,7 @@ function shouldLightBeOnBySchedule(now = new Date()): boolean {
   return true;
 }
 
-function getCycleProfile(now = new Date()) {
+export function getCycleProfile(now = new Date()) {
   const mode = getModeForNow(now);
   const isDay = mode === "DAY";
 

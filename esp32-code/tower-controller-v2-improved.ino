@@ -40,8 +40,8 @@ const char* WIFI_PASS = "Whoareu@0000";
 const char* API_BASE_URL = "http://13.234.122.175:8080";// Paste the backend-generated values here after creating the device in Admin UI.
 // DEVICE_ID must match the deviceId returned by the backend.
 // DEVICE_SECRET is the one-time secret returned by the backend and shown only once.
-const char* DEVICE_ID     = "device-3ljzoq";
-const char* DEVICE_SECRET = "5d8b61e327977760175cf87eb1c028351c1bde5031372da5";
+const char* DEVICE_ID     = "device-wqkt6l";
+const char* DEVICE_SECRET = "f71c0b06dadf8617cd1f31250a4cd796825ae9314f4cb7ee";
 
 const int PIN_DHT_DATA     = 16;
 const int PIN_LDR_SENSOR   = 36;
@@ -164,7 +164,7 @@ struct LogEntry {
 void fetchSchedule();
 void syncRemoteManualModes();
 void postStatus();
-int httpRequest(const char* method, const char* path, const String& body = "", int* respCode = nullptr);
+int httpRequest(const char* method, const char* path, const String& body, int* respCode = nullptr);
 void logPumpCycle(float durationSec, bool flowed, String fault, float volumeLiters);
 bool postLogEntryToAPI(const LogEntry& entry);
 
@@ -309,6 +309,9 @@ void manageLightRelay() {
     setRelayState(PIN_LED_RELAY, shouldLightOn);
     status.lightOn = shouldLightOn;
     Serial.printf("[LIGHT] %s (LDR=%d)\n", shouldLightOn ? "ON" : "OFF", sensors.lightRaw);
+    if (wifiConnected) {
+      postStatus();
+    }
   }
 }
 

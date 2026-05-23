@@ -72,7 +72,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
             <Thermometer className="h-5 w-5 text-orange-500" />
           </div>
           <div className="mt-2 text-xl font-semibold">
-            {status.reservoirTempC !== null ? (
+            {status.reservoirTempC != null ? (
               <>
                 {status.reservoirTempC.toFixed(1)}
                 <span className="text-sm text-muted-foreground">°C</span>
@@ -82,9 +82,9 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            {status.reservoirTempC !== null && status.reservoirTempC >= 25
+            {status.reservoirTempC != null && status.reservoirTempC >= 25
               ? "⚠ High - consider shading"
-              : status.reservoirTempC !== null && status.reservoirTempC < 15
+              : status.reservoirTempC != null && status.reservoirTempC < 15
                 ? "⚠ Cold - slows growth"
                 : "✓ Optimal"}
           </p>
@@ -97,7 +97,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
             <Thermometer className="h-5 w-5 text-green-500" />
           </div>
           <div className="mt-2 text-xl font-semibold">
-            {status.towerTempC !== null ? (
+            {status.towerTempC != null ? (
               <>
                 {status.towerTempC.toFixed(1)}
                 <span className="text-sm text-muted-foreground">°C</span>
@@ -107,9 +107,9 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            {status.towerTempC !== null && status.towerTempC >= 30
+            {status.towerTempC != null && status.towerTempC >= 30
               ? "⚠ Very hot"
-              : status.towerTempC !== null && status.towerTempC < 12
+              : status.towerTempC != null && status.towerTempC < 12
                 ? "⚠ Cold"
                 : "✓ Good"}
           </p>
