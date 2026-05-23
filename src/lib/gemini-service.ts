@@ -33,7 +33,7 @@ function computeDataHash(status: LiveStatus, history: SensorSnapshot[]): string 
   const tds = tdsAvg.length ? (tdsAvg.reduce((s, v) => s + v, 0) / tdsAvg.length).toFixed(1) : "N/A";
   const ec = ecAvg.length ? (ecAvg.reduce((s, v) => s + v, 0) / ecAvg.length).toFixed(2) : "N/A";
 
-  const key = `${status.reservoirTempC}|${status.towerTempC}|${status.humidityPct}|${status.lightLux ?? "N/A"}|${status.waterLevel}|${history.length}|${ph}|${tds}|${ec}`;
+  const key = `${status.reservoirTempC}|${status.towerTempC}|${status.humidityPct}|${status.lightLux ?? "N/A"}|${history.length}|${ph}|${tds}|${ec}`;
   // Simple hash: sum of char codes (good enough for cache invalidation)
   return String(Array.from(key).reduce((sum, c) => sum + c.charCodeAt(0), 0));
 }
@@ -91,7 +91,6 @@ export async function analyzeSensorDataWithGemini(
   Current Status:
   - Pump: ${currentStatus.pumpOn ? "ON" : "OFF"}
   - Water Flow: ${currentStatus.flowing ? "OK" : "NO FLOW"}
-  - Water Level: ${currentStatus.waterLevel}
   - Fault: ${currentStatus.fault || "None"}
   - Grow Light: ${currentStatus.lightOn ? "ON" : "OFF"}
   - Ambient light (current): ${currentStatus.lightLux != null ? currentStatus.lightLux + " lux" : "N/A"}

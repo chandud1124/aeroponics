@@ -13,7 +13,6 @@ RUN npm ci
 COPY . .
 
 # Copy environment file
-COPY .env.local .env 2>/dev/null || true
 
 # Build with environment variables from build args
 ARG VITE_SUPABASE_URL=http://localhost:3000

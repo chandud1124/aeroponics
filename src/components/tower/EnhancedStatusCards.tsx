@@ -119,34 +119,12 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
       {/* Water Level */}
       <Card className="p-4">
         <div className="flex items-center justify-between">
-          <span className="font-medium">Water Level</span>
+          <span className="font-medium">Water Sensor</span>
           <Droplet className="h-5 w-5 text-blue-500" />
         </div>
-        <div className="mt-3 space-y-2">
-          {["FULL", "MEDIUM", "LOW"].map((level) => (
-            <div
-              key={level}
-              className={`flex items-center rounded px-3 py-2 text-sm ${
-                status.waterLevel === level
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              <div
-                className={`mr-2 h-3 w-3 rounded-full ${
-                  status.waterLevel === level ? "bg-primary-foreground" : "bg-border"
-                }`}
-              />
-              {level}
-            </div>
-          ))}
+        <div className="mt-3 rounded border border-dashed border-border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
+          No water level sensor installed right now.
         </div>
-        {status.waterLevel === "LOW" && (
-          <Alert variant="destructive" className="mt-4">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>Refill tank soon — pump cycles will be skipped</AlertDescription>
-          </Alert>
-        )}
       </Card>
 
       {/* Last Run */}

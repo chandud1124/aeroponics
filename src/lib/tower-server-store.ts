@@ -55,14 +55,18 @@ export type LiveStatus = {
   pumpOn: boolean;
   flowing: boolean;
   pumpState: PumpState;
+  motorManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
+  lightManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
   reservoirTempC: number | null;
   humidityPct?: number | null;
   lightLux?: number | null;
   towerTempC: number | null;
   lightOn?: boolean;
-  waterLevel: "LOW" | "MEDIUM" | "FULL";
   lastRunISO: string | null;
   fault: string | null;
+  resetReason?: string | null;
+  lastBootFault?: string | null;
+  uptimeSec?: number | null;
   nextCycleISO: string | null;
   nextCycleIn: number; // seconds until next cycle
   telemetryUpdatedAt: number | null;
@@ -76,7 +80,6 @@ export type SensorSnapshot = {
   humidityPct?: number | null;
   lightLux?: number | null;
   towerTempC: number | null;
-  waterLevel: LiveStatus["waterLevel"];
   pumpState: PumpState;
   fault: string | null;
 };
@@ -190,7 +193,6 @@ function pushSensorSnapshot(nextStatus: LiveStatus) {
       humidityPct: nextStatus.humidityPct ?? null,
       lightLux: nextStatus.lightLux ?? null,
       towerTempC: nextStatus.towerTempC,
-      waterLevel: nextStatus.waterLevel,
       pumpState: nextStatus.pumpState,
       fault: nextStatus.fault,
       lightOn: nextStatus.lightOn ?? false,
@@ -280,28 +282,27 @@ export function updateStatus(
   const shouldApplySchedule = patch.lightOn === undefined;
   const scheduledLightOn = shouldApplySchedule ? shouldLightBeOnBySchedule() : patch.lightOn;
   const source = options.source ?? "server";
-  const telemetryUpdatedAt =
-    source === "esp32" ? Date.now() : status?.telemetryUpdatedAt ?? null;
+  const telemetryUpdatedAt = source === "esp32" ? Date.now() : status?.telemetryUpdatedAt ?? null;
+  const isOnline = telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS;
 
   status = {
     pumpOn: false,
     flowing: false,
     pumpState: PumpState.IDLE,
+    motorManualMode: "AUTO",
+    lightManualMode: "AUTO",
     reservoirTempC: null,
     humidityPct: null,
     lightLux: null,
     towerTempC: null,
-    waterLevel: "MEDIUM",
     lastRunISO: null,
     fault: null,
     nextCycleISO: null,
     nextCycleIn: 0,
-    telemetryUpdatedAt,
-    isOnline: telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS,
     ...status,
     ...patch,
     telemetryUpdatedAt,
-    isOnline: telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS,
+    isOnline,
     lightOn: scheduledLightOn,
   };
 

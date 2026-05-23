@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
+import fs from "node:fs";
+import path from "node:path";
 
 import app from "./dist/server/index.js";
 
@@ -35,6 +37,45 @@ function readRequestBody(req) {
 const server = createServer(async (req, res) => {
   try {
     const requestUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? `localhost:${port}`}`);
+
+    // Serve static client assets directly from dist to avoid hitting the SSR handler
+    // This ensures /assets/* and /favicon.svg are resolved reliably in the container.
+    const pathname = requestUrl.pathname;
+    if (pathname.startsWith("/assets/") || pathname === "/favicon.svg") {
+      const relPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+      const filePath = path.join(process.cwd(), "dist", "client", relPath);
+      console.log(`[static] request ${pathname} -> ${filePath}`);
+      try {
+        const candidates = [
+          filePath,
+          path.join(process.cwd(), relPath),
+          path.join("/", relPath),
+          path.join(process.cwd(), "dist", "client", "assets", path.basename(relPath))
+        ];
+        let found = null;
+        for (const cand of candidates) {
+          try {
+            if (fs.existsSync(cand) && fs.statSync(cand).isFile()) { found = cand; break; }
+          } catch (e) {
+            // ignore
+          }
+        }
+        if (found) {
+          const ext = path.extname(found).toLowerCase();
+          const mime = ext === ".js" ? "application/javascript" : ext === ".css" ? "text/css" : ext === ".svg" ? "image/svg+xml" : "application/octet-stream";
+          console.log(`[static] serving ${found} as ${mime}`);
+          res.statusCode = 200;
+          res.setHeader("content-type", mime + "; charset=utf-8");
+          const stream = fs.createReadStream(found);
+          stream.pipe(res);
+          return;
+        }
+        console.log(`[static] not found candidates: ${candidates.join(', ')}`);
+      } catch (e) {
+        console.error("Static file serve error:", e);
+        // fallthrough to SSR handler
+      }
+    }
     const requestBody = await readRequestBody(req);
     const request = new Request(requestUrl, {
       method: req.method,

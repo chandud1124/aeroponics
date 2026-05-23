@@ -70,8 +70,6 @@ function FaultAlert({ fault }: { fault: string | null }) {
 }
 
 export function StatusCards({ status }: { status: LiveStatus }) {
-  const levelTone =
-    status.waterLevel === "LOW" ? "bad" : status.waterLevel === "FULL" ? "good" : "warn";
   return (
     <div className="space-y-4">
       <FaultAlert fault={status.fault} />
@@ -90,38 +88,43 @@ export function StatusCards({ status }: { status: LiveStatus }) {
         <StatusCard
           icon={<Droplets className="h-5 w-5" />}
           label="Water flow"
-          value={
-            <Badge variant={status.flowing ? "default" : "secondary"}>
-              {status.flowing ? "OK" : "NO FLOW"}
-            </Badge>
-          }
-          hint="YF-S201 flow sensor"
-          tone={status.flowing ? "good" : status.pumpOn ? "bad" : "default"}
+          value="Next feature"
+          hint="Flow sensor removed from current build"
+          tone="default"
         />
         <StatusCard
           icon={<Gauge className="h-5 w-5" />}
-          label="Water level"
-          value={status.waterLevel}
-          hint="3-probe conductivity"
-          tone={levelTone}
+          label="Water sensor"
+          value="Next feature"
+          hint="Water-level probes are not part of the active build"
+          tone="default"
         />
         <StatusCard
           icon={<Thermometer className="h-5 w-5" />}
           label="Reservoir temp"
-          value={status.reservoirTempC != null ? `${status.reservoirTempC.toFixed(1)} °C` : "Waiting for ESP32"}
-          hint={status.reservoirTempC != null ? "DS18B20 in tank" : "Sensor offline or device not yet connected"}
+          value="Next feature"
+          hint="Temperature probe removed from current build"
+          tone="default"
         />
         <StatusCard
           icon={<Droplets className="h-5 w-5" />}
           label="Humidity"
-          value={status.humidityPct != null ? `${Math.round(status.humidityPct)} %` : "Waiting for ESP32"}
-          hint={status.humidityPct != null ? "DHT sensor" : "Sensor offline or device not yet connected"}
+          value={status.dhtOk === false ? "No data" : status.humidityPct != null ? `${Math.round(status.humidityPct)} %` : "Waiting for ESP32"}
+          hint={status.dhtOk === false ? "DHT not sending data" : status.humidityPct != null ? "DHT sensor" : "Sensor offline or device not yet connected"}
+        />
+        <StatusCard
+          icon={<Gauge className="h-5 w-5" />}
+          label="Ambient light"
+          value={status.lightLux != null ? `${status.lightLux} lux` : "Waiting for ESP32"}
+          hint={status.lightLux != null ? "LDR / ambient sensor" : "Sensor offline or device not yet connected"}
+          tone={status.lightLux != null ? "default" : "default"}
         />
         <StatusCard
           icon={<Sprout className="h-5 w-5" />}
           label="Tower / root zone"
-          value={status.towerTempC != null ? `${status.towerTempC.toFixed(1)} °C` : "Waiting for ESP32"}
-          hint={status.towerTempC != null ? "DS18B20 in tower" : "Sensor offline or device not yet connected"}
+          value="Next feature"
+          hint="Tower probe removed from current build"
+          tone="default"
         />
         <StatusCard
           icon={<Clock className="h-5 w-5" />}
@@ -135,6 +138,13 @@ export function StatusCards({ status }: { status: LiveStatus }) {
                 : "No cycle yet"
           }
             hint={status.lastRunISO ? new Date(status.lastRunISO).toLocaleDateString() : "Waiting for first automated cycle"}
+        />
+        <StatusCard
+          icon={<AlertCircle className="h-5 w-5" />}
+          label="Device restart"
+          value={status.resetReason || "Unknown"}
+          hint={`Last fault before boot: ${status.lastBootFault || "NONE"} • Uptime: ${status.uptimeSec != null ? `${status.uptimeSec}s` : "n/a"}`}
+          tone={status.resetReason === "TASK_WDT" || status.resetReason === "PANIC" ? "bad" : "default"}
         />
         {(() => {
           const code = parseFault(status.fault);
@@ -179,6 +189,13 @@ export function StatusCards({ status }: { status: LiveStatus }) {
           }
           hint="LED grow light relay"
           tone={status.lightOn ? "good" : "default"}
+        />
+        <StatusCard
+          icon={<AlertCircle className="h-5 w-5" />}
+          label="Sensor health"
+          value="Next feature"
+          hint="Expanded sensor diagnostics will come later"
+          tone="default"
         />
       </div>
     </div>

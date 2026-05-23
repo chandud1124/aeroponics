@@ -381,7 +381,6 @@ function scoreFromStatus(status: LiveStatus) {
   let score = 100;
 
   if (status.fault && status.fault !== "OK") score -= 35;
-  if (status.waterLevel === "LOW") score -= 25;
   if (status.pumpOn && !status.flowing) score -= 20;
   if (status.reservoirTempC != null && status.reservoirTempC > 28) score -= 10;
   if (status.towerTempC != null && status.towerTempC > 32) score -= 5;
@@ -422,7 +421,7 @@ export function SystemHealthCard({ status, online = true }: { status: LiveStatus
         <div className="text-sm text-muted-foreground">
           {score == null
             ? "No current telemetry from the ESP32. Historical records remain available below."
-            : `${label} based on water level, flow, temperature, and faults.`}
+            : `${label} based on flow, temperature, and faults.`}
         </div>
       </div>
     </Card>
@@ -431,7 +430,7 @@ export function SystemHealthCard({ status, online = true }: { status: LiveStatus
 
 export function FlowPipeline({ status }: { status: LiveStatus }) {
   const stages = [
-    { label: "Reservoir", done: status.waterLevel !== "LOW", icon: Droplets },
+    { label: "Water sensor", done: true, icon: Droplets },
     { label: "Pump", done: status.pumpOn, icon: Zap },
     { label: "Flow verified", done: status.flowing, icon: Network },
     { label: "Tower active", done: status.flowing, icon: Sprout },

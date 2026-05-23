@@ -240,7 +240,7 @@ export function HistoryAnalyticsTab() {
   const manualRows = [...manualReadings].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
 
   const exportRows: string[] = [
-    "type,timestamp,reservoirTempC,towerTempC,waterLevel,pumpState,fault,mode,durationSeconds,flowed,ph,tds,ec,notes",
+    "type,timestamp,reservoirTempC,towerTempC,pumpState,fault,mode,durationSeconds,flowed,ph,tds,ec,notes",
   ];
 
   for (const snapshot of sensorHistory) {
@@ -250,7 +250,6 @@ export function HistoryAnalyticsTab() {
         new Date(snapshot.timestamp).toISOString(),
         snapshot.reservoirTempC ?? "",
         snapshot.towerTempC ?? "",
-        snapshot.waterLevel,
         snapshot.pumpState,
         snapshot.fault ?? "",
         "",

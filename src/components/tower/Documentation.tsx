@@ -10,14 +10,17 @@ const gpio = [
   [
     "GPIO 4",
     "DS18B20 #1 — Reservoir temp",
-    "Both DS18B20s share one OneWire bus. Use 4.7 kΩ pull-up from data → 3.3 V.",
+    "Separate OneWire bus. Use 4.7 kΩ pull-up from data → 3.3 V.",
   ],
-  ["GPIO 4", "DS18B20 #2 — Tower / root zone", "Same OneWire bus, different ROM address."],
+  ["GPIO 17", "DS18B20 #2 — Tower / root zone", "Separate OneWire bus, different ROM address."],
   [
     "GPIO 18",
     "YF-S201 flow sensor (signal)",
     "Pulse input. Power sensor from 5 V. Add 10 kΩ pull-up.",
   ],
+  ["GPIO 19", "Motor override button", "INPUT_PULLUP switch to GND; debounced in firmware."],
+  ["GPIO 23", "Light override button", "INPUT_PULLUP switch to GND; debounced in firmware."],
+  ["GPIO 22", "Battery charge override button", "INPUT_PULLUP switch to GND; manual override for the battery relay."],
   [
     "GPIO 32",
     "Water level probe — LOW",
@@ -25,7 +28,10 @@ const gpio = [
   ],
   ["GPIO 33", "Water level probe — MEDIUM", "Same divider pattern."],
   ["GPIO 34", "Water level probe — FULL", "Input-only pin, divider required."],
-  ["GPIO 26", "Relay IN — pump", "Active LOW on most modules. Drive HIGH to OFF at boot."],
+  ["GPIO 25", "Relay IN — spare / expansion", "Active LOW on most modules. Keep OFF at boot unless assigned."],
+  ["GPIO 26", "Relay IN — battery charging", "Active LOW on most modules. Daily 4-hour window in firmware."],
+  ["GPIO 27", "Relay IN — pump", "Active LOW on most modules. Drive HIGH to OFF at boot."],
+  ["GPIO 35", "Reserved / input-only", "Optional analog or digital input only; not used by current build."],
   ["GND rod", "Common probe in tank", "Connected to ESP32 GND (through 1 kΩ for safety)."],
 ];
 

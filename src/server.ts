@@ -172,15 +172,16 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         lightLux?: number | null;
         towerTempC?: number;
         lightOn?: boolean;
-        waterLevel?: string;
         fault?: string | null;
+        resetReason?: string | null;
+        lastBootFault?: string | null;
+        uptimeSec?: number | null;
         lastRunAt?: string;
+          sensorDataOk?: boolean;
+          dhtOk?: boolean;
+          reservoirDsOk?: boolean;
+          towerDsOk?: boolean;
       };
-
-      // Validate water level
-      if (payload.waterLevel && !["LOW", "MEDIUM", "FULL"].includes(payload.waterLevel)) {
-        return jsonResponse({ error: "Invalid water level" }, 400);
-      }
 
       // Validate temperature ranges (reasonable bounds for hydroponics: -10°C to 60°C)
       if (payload.reservoirTempC !== undefined && (payload.reservoirTempC < -10 || payload.reservoirTempC > 60)) {
@@ -205,12 +206,18 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           pumpState: payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE,
           humidityPct: payload.humidityPct ?? undefined,
           lightLux: payload.lightLux ?? undefined,
-          reservoirTempC: payload.reservoirTempC,
-          towerTempC: payload.towerTempC,
+          reservoirTempC: null,
+          towerTempC: null,
           lightOn: payload.lightOn ?? undefined,
-          waterLevel: payload.waterLevel as "LOW" | "MEDIUM" | "FULL" | undefined,
           fault: payload.fault ?? undefined,
+          resetReason: payload.resetReason ?? undefined,
+          lastBootFault: payload.lastBootFault ?? undefined,
+          uptimeSec: payload.uptimeSec ?? undefined,
           lastRunISO: payload.lastRunAt ?? undefined,
+          sensorDataOk: payload.sensorDataOk ?? undefined,
+          dhtOk: payload.dhtOk ?? undefined,
+          reservoirDsOk: payload.reservoirDsOk ?? undefined,
+          towerDsOk: payload.towerDsOk ?? undefined,
         }, { source: "esp32" }) ?? { success: true },
       );
     }
@@ -401,12 +408,23 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (payload.action === "start") {
-      updateStatus({ pumpOn: true, flowing: false, pumpState: PumpState.MANUAL_MODE, fault: null });
+      updateStatus({
+        pumpOn: true,
+        flowing: false,
+        pumpState: PumpState.MANUAL_MODE,
+        motorManualMode: "FORCED_ON",
+        fault: null,
+      });
       addPumpLog({ durationSeconds: 0, flowed: false, fault: null });
       return jsonResponse({ success: true, state: "MANUAL_MODE" }, 201);
     }
 
-    updateStatus({ pumpOn: false, flowing: false, pumpState: PumpState.IDLE });
+    updateStatus({
+      pumpOn: false,
+      flowing: false,
+      pumpState: PumpState.MANUAL_MODE,
+      motorManualMode: "FORCED_OFF",
+    });
     addPumpLog({ durationSeconds: 0, flowed: false, fault: null });
     return jsonResponse({ success: true, state: "IDLE" }, 201);
   }
@@ -422,11 +440,11 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (payload.action === "on") {
-      updateStatus({ lightOn: true });
+      updateStatus({ lightOn: true, lightManualMode: "FORCED_ON" });
       return jsonResponse({ success: true, lightOn: true }, 201);
     }
 
-    updateStatus({ lightOn: false });
+    updateStatus({ lightOn: false, lightManualMode: "FORCED_OFF" });
     return jsonResponse({ success: true, lightOn: false }, 201);
   }
 

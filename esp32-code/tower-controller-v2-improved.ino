@@ -1,46 +1,3 @@
-/*
- * ╔══════════════════════════════════════════════════════════════════╗
- * ║        SMART TOWER GARDEN — ESP32 AEROPONIC CONTROLLER          ║
- * ║        v2.1 — Fixed, Hardened, Full Offline Resilience          ║
- * ║              + Additional Safety & Validation Improvements       ║
- * ╠══════════════════════════════════════════════════════════════════╣
- * ║                                                                  ║
- * ║  v2.0 FIXES (MAINTAINED):                                        ║
- * ║  [BUG-1]  isTimeToWater() now uses NTP time() not millis()      ║
- * ║  [BUG-2]  lastRunEpoch updated properly in stateStopping()      ║
- * ║  [BUG-3]  isSensorValid set to TRUE after good reads            ║
- * ║  [BUG-4]  Extra closing brace removed                            ║
- * ║  [BUG-5]  http.PUT() instead of non-existent PATCH()            ║
- * ║  [BUG-6]  WiFi connection fully non-blocking                     ║
- * ║  [BUG-7]  Time sync non-blocking with yield()                    ║
- * ║  [BUG-8]  Flow sensor reads atomic (interrupts disabled)         ║
- * ║  [BUG-9]  Schedule persisted to NVS (survives power cycle)       ║
- * ║  [BUG-10] Offline log queue in NVS (flushed on reconnect)        ║
- * ║  [BUG-11] WiFi backoff exponential (not aggressive 5s retry)     ║
- * ║  [BUG-12] Time cache in NVS (RTC backup)                         ║
- * ║                                                                  ║
- * ║  v2.1 IMPROVEMENTS:                                               ║
- * ║  [IMP-1]  Schedule validation — reject invalid API values        ║
- * ║  [IMP-2]  Better JSON parsing with whitespace tolerance          ║
- * ║  [IMP-3]  NVS error checking — log failures                      ║
- * ║  [IMP-4]  Offline scheduling failsafe (48h limit)                ║
- * ║  [IMP-5]  Time validity better tracked with sync flag            ║
- * ║  [IMP-6]  WiFi backoff fully resets on connect                   ║
- * ║  [IMP-7]  Pump relay verification with timeout check             ║
- * ║  [IMP-8]  Safer fault state transitions                          ║
- * ║                                                                  ║
- * ║  ARCHITECTURE:                                                   ║
- * ║  - State machine: IDLE→CHECK_WATER→PUMP_ON→VERIFY_FLOW          ║
- * ║                   →RUNNING→STOPPING→FAULT→RECOVERY              ║
- * ║  - 100% non-blocking (millis() everywhere, zero delay())         ║
- * ║  - Full offline operation: schedule + logs persist in NVS        ║
- * ║  - Offline log queue: up to 20 pump cycles buffered             ║
- * ║  - WiFi reconnect with exponential backoff (5s–5m)              ║
- * ║  - Atomic interrupt reads prevent race conditions                ║
- * ║  - NVS-backed schedule + time cache                              ║
- * ║                                                                  ║
- * ╚══════════════════════════════════════════════════════════════════╝
- */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -50,7 +7,6 @@
 #include <time.h>
 #include <esp_system.h>
 #include <esp_log.h>
-#include <esp_task_wdt.h>
 
 // ─────────────────────────────────────────────────────────────────────
 //  STATE MACHINE ENUM
@@ -59,16 +15,15 @@ enum PumpState : uint8_t {
   STATE_IDLE              = 0,
   STATE_CHECK_WATER       = 1,
   STATE_PUMP_ON           = 2,
-  STATE_WAITING_FOR_FLOW  = 3,
-  STATE_RUNNING           = 4,
-  STATE_STOPPING          = 5,
-  STATE_FAULT             = 6,
-  STATE_RECOVERY          = 7,
-  STATE_MANUAL_MODE       = 8
+  STATE_RUNNING           = 3,
+  STATE_STOPPING          = 4,
+  STATE_FAULT             = 5,
+  STATE_RECOVERY          = 6,
+  STATE_MANUAL_MODE       = 7
 };
 
 const char* const STATE_NAMES[] = {
-  "IDLE", "CHECK_WATER", "PUMP_ON", "WAITING_FOR_FLOW",
+  "IDLE", "CHECK_WATER", "PUMP_ON",
   "RUNNING", "STOPPING", "FAULT", "RECOVERY", "MANUAL_MODE"
 };
 
@@ -78,7 +33,7 @@ const char* const STATE_NAMES[] = {
 
 const char* WIFI_SSID = "I am Not A Witch I am Your Wifi";
 const char* WIFI_PASS = "Whoareu@0000";
-const char* API_BASE_URL = "http://192.168.0.229:8080";
+const char* API_BASE_URL = "http://192.168.0.147:8080";
 // Paste the backend-generated values here after creating the device in Admin UI.
 // DEVICE_ID must match the deviceId returned by the backend.
 // DEVICE_SECRET is the one-time secret returned by the backend and shown only once.
@@ -89,17 +44,18 @@ const int PIN_DHT_DATA     = 16;
 const int PIN_LDR_SENSOR   = 36;
 const int PIN_MOTOR_BUTTON = 19;
 const int PIN_LIGHT_BUTTON = 23;
+const int PIN_BATTERY_BUTTON = 22;
 
 const uint16_t LDR_DARK_THRESHOLD = 2000;
 const unsigned long BUTTON_DEBOUNCE_MS = 50UL;
 
 const int PIN_PUMP_RELAY   = 27;
 const int PIN_LED_RELAY    = 33;
-const int PIN_FLOW_SENSOR  = 18;
-const int PIN_PROBE_GND    = 21;
-const int PIN_PROBE_LOW    = 32;
-const int PIN_PROBE_MED    = 35;
-const int PIN_PROBE_HIGH   = 34;
+const int PIN_BATTERY_CHARGE_RELAY = 26;
+const int PIN_SPARE_RELAY  = 25;
+
+const unsigned long BATTERY_CHARGE_START_SECONDS    = 8UL * 3600UL;
+const unsigned long BATTERY_CHARGE_DURATION_SECONDS = 4UL * 3600UL;
 
 // Relay polarity configuration.
 // Set RELAY_ACTIVE_HIGH to true if your relay turns ON with HIGH.
@@ -108,12 +64,11 @@ const int PIN_PROBE_HIGH   = 34;
 #define MANUAL_ACTIVE_LOW true
 
 // Safety thresholds
-const float   TEMP_RESERVOIR_MAX_C    = 28.0f;
-const float   TEMP_TOWER_MAX_C        = 32.0f;
-const unsigned long FLOW_VERIFY_MS    = 5000UL;
+// The current build uses one DHT reading for both reservoir and tower temperature.
+// Keep these thresholds permissive until a dedicated water-temperature sensor is installed.
+const float   TEMP_RESERVOIR_MAX_C    = 40.0f;
+const float   TEMP_TOWER_MAX_C        = 45.0f;
 const unsigned long PUMP_MAX_RUN_MS   = 120000UL;
-const unsigned long FLOW_STALL_MS     = 10000UL;
-const unsigned long FLOW_CHECK_MS     = 3000UL;
 const unsigned long FAULT_RETRY_MS    = 30000UL;
 const unsigned long WIFI_CONNECT_MS   = 20000UL;
 const unsigned long API_TIMEOUT_MS    = 8000UL;
@@ -123,6 +78,7 @@ const unsigned long IV_SENSOR         = 30000UL;
 const unsigned long IV_SCHEDULE       = 60000UL;
 const unsigned long IV_STATUS_POST    = 10000UL;
 const unsigned long IV_WIFI_CHECK     = 10000UL;
+const unsigned long IV_REMOTE_SYNC    = 3000UL;
 // Feed the watchdog well below the core's active TWDT window.
 const unsigned long IV_WDT_FEED       = 2000UL;
 const unsigned long IV_LOG_FLUSH      = 60000UL;
@@ -158,23 +114,20 @@ struct Schedule {
 };
 
 struct SensorData {
-  float  reservoirTempC = 0.0f;
-  float  towerTempC     = 0.0f;
   float  humidityPct    = 0.0f;
   int    lightRaw       = 0;
-  String waterLevel     = "UNKNOWN";
   bool   valid          = false;
 };
 
 struct SystemStatus {
   bool   pumpOn         = false;
   bool   lightOn        = false;
+  bool   batteryChargeOn = false;
+  bool   dhtOk          = false;
+  bool   sensorDataOk   = false;
   bool   flowing        = false;
-  float  reservoirTempC = 0.0f;
-  float  towerTempC     = 0.0f;
   float  humidityPct    = 0.0f;
   int    lightRaw       = 0;
-  String waterLevel     = "UNKNOWN";
   String fault          = "OK";
   time_t lastRunEpoch   = 0;
 };
@@ -190,7 +143,7 @@ struct LogEntry {
 //  GLOBALS
 // ─────────────────────────────────────────────────────────────────────
 
-// DHT22 / AM2302 temperature + humidity sensor
+// DHT22 / AM2302 humidity sensor
 DHT               dht(PIN_DHT_DATA, DHT22);
 Preferences     prefs;
 
@@ -201,16 +154,8 @@ Schedule     schedule;
 SensorData   sensors;
 SystemStatus status;
 
-volatile uint32_t isrFlowPulseCount  = 0;
-volatile uint32_t isrLastFlowPulseMs = 0;
-
-uint32_t  flowPulseCount  = 0;
-uint32_t  lastFlowPulseMs = 0;
-
 unsigned long pumpStartMs          = 0;
 unsigned long pumpScheduledEndMs   = 0;
-unsigned long flowVerifyStartMs    = 0;
-unsigned long lastFlowCheckMs      = 0;
 
 unsigned long faultStartMs         = 0;
 String        faultCode            = "OK";
@@ -220,15 +165,32 @@ unsigned long tsLastSensor         = 0;
 unsigned long tsLastScheduleFetch  = 0;
 unsigned long tsLastStatusPost     = 0;
 unsigned long tsLastWifiCheck      = 0;
+unsigned long tsLastRemoteSync     = 0;
 unsigned long tsLastWdtFeed        = 0;
 unsigned long tsLastLogFlush       = 0;
+
+// Non-blocking DS18B20 conversion state to avoid long blocking calls
+unsigned long tsTempRequestMs = 0;
+bool pendingTempRequest = false;
+// Deferred fault: if a fault is detected while pump is running, defer entering
+// full FAULT state until pump stops so we don't abruptly stop or restart
+bool deferredFault = false;
+String deferredFaultCode = "";
 
 unsigned long tsLastWifiAttempt    = 0;
 unsigned long wifiBackoffMs        = 5000UL;
 const unsigned long WIFI_BACKOFF_MAX = 300000UL;
+unsigned long tsBackendReadyMs     = 0;
+const unsigned long BACKEND_READY_GRACE_MS = 5000UL;
+unsigned long tsBootMs             = 0;
+const unsigned long RELAY_STARTUP_GRACE_MS = 60000UL;
 
 bool wifiConnected  = false;
 bool ntpSynced      = false;  // [IMP-5] Better time validity tracking
+bool reservoirDsMissingLogged = false;
+bool towerDsMissingLogged     = false;
+String bootResetReason = "UNKNOWN";
+String bootLastFault = "NONE";
 
 enum ManualMode : uint8_t {
   MANUAL_AUTO = 0,
@@ -244,8 +206,10 @@ struct ButtonState {
 
 ManualMode motorManualMode = MANUAL_AUTO;
 ManualMode lightManualMode = MANUAL_AUTO;
+ManualMode batteryManualMode = MANUAL_AUTO;
 ButtonState motorButton;
 ButtonState lightButton;
+ButtonState batteryButton;
 
 const char* manualModeToString(ManualMode mode) {
   switch (mode) {
@@ -253,6 +217,12 @@ const char* manualModeToString(ManualMode mode) {
     case MANUAL_FORCE_OFF: return "FORCED_OFF";
     default:               return "AUTO";
   }
+}
+
+ManualMode manualModeFromString(const String& value) {
+  if (value == "FORCED_ON") return MANUAL_FORCE_ON;
+  if (value == "FORCED_OFF") return MANUAL_FORCE_OFF;
+  return MANUAL_AUTO;
 }
 
 const char* resetReasonToString(esp_reset_reason_t reason) {
@@ -289,21 +259,68 @@ void manageLightRelay() {
   }
 }
 
+void manageBatteryChargeRelay() {
+  if (batteryManualMode != MANUAL_AUTO) {
+    return;
+  }
+
+  if (millis() - tsBootMs < RELAY_STARTUP_GRACE_MS) {
+    if (status.batteryChargeOn) {
+      setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
+      status.batteryChargeOn = false;
+    }
+    return;
+  }
+
+  if (!ntpSynced) {
+    if (status.batteryChargeOn) {
+      setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
+      status.batteryChargeOn = false;
+    }
+    return;
+  }
+
+  time_t epochNow = getCurrentEpoch();
+  if (epochNow <= 0) {
+    if (status.batteryChargeOn) {
+      setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
+      status.batteryChargeOn = false;
+    }
+    return;
+  }
+
+  struct tm localTime = {};
+  if (!localtime_r(&epochNow, &localTime)) {
+    if (status.batteryChargeOn) {
+      setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
+      status.batteryChargeOn = false;
+    }
+    return;
+  }
+
+  unsigned long secondsIntoDay = (unsigned long)localTime.tm_hour * 3600UL +
+                                 (unsigned long)localTime.tm_min * 60UL +
+                                 (unsigned long)localTime.tm_sec;
+  unsigned long chargeEndSeconds = BATTERY_CHARGE_START_SECONDS + BATTERY_CHARGE_DURATION_SECONDS;
+  bool shouldCharge = secondsIntoDay >= BATTERY_CHARGE_START_SECONDS &&
+                      secondsIntoDay < chargeEndSeconds;
+
+  if (shouldCharge != status.batteryChargeOn) {
+    setRelayState(PIN_BATTERY_CHARGE_RELAY, shouldCharge);
+    status.batteryChargeOn = shouldCharge;
+    Serial.printf("[CHARGE] %s (%02d:%02d:%02d window %02lu:%02lu-%02lu:%02lu)\n",
+                  shouldCharge ? "ON" : "OFF",
+                  localTime.tm_hour, localTime.tm_min, localTime.tm_sec,
+                  BATTERY_CHARGE_START_SECONDS / 3600UL,
+                  (BATTERY_CHARGE_START_SECONDS % 3600UL) / 60UL,
+                  chargeEndSeconds / 3600UL,
+                  (chargeEndSeconds % 3600UL) / 60UL);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 //  INTERRUPT SERVICE ROUTINE
 // ─────────────────────────────────────────────────────────────────────
-
-void IRAM_ATTR onFlowPulse() {
-  isrFlowPulseCount++;
-  isrLastFlowPulseMs = (uint32_t)millis();
-}
-
-void snapshotFlowSensor() {
-  portDISABLE_INTERRUPTS();
-  flowPulseCount  = isrFlowPulseCount;
-  lastFlowPulseMs = isrLastFlowPulseMs;
-  portENABLE_INTERRUPTS();
-}
 
 void handleButtonEdge(int pin, ButtonState& button, ManualMode& mode, const char* label, unsigned long now) {
   bool reading = digitalRead(pin);
@@ -331,6 +348,7 @@ void handleButtonEdge(int pin, ButtonState& button, ManualMode& mode, const char
 void handleManualButtons(unsigned long now) {
   handleButtonEdge(PIN_MOTOR_BUTTON, motorButton, motorManualMode, "MOTOR", now);
   handleButtonEdge(PIN_LIGHT_BUTTON, lightButton, lightManualMode, "LIGHT", now);
+  handleButtonEdge(PIN_BATTERY_BUTTON, batteryButton, batteryManualMode, "BATTERY", now);
 }
 
 void applyManualOutputs() {
@@ -355,6 +373,16 @@ void applyManualOutputs() {
     status.lightOn = false;
     curState = STATE_MANUAL_MODE;
   }
+
+  if (batteryManualMode == MANUAL_FORCE_ON) {
+    setRelayState(PIN_BATTERY_CHARGE_RELAY, true);
+    status.batteryChargeOn = true;
+    curState = STATE_MANUAL_MODE;
+  } else if (batteryManualMode == MANUAL_FORCE_OFF) {
+    setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
+    status.batteryChargeOn = false;
+    curState = STATE_MANUAL_MODE;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -373,6 +401,49 @@ bool saveScheduleToNVS() {
   return ok;
 }
 
+bool clampScheduleValues() {
+  bool changed = false;
+
+  if (schedule.intervalMinutes < 5) {
+    schedule.intervalMinutes = 5;
+    changed = true;
+  } else if (schedule.intervalMinutes > 1440) {
+    schedule.intervalMinutes = 1440;
+    changed = true;
+  }
+
+  if (schedule.durationSeconds < 10) {
+    schedule.durationSeconds = 10;
+    changed = true;
+  } else if (schedule.durationSeconds > 600) {
+    schedule.durationSeconds = 600;
+    changed = true;
+  }
+
+  if (schedule.startHour < 0) {
+    schedule.startHour = 0;
+    changed = true;
+  } else if (schedule.startHour > 23) {
+    schedule.startHour = 23;
+    changed = true;
+  }
+
+  if (schedule.endHour < 0) {
+    schedule.endHour = 0;
+    changed = true;
+  } else if (schedule.endHour > 23) {
+    schedule.endHour = 23;
+    changed = true;
+  }
+
+  if (schedule.endHour <= schedule.startHour) {
+    schedule.endHour = min(schedule.startHour + 1, 23);
+    changed = true;
+  }
+
+  return changed;
+}
+
 void loadScheduleFromNVS() {
   prefs.begin(NVS_NS, true);
   schedule.intervalMinutes = prefs.getInt(NVS_SCHED_INT, 30);
@@ -383,6 +454,15 @@ void loadScheduleFromNVS() {
   status.lastRunEpoch      = (time_t)prefs.getUInt(NVS_LAST_RUN, 0);
   ntpSynced                = prefs.getBool(NVS_TIME_VALID, false);  // [IMP-5]
   prefs.end();
+
+  if (clampScheduleValues()) {
+    Serial.printf("[NVS] Clamped schedule to %dmin/%ds %02d:00-%02d:00\n",
+                  schedule.intervalMinutes,
+                  schedule.durationSeconds,
+                  schedule.startHour,
+                  schedule.endHour);
+    saveScheduleToNVS();
+  }
 }
 
 bool saveLastRunToNVS(time_t epoch) {
@@ -502,9 +582,8 @@ void initWiFi() {
   WiFi.persistent(false);
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(false);
-  esp_task_wdt_reset();
+  WiFi.setTxPower(WIFI_POWER_11dBm);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  esp_task_wdt_reset();
   tsLastWifiAttempt = millis();
   Serial.printf("[WiFi] Connecting to '%s' (async)...\n", WIFI_SSID);
 }
@@ -518,10 +597,11 @@ void maintainWiFi(unsigned long now) {
   if (connected && !wifiConnected) {
     wifiConnected = true;
     wifiBackoffMs = 5000UL;  // [IMP-6] FULLY reset backoff on successful connect
+    tsBackendReadyMs = now + BACKEND_READY_GRACE_MS;
     Serial.print("[WiFi] Connected: ");
     Serial.println(WiFi.localIP());
     syncTimeNTP();
-    tsLastStatusPost = 0;
+    readSensors();
   } else if (!connected && wifiConnected) {
     wifiConnected = false;
     Serial.println("[WiFi] Disconnected — offline mode");
@@ -529,13 +609,35 @@ void maintainWiFi(unsigned long now) {
 
   if (!connected && (now - tsLastWifiAttempt >= wifiBackoffMs)) {
     Serial.printf("[WiFi] Reconnecting (backoff: %lums)...\n", wifiBackoffMs);
-    esp_task_wdt_reset();
     WiFi.disconnect(false, false);
-    esp_task_wdt_reset();
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     tsLastWifiAttempt = now;
     wifiBackoffMs = min(wifiBackoffMs * 2, WIFI_BACKOFF_MAX);
   }
+}
+
+String extractJsonString(const String& json, const char* key) {
+  String search = String("\"") + key + "\"";
+  int idx = json.indexOf(search);
+  if (idx < 0) return "";
+
+  idx += search.length();
+  while (idx < (int)json.length() && (json[idx] == ' ' || json[idx] == ':')) {
+    idx++;
+  }
+
+  if (idx >= (int)json.length() || json[idx] != '"') return "";
+  idx++;
+
+  String out = "";
+  while (idx < (int)json.length() && json[idx] != '"') {
+    if (json[idx] == '\\' && idx + 1 < (int)json.length()) {
+      idx++;
+    }
+    out += json[idx++];
+  }
+
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -590,28 +692,14 @@ time_t getCurrentEpoch() {
 
 void setup() {
   Serial.begin(115200);
+  tsBootMs = millis();
   unsigned long t0 = millis();
   while (millis() - t0 < 300) yield();
 
-  esp_log_level_set("task_wdt", ESP_LOG_NONE);
-
-  esp_task_wdt_config_t wdt_config = {
-    .timeout_ms = 120000,
-    .idle_core_mask = (1 << 0) | (1 << 1),
-    .trigger_panic = true
-  };
-  esp_err_t wdtInitResult = esp_task_wdt_init(&wdt_config);
-  if (wdtInitResult != ESP_OK && wdtInitResult != ESP_ERR_INVALID_STATE) {
-    Serial.printf("[WDT] Init failed: %s\n", esp_err_to_name(wdtInitResult));
-  }
-
-  esp_err_t wdtAddResult = esp_task_wdt_add(NULL);
-  if (wdtAddResult != ESP_OK) {
-    Serial.printf("[WDT] Task registration failed: %s\n", esp_err_to_name(wdtAddResult));
-  }
-
   loadLastFaultFromNVS();
   esp_reset_reason_t resetReason = esp_reset_reason();
+  bootResetReason = String(resetReasonToString(resetReason));
+  bootLastFault = lastFaultCode;
   Serial.printf("[BOOT] Reset reason: %s | Last fault: %s\n", resetReasonToString(resetReason), lastFaultCode.c_str());
   if (resetReason == ESP_RST_TASK_WDT && lastFaultCode != "NONE") {
     Serial.printf("[BOOT] Previous fault before watchdog reset: %s\n", lastFaultCode.c_str());
@@ -623,22 +711,17 @@ void setup() {
   pinMode(PIN_LED_RELAY, OUTPUT);
   setRelayState(PIN_LED_RELAY, false);
 
+  pinMode(PIN_BATTERY_CHARGE_RELAY, OUTPUT);
+  setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
+
+  pinMode(PIN_SPARE_RELAY, OUTPUT);
+  setRelayState(PIN_SPARE_RELAY, false);
+
   pinMode(PIN_DHT_DATA, INPUT_PULLUP);
   pinMode(PIN_LDR_SENSOR, INPUT);
   pinMode(PIN_MOTOR_BUTTON, INPUT_PULLUP);
   pinMode(PIN_LIGHT_BUTTON, INPUT_PULLUP);
-
-  pinMode(PIN_PROBE_GND, OUTPUT);
-  digitalWrite(PIN_PROBE_GND, LOW);
-
-  pinMode(PIN_PROBE_LOW,  INPUT_PULLUP);
-  // GPIO34/35 are input-only and do not support internal pullups on ESP32.
-  // Use external pullup resistors for MED/HIGH probes.
-  pinMode(PIN_PROBE_MED,  INPUT);
-  pinMode(PIN_PROBE_HIGH, INPUT);
-
-  pinMode(PIN_FLOW_SENSOR, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_FLOW_SENSOR), onFlowPulse, RISING);
+  pinMode(PIN_BATTERY_BUTTON, INPUT_PULLUP);
 
   dht.begin();
 
@@ -651,6 +734,7 @@ void setup() {
   tsLastScheduleFetch = now;
   tsLastStatusPost    = now;
   tsLastWifiCheck     = 0;
+  tsLastRemoteSync    = now;
   tsLastWdtFeed       = now;
   tsLastLogFlush      = now;
 
@@ -665,12 +749,9 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  if (now - tsLastWdtFeed >= IV_WDT_FEED) {
-    esp_task_wdt_reset();
-    tsLastWdtFeed = now;
-  }
-
   maintainWiFi(now);
+
+  bool backendReady = wifiConnected && now >= tsBackendReadyMs;
 
   // [IMP-5] Periodically check if NTP synced
   if (!ntpSynced && wifiConnected) {
@@ -686,22 +767,27 @@ void loop() {
 
   checkSafety(now);
 
-  if (now - tsLastScheduleFetch >= IV_SCHEDULE) {
+  if (backendReady && now - tsLastScheduleFetch >= IV_SCHEDULE) {
     fetchSchedule();
     tsLastScheduleFetch = now;
   }
 
-  manageLightRelay();
+  if (backendReady && now - tsLastRemoteSync >= IV_REMOTE_SYNC) {
+    syncRemoteManualModes();
+    tsLastRemoteSync = now;
+  }
 
-  snapshotFlowSensor();
+  manageLightRelay();
+  manageBatteryChargeRelay();
+
   runStateMachine(now);
 
-  if (now - tsLastStatusPost >= IV_STATUS_POST) {
+  if (backendReady && now - tsLastStatusPost >= IV_STATUS_POST) {
     postStatus();
     tsLastStatusPost = now;
   }
 
-  if (now - tsLastLogFlush >= IV_LOG_FLUSH) {
+  if (backendReady && now - tsLastLogFlush >= IV_LOG_FLUSH) {
     flushOfflineLogQueue();
     tsLastLogFlush = now;
   }
@@ -714,7 +800,7 @@ void loop() {
 // ─────────────────────────────────────────────────────────────────────
 
 void runStateMachine(unsigned long now) {
-  if (motorManualMode != MANUAL_AUTO || lightManualMode != MANUAL_AUTO) {
+  if (motorManualMode != MANUAL_AUTO || lightManualMode != MANUAL_AUTO || batteryManualMode != MANUAL_AUTO) {
     curState = STATE_MANUAL_MODE;
   }
 
@@ -726,7 +812,6 @@ void runStateMachine(unsigned long now) {
     case STATE_IDLE:             stateIdle(now);           break;
     case STATE_CHECK_WATER:      stateCheckWater(now);     break;
     case STATE_PUMP_ON:          statePumpOn(now);         break;
-    case STATE_WAITING_FOR_FLOW: stateWaitForFlow(now);    break;
     case STATE_RUNNING:          stateRunning(now);        break;
     case STATE_STOPPING:         stateStopping(now);       break;
     case STATE_FAULT:            stateFault(now);          break;
@@ -743,27 +828,7 @@ void stateIdle(unsigned long now) {
 }
 
 void stateCheckWater(unsigned long now) {
-  if (sensors.waterLevel == "EMPTY" || sensors.waterLevel == "LOW") {
-    enterFault(now, "LOW_WATER");
-    return;
-  }
-  if (!sensors.valid) {
-    enterFault(now, "SENSOR_FAIL");
-    return;
-  }
-  if (sensors.reservoirTempC > TEMP_RESERVOIR_MAX_C) {
-    enterFault(now, "TEMP_HIGH");
-    return;
-  }
-
   pumpStartMs        = now;
-  flowVerifyStartMs  = now;
-  portDISABLE_INTERRUPTS();
-  isrFlowPulseCount  = 0;
-  isrLastFlowPulseMs = 0;
-  portENABLE_INTERRUPTS();
-  flowPulseCount     = 0;
-  lastFlowPulseMs    = 0;
   curState           = STATE_PUMP_ON;
 }
 
@@ -771,25 +836,7 @@ void statePumpOn(unsigned long now) {
   setRelayState(PIN_PUMP_RELAY, true);
   status.pumpOn = true;
   pumpScheduledEndMs = pumpStartMs + (unsigned long)(schedule.durationSeconds * 1000UL);
-  curState = STATE_WAITING_FOR_FLOW;
-}
-
-void stateWaitForFlow(unsigned long now) {
-  if (flowPulseCount > 0) {
-    status.flowing = true;
-    lastFlowCheckMs = now;
-    curState = STATE_RUNNING;
-    return;
-  }
-
-  unsigned long elapsed = now - flowVerifyStartMs;
-  if (elapsed >= FLOW_VERIFY_MS) {
-    setRelayState(PIN_PUMP_RELAY, false);
-    status.pumpOn  = false;
-    status.flowing = false;
-    logPumpCycle(elapsed / 1000.0f, false, "DRY_RUN");
-    enterFault(now, "DRY_RUN");
-  }
+  curState = STATE_RUNNING;
 }
 
 void stateRunning(unsigned long now) {
@@ -803,15 +850,6 @@ void stateRunning(unsigned long now) {
     curState = STATE_STOPPING;
     return;
   }
-
-  if (now - lastFlowCheckMs >= FLOW_CHECK_MS) {
-    lastFlowCheckMs = now;
-    unsigned long msSinceFlow = now - (unsigned long)lastFlowPulseMs;
-    if (msSinceFlow > FLOW_STALL_MS) {
-      enterFault(now, "FLOW_STOPPED");
-      curState = STATE_STOPPING;
-    }
-  }
 }
 
 void stateStopping(unsigned long now) {
@@ -824,10 +862,15 @@ void stateStopping(unsigned long now) {
     saveLastRunToNVS(epochNow);
   }
 
-  logPumpCycle((now - pumpStartMs) / 1000.0f, status.flowing, status.fault);
-
-  status.flowing = false;
+  logPumpCycle((now - pumpStartMs) / 1000.0f, false, status.fault);
   status.fault   = "OK";
+  // If a fault was deferred while pump was running, enter FAULT now.
+  if (deferredFault) {
+    enterFault(now, deferredFaultCode.c_str());
+    // ensure deferred flag cleared inside enterFault when entering FAULT
+    return;
+  }
+
   curState = STATE_IDLE;
 }
 
@@ -843,27 +886,17 @@ void stateFault(unsigned long now) {
 }
 
 void stateRecovery(unsigned long now) {
-  readSensors();
-
-  bool waterOk = (sensors.waterLevel != "EMPTY" && sensors.waterLevel != "LOW");
-  bool tempOk  = (sensors.reservoirTempC <= TEMP_RESERVOIR_MAX_C);
-  bool sensorOk = sensors.valid;
-
-  if (waterOk && tempOk && sensorOk) {
-    status.fault = "OK";
-    faultCode    = "OK";
-    curState = STATE_IDLE;
-  } else {
-    faultStartMs = now;
-    curState = STATE_FAULT;
-  }
+  (void)now;
+  status.fault = "OK";
+  faultCode    = "OK";
+  curState = STATE_IDLE;
 }
 
 void stateManual(unsigned long now) {
   (void)now;
   applyManualOutputs();
 
-  if (motorManualMode == MANUAL_AUTO && lightManualMode == MANUAL_AUTO) {
+  if (motorManualMode == MANUAL_AUTO && lightManualMode == MANUAL_AUTO && batteryManualMode == MANUAL_AUTO) {
     curState = STATE_IDLE;
   }
 }
@@ -874,6 +907,18 @@ void enterFault(unsigned long now, const char* code) {
   faultStartMs = now;
   lastFaultCode = code;
   saveLastFaultToNVS(code);
+
+  // If pump is running, defer entering full FAULT state until it stops so
+  // the motor isn't abruptly stopped or the device doesn't restart mid-cycle.
+  if (status.pumpOn) {
+    deferredFault = true;
+    deferredFaultCode = String(code);
+    Serial.printf("[FAULT] (deferred while pump running) → %s\n", code);
+    return;
+  }
+
+  deferredFault = false;
+  deferredFaultCode = "";
   curState     = STATE_FAULT;
   Serial.printf("[FAULT] → %s\n", code);
 }
@@ -922,43 +967,22 @@ bool isTimeToWater() {
 
 void readSensors() {
   float humidity = dht.readHumidity();
-  float temperature = dht.readTemperature();
-  bool dhtOk = !isnan(humidity) && !isnan(temperature) && humidity >= 0.0f && humidity <= 100.0f;
+  bool dhtOk = !isnan(humidity) && humidity >= 0.0f && humidity <= 100.0f;
 
+  // Update humidity immediately if available
   if (dhtOk) {
     sensors.humidityPct = humidity;
-    sensors.reservoirTempC = temperature;
-    sensors.towerTempC = temperature;
   }
 
+  // Read LDR immediately (fast)
   sensors.lightRaw = analogRead(PIN_LDR_SENSOR);
   status.lightRaw = sensors.lightRaw;
 
   sensors.valid = dhtOk;
-
-  readWaterLevel();
-
-  status.reservoirTempC = sensors.reservoirTempC;
-  status.towerTempC     = sensors.towerTempC;
   status.humidityPct    = sensors.humidityPct;
   status.lightRaw       = sensors.lightRaw;
-  status.waterLevel     = sensors.waterLevel;
-}
-
-void readWaterLevel() {
-  bool hi  = digitalRead(PIN_PROBE_HIGH);
-  bool med = digitalRead(PIN_PROBE_MED);
-  bool lo  = digitalRead(PIN_PROBE_LOW);
-
-  if (hi) {
-    sensors.waterLevel = "FULL";
-  } else if (med) {
-    sensors.waterLevel = "MEDIUM";
-  } else if (lo) {
-    sensors.waterLevel = "LOW";
-  } else {
-    sensors.waterLevel = "EMPTY";
-  }
+  status.dhtOk = dhtOk;
+  status.sensorDataOk = sensors.valid;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -966,21 +990,7 @@ void readWaterLevel() {
 // ─────────────────────────────────────────────────────────────────────
 
 void checkSafety(unsigned long now) {
-  if (!sensors.valid) return;
-
-  if (status.pumpOn && sensors.reservoirTempC > TEMP_RESERVOIR_MAX_C) {
-    setRelayState(PIN_PUMP_RELAY, false);
-    status.pumpOn = false;
-    enterFault(now, "TEMP_HIGH");
-    curState = STATE_FAULT;
-  }
-
-  if (status.pumpOn && sensors.towerTempC > TEMP_TOWER_MAX_C) {
-    setRelayState(PIN_PUMP_RELAY, false);
-    status.pumpOn = false;
-    enterFault(now, "TEMP_HIGH");
-    curState = STATE_FAULT;
-  }
+  (void)now;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -990,8 +1000,6 @@ void checkSafety(unsigned long now) {
 int httpRequest(const char* method, const char* path,
                 const String& body = "", int* respCode = nullptr) {
   if (!wifiConnected) return -1;
-
-  esp_task_wdt_reset();
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
   http.begin(String(API_BASE_URL) + path);
@@ -1004,10 +1012,17 @@ int httpRequest(const char* method, const char* path,
   if (strcmp(method, "POST") == 0) code = http.POST(body);
   if (strcmp(method, "PUT")  == 0) code = http.PUT(body);
 
+  if (code < 0) {
+    Serial.printf("[API] %s %s failed: %s (%d)\n",
+                  method,
+                  path,
+                  http.errorToString(code).c_str(),
+                  code);
+  }
+
   if (respCode) *respCode = code;
 
   http.end();
-  esp_task_wdt_reset();
   return code;
 }
 
@@ -1016,8 +1031,6 @@ void fetchSchedule() {
     Serial.println(F("[API] Offline — using NVS schedule"));
     return;
   }
-
-  esp_task_wdt_reset();
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
   http.begin(String(API_BASE_URL) + "/api/schedule");
@@ -1076,7 +1089,34 @@ void fetchSchedule() {
     Serial.printf("[API] Backend unreachable: schedule fetch failed (HTTP %d)\n", code);
   }
   http.end();
-  esp_task_wdt_reset();
+}
+
+void syncRemoteManualModes() {
+  if (!wifiConnected) return;
+  HTTPClient http;
+  http.setTimeout(API_TIMEOUT_MS);
+  http.begin(String(API_BASE_URL) + "/api/status");
+  http.addHeader("X-Device-ID", DEVICE_ID);
+  http.addHeader("X-API-Key",   DEVICE_SECRET);
+
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return;
+  }
+
+  String resp = http.getString();
+  String pumpMode = extractJsonString(resp, "motorManualMode");
+  String lightMode = extractJsonString(resp, "lightManualMode");
+
+  if (pumpMode.length() > 0) {
+    motorManualMode = manualModeFromString(pumpMode);
+  }
+  if (lightMode.length() > 0) {
+    lightManualMode = manualModeFromString(lightMode);
+  }
+
+  http.end();
 }
 
 void postStatus() {
@@ -1086,18 +1126,19 @@ void postStatus() {
   body += "\"pumpOn\":"           + String(status.pumpOn ? "true" : "false") + ",";
   body += "\"lightOn\":"          + String(status.lightOn ? "true" : "false") + ",";
   body += "\"flowing\":"          + String(status.flowing ? "true" : "false") + ",";
-  body += "\"reservoirTempC\":"   + String(sensors.reservoirTempC, 1) + ",";
-  body += "\"towerTempC\":"       + String(sensors.towerTempC, 1) + ",";
   body += "\"humidityPct\":"      + String(sensors.humidityPct, 1) + ",";
   body += "\"lightLux\":"         + String(sensors.lightRaw) + ",";
-  body += "\"waterLevel\":\""     + status.waterLevel + "\",";
   body += "\"fault\":\""          + status.fault + "\",";
+  body += "\"resetReason\":\""    + bootResetReason + "\",";
+  body += "\"lastBootFault\":\""  + bootLastFault + "\",";
+  body += "\"uptimeSec\":"        + String((uint32_t)(millis() / 1000UL)) + ",";
+  body += "\"sensorDataOk\":"     + String(status.sensorDataOk ? "true" : "false") + ",";
+  body += "\"dhtOk\":"            + String(status.dhtOk ? "true" : "false") + ",";
   body += "\"state\":\""          + String(STATE_NAMES[curState]) + "\",";
   body += "\"pendingLogs\":"      + String(getOfflineLogCount()) + ",";
   body += "\"wifiConnected\":"    + String(wifiConnected ? "true" : "false");
   body += "}";
 
-  esp_task_wdt_reset();
   int code = httpRequest("PUT", "/api/status", body);
   if (code != 200 && code != 204) {
     Serial.printf("[API] Backend unreachable: status update failed (HTTP %d)\n", code);
@@ -1130,7 +1171,6 @@ bool postLogEntryToAPI(const LogEntry& entry) {
   body += "\"fault\":\""          + String(entry.fault) + "\"";
   body += "}";
 
-  esp_task_wdt_reset();
   int code = httpRequest("POST", "/api/pump-log", body);
   if (code == 200 || code == 201) {
     return true;
