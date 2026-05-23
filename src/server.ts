@@ -547,6 +547,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         flowing: false,
         pumpState: PumpState.IDLE,
         motorManualMode: "AUTO",
+        lastRunISO: null,
       });
       return jsonResponse({ success: true, state: "AUTO" }, 201);
     }

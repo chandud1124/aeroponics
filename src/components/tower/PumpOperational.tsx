@@ -117,6 +117,11 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
         return;
       }
 
+      if (status.nextCycleIn === 0) {
+        setCountdown("DUE NOW");
+        return;
+      }
+
       const targetMs = new Date(status.nextCycleISO).getTime();
       if (Number.isNaN(targetMs)) {
         setCountdown("--:--");
@@ -395,11 +400,16 @@ export function LiveCycleHistoryPanel() {
 
 // ==================== MANUAL CONTROL PANEL ====================
 
-export function ManualControlPanel() {
-  const [loading, setLoading] = useState(false);
+export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
+  const [pumpLoading, setPumpLoading] = useState(false);
+  const [pumpModeLoading, setPumpModeLoading] = useState(false);
+  const [lightLoading, setLightLoading] = useState(false);
   const [optimisticLightOn, setOptimisticLightOn] = useState<boolean | null>(null);
+  const pumpModeIsManual = status?.motorManualMode !== "AUTO";
 
   const handleStart = async () => {
+    if (!pumpModeIsManual) return;
+    setPumpLoading(true);
     try {
       const response = await fetch("/api/manual-pump", {
         method: "POST",
@@ -413,10 +423,14 @@ export function ManualControlPanel() {
       }
     } catch (error) {
       console.error("Failed to start pump:", error);
+    } finally {
+      setPumpLoading(false);
     }
   };
 
   const handleStop = async () => {
+    if (!pumpModeIsManual) return;
+    setPumpLoading(true);
     try {
       const response = await fetch("/api/manual-pump", {
         method: "POST",
@@ -429,11 +443,28 @@ export function ManualControlPanel() {
       }
     } catch (error) {
       console.error("Failed to stop pump:", error);
+    } finally {
+      setPumpLoading(false);
+    }
+  };
+
+  const handlePumpModeToggle = async () => {
+    setPumpModeLoading(true);
+    try {
+      await fetch("/api/manual-pump", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: pumpModeIsManual ? "auto" : "manual", desiredOn: false }),
+      });
+    } catch (error) {
+      console.error("Failed to switch pump mode:", error);
+    } finally {
+      setPumpModeLoading(false);
     }
   };
 
   const handleLightToggle = async (action: "on" | "off") => {
-    setLoading(true);
+    setLightLoading(true);
     // Optimistic update: show state immediately
     setOptimisticLightOn(action === "on");
     
@@ -450,7 +481,7 @@ export function ManualControlPanel() {
       // Revert optimistic update on error
       setOptimisticLightOn(null);
     } finally {
-      setLoading(false);
+      setLightLoading(false);
     }
   };
 
@@ -460,30 +491,53 @@ export function ManualControlPanel() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-sm font-medium text-muted-foreground">Manual controls</div>
-            <div className="text-xs text-muted-foreground">Use these buttons to force pump or light relay state.</div>
+            <div className="text-xs text-muted-foreground">Pump controls require MANUAL mode. Light controls stay available.</div>
           </div>
           <div className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground">
             Top priority controls
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-secondary/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Pump mode</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              {pumpModeIsManual ? "Manual mode is active" : "Auto mode is active and schedule control is restored"}
+            </div>
+          </div>
+          <Button
+            onClick={handlePumpModeToggle}
+            disabled={pumpModeLoading}
+            variant={pumpModeIsManual ? "secondary" : "default"}
+            className="w-full sm:w-auto"
+          >
+            {pumpModeIsManual ? "Switch Pump to AUTO" : "Switch Pump to MANUAL"}
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={handleStart}
-            className="flex-1 bg-green-600 hover:bg-green-700"
+            disabled={!pumpModeIsManual || pumpLoading}
+            className="flex-1 bg-green-600 hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
             variant="default"
           >
             <Play className="mr-2 h-4 w-4" />
             Start Pump Now
           </Button>
-          <Button onClick={handleStop} className="flex-1 bg-red-600 hover:bg-red-700" variant="default">
+          <Button
+            onClick={handleStop}
+            disabled={!pumpModeIsManual || pumpLoading}
+            className="flex-1 bg-red-600 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            variant="default"
+          >
             <Square className="mr-2 h-4 w-4" />
             Emergency Stop
           </Button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={() => handleLightToggle("on")}
-            disabled={loading}
+            disabled={lightLoading}
             className={`flex-1 ${optimisticLightOn ? "bg-yellow-500 hover:bg-yellow-600" : "bg-indigo-600 hover:bg-indigo-700"} transition-colors`}
             variant="default"
           >
@@ -492,7 +546,7 @@ export function ManualControlPanel() {
           </Button>
           <Button
             onClick={() => handleLightToggle("off")}
-            disabled={loading}
+            disabled={lightLoading}
             className={`flex-1 ${optimisticLightOn === false ? "bg-slate-400 hover:bg-slate-500" : "bg-slate-600 hover:bg-slate-700"} transition-colors`}
             variant="default"
           >
@@ -517,16 +571,16 @@ type RelayStateCardProps = {
   active: boolean;
   manualMode?: string;
   detail: string;
-  toggleLabel: string;
-  onToggleMode: () => void;
+  toggleLabel?: string;
+  onToggleMode?: () => void;
   toggling?: boolean;
 };
 
 function RelayStateCard({ label, icon, active, manualMode, detail, toggleLabel, onToggleMode, toggling = false }: RelayStateCardProps) {
   return (
     <Card className={`p-5 ${active ? "border-primary/40 bg-primary/5" : "border-border"}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
           <div className={`rounded-full p-2 ${active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
             {icon}
           </div>
@@ -535,14 +589,22 @@ function RelayStateCard({ label, icon, active, manualMode, detail, toggleLabel, 
             <div className="mt-1 text-2xl font-semibold tracking-tight">{active ? "ON" : "OFF"}</div>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col gap-2 sm:items-end">
           <Badge variant={active ? "default" : "secondary"}>{active ? "Relay active" : "Relay idle"}</Badge>
-          <Button variant="outline" size="sm" onClick={onToggleMode} disabled={toggling} className="h-7 px-2 text-[11px] uppercase tracking-[0.18em]">
-            {toggleLabel}
-          </Button>
+          {toggleLabel && onToggleMode ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onToggleMode}
+              disabled={toggling}
+              className="h-7 w-full px-2 text-[11px] uppercase tracking-[0.18em] sm:w-auto"
+            >
+              {toggleLabel}
+            </Button>
+          ) : null}
         </div>
       </div>
-      <div className="mt-3 text-xs text-muted-foreground">
+      <div className="mt-3 text-xs leading-relaxed text-muted-foreground">
         {detail}
         {manualMode && manualMode !== "AUTO" ? ` • Manual mode: ${manualMode}` : ""}
       </div>
@@ -606,16 +668,13 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
           </Badge>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <RelayStateCard
             label="Motor / pump"
             icon={<ToggleRight className="h-4 w-4" />}
             active={status.pumpOn}
             manualMode={status.motorManualMode}
             detail={status.flowing ? "Flow verified right now" : "Relay state is on/off only; flow may still be pending"}
-            toggleLabel={status.motorManualMode && status.motorManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
-            onToggleMode={() => toggleRelayMode("pump", status.pumpOn, status.motorManualMode)}
-            toggling={modeLoading.pump}
           />
           <RelayStateCard
             label="LED grow light"

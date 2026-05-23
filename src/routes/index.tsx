@@ -100,7 +100,7 @@ function Index() {
               <div className="space-y-4">
                 {!backendReachable ? (
                   <>
-                    <ManualControlPanel />
+                    <ManualControlPanel status={null} />
 
                     <Card className="border-dashed p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -158,7 +158,7 @@ function Index() {
                       <FaultAlertBanner status={currentStatus} />
                     )}
 
-                    <ManualControlPanel />
+                    <ManualControlPanel status={currentStatus} />
 
                     <div className="grid gap-4 xl:grid-cols-2">
                       <RelayStatesCard status={currentStatus} online={true} />

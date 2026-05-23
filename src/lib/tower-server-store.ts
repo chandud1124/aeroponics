@@ -155,6 +155,8 @@ let sensorHistory: SensorSnapshot[] = [];
 let readings: ManualReading[] = [];
 let pumpLogs: PumpLog[] = [];
 let faultHistory: Array<{ timestamp: number; fault: string; resolved?: number }> = [];
+let autoPumpStartedAtMs: number | null = null;
+let autoPumpLogId: string | null = null;
 
 const TELEMETRY_STALE_MS = 15000;
 
@@ -250,8 +252,16 @@ function calculateNextCycle(): { nextCycleISO: string | null; nextCycleIn: numbe
   const intervalMs = offIntervalMinutes * 60 * 1000;
 
   if (!lastRunTime) {
-    // Never run yet - let the UI show an explicit waiting state instead of 00:00
-    return { nextCycleISO: null, nextCycleIn: -1 };
+    // Never run yet - point to the current active window, or the next window start.
+    if (currentHour < schedule.startHour || currentHour >= schedule.endHour) {
+      const nextDay = new Date(now);
+      nextDay.setDate(nextDay.getDate() + 1);
+      nextDay.setHours(schedule.startHour, 0, 0, 0);
+      const secondsUntil = Math.floor((nextDay.getTime() - now.getTime()) / 1000);
+      return { nextCycleISO: nextDay.toISOString(), nextCycleIn: secondsUntil };
+    }
+
+    return { nextCycleISO: now.toISOString(), nextCycleIn: 0 };
   }
 
   const nextCycleTime = new Date(lastRunTime + intervalMs);
@@ -269,6 +279,149 @@ function calculateNextCycle(): { nextCycleISO: string | null; nextCycleIn: numbe
   return { nextCycleISO: nextCycleTime.toISOString(), nextCycleIn: Math.max(0, secondsUntil) };
 }
 
+function createBaseStatus(now = new Date()): LiveStatus {
+  return {
+    pumpOn: false,
+    flowing: false,
+    pumpState: PumpState.IDLE,
+    motorManualMode: "AUTO",
+    lightManualMode: "AUTO",
+    batteryManualMode: "AUTO",
+    reservoirTempC: null,
+    humidityPct: null,
+    lightLux: null,
+    towerTempC: null,
+    flowRateLpm: null,
+    lightOn: shouldLightBeOnBySchedule(now),
+    lastRunISO: null,
+    fault: null,
+    resetReason: null,
+    lastBootFault: null,
+    uptimeSec: null,
+    nextCycleISO: null,
+    nextCycleIn: 0,
+    telemetryUpdatedAt: null,
+    isOnline: false,
+  };
+}
+
+function syncScheduledState(now = new Date()) {
+  if (!status) {
+    status = createBaseStatus(now);
+  }
+
+  if (status.isOnline) {
+    return;
+  }
+
+  const nextStatus = { ...status };
+
+  if (nextStatus.lightManualMode === "AUTO") {
+    nextStatus.lightOn = shouldLightBeOnBySchedule(now);
+  }
+
+  if (nextStatus.motorManualMode === "AUTO" && schedule.enabled) {
+    const withinActiveWindow = now.getHours() >= schedule.startHour && now.getHours() < schedule.endHour;
+    const cycleProfile = getCycleProfile(now);
+    const onDurationMs = cycleProfile.onDurationSeconds * 1000;
+    const offIntervalMs = cycleProfile.offIntervalMinutes * 60 * 1000;
+    const lastRunMs = nextStatus.lastRunISO ? Date.parse(nextStatus.lastRunISO) : null;
+
+    if (!withinActiveWindow) {
+      if (nextStatus.pumpOn || nextStatus.pumpState !== PumpState.IDLE) {
+        nextStatus.pumpOn = false;
+        nextStatus.flowing = false;
+        nextStatus.pumpState = PumpState.IDLE;
+      }
+
+      if (autoPumpLogId) {
+        try {
+          updatePumpLog(autoPumpLogId, {
+            durationSeconds: autoPumpStartedAtMs ? Math.max(1, Math.round((now.getTime() - autoPumpStartedAtMs) / 1000)) : undefined,
+            flowed: false,
+            endedAtMs: now.getTime(),
+          });
+        } catch {
+          // ignore automatic log closure failures
+        }
+        autoPumpLogId = null;
+        autoPumpStartedAtMs = null;
+      }
+
+      status = nextStatus;
+      return;
+    }
+
+    const turnPumpOn = () => {
+      const startedAtMs = now.getTime();
+      nextStatus.pumpOn = true;
+      nextStatus.flowing = true;
+      nextStatus.pumpState = PumpState.RUNNING;
+      nextStatus.motorManualMode = "AUTO";
+      nextStatus.lastRunISO = new Date(startedAtMs).toISOString();
+
+      if (!autoPumpLogId) {
+        try {
+          const created = startPumpLog({
+            mode: cycleProfile.mode,
+            onDurationSeconds: cycleProfile.onDurationSeconds,
+            offIntervalMinutes: cycleProfile.offIntervalMinutes,
+            startedAtMs,
+          });
+          autoPumpLogId = created.id;
+          autoPumpStartedAtMs = startedAtMs;
+        } catch {
+          autoPumpLogId = null;
+          autoPumpStartedAtMs = null;
+        }
+      }
+    };
+
+    const turnPumpOff = () => {
+      nextStatus.pumpOn = false;
+      nextStatus.flowing = false;
+      nextStatus.pumpState = PumpState.IDLE;
+
+      if (autoPumpLogId) {
+        try {
+          updatePumpLog(autoPumpLogId, {
+            durationSeconds: autoPumpStartedAtMs ? Math.max(1, Math.round((now.getTime() - autoPumpStartedAtMs) / 1000)) : onDurationMs / 1000,
+            flowed: true,
+            endedAtMs: now.getTime(),
+          });
+        } catch {
+          // ignore automatic log closure failures
+        }
+        autoPumpLogId = null;
+        autoPumpStartedAtMs = null;
+      }
+    };
+
+    if (lastRunMs == null) {
+      turnPumpOn();
+      status = nextStatus;
+      return;
+    }
+
+    const elapsedMs = now.getTime() - lastRunMs;
+
+    if (nextStatus.pumpOn) {
+      if (elapsedMs >= onDurationMs) {
+        turnPumpOff();
+      } else {
+        nextStatus.pumpState = PumpState.RUNNING;
+        nextStatus.flowing = true;
+      }
+    } else if (elapsedMs >= onDurationMs + offIntervalMs) {
+      turnPumpOn();
+    } else {
+      nextStatus.pumpState = PumpState.IDLE;
+    }
+  }
+
+  status = nextStatus;
+}
+
 function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -283,6 +436,7 @@ export function updateSchedule(next: Schedule) {
 }
 
 export function getStatus() {
+  syncScheduledState();
   if (!status) return null;
   
   // Calculate next cycle and update status
@@ -317,6 +471,10 @@ export function updateStatus(
   patch: Partial<LiveStatus>,
   options: { source?: "esp32" | "server" } = {},
 ) {
+  if (!status) {
+    status = createBaseStatus();
+  }
+
   // Apply scheduled light logic if lightOn wasn't explicitly set in patch
   const shouldApplySchedule = patch.lightOn === undefined;
   const scheduledLightOn = shouldApplySchedule ? shouldLightBeOnBySchedule() : patch.lightOn;
@@ -365,24 +523,9 @@ export function updateStatus(
 export function touchStatus(options: { source?: "esp32" | "server" } = {}) {
   const source = options.source ?? "server";
   if (!status) {
-    status = {
-      pumpOn: false,
-      flowing: false,
-      pumpState: PumpState.IDLE,
-      motorManualMode: "AUTO",
-      lightManualMode: "AUTO",
-      batteryManualMode: "AUTO",
-      reservoirTempC: null,
-      humidityPct: null,
-      lightLux: null,
-      towerTempC: null,
-      lastRunISO: null,
-      fault: null,
-      nextCycleISO: null,
-      nextCycleIn: 0,
-      telemetryUpdatedAt: source === "esp32" ? Date.now() : null,
-      isOnline: source === "esp32",
-    };
+    status = createBaseStatus();
+    status.telemetryUpdatedAt = source === "esp32" ? Date.now() : null;
+    status.isOnline = source === "esp32";
     return getStatus();
   }
 
