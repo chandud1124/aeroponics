@@ -42,6 +42,9 @@ type Schedule = {
   startHour: number;
   endHour: number;
   enabled: boolean;
+  lightEnabled?: boolean;
+  lightStartHour?: number;
+  lightEndHour?: number;
   dayIntervalMinutes?: number;
   dayDurationSeconds?: number;
   nightIntervalMinutes?: number;
@@ -133,6 +136,9 @@ const DEFAULT_SCHEDULE: Schedule = {
   startHour: 5,
   endHour: 21,
   enabled: true,
+  lightEnabled: true,
+  lightStartHour: 5,
+  lightEndHour: 21,
   dayIntervalMinutes: 7,
   dayDurationSeconds: 45,
   nightIntervalMinutes: 20,
@@ -162,9 +168,12 @@ function getModeForNow(now = new Date()): "DAY" | "NIGHT" {
  * Light is on during active hours (startHour to endHour) if enabled
  */
 function shouldLightBeOnBySchedule(now = new Date()): boolean {
+  if (!schedule.lightEnabled) return false;
   if (!schedule.enabled) return false;
   const hour = now.getHours();
-  const inWindow = hour >= schedule.startHour && hour < schedule.endHour;
+  const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
+  const lightEndHour = schedule.lightEndHour ?? schedule.endHour;
+  const inWindow = hour >= lightStartHour && hour < lightEndHour;
   if (!inWindow) return false;
 
   // If an ambient light sensor is present, prefer auto-on when ambient lux is low (indoor use)
@@ -241,8 +250,8 @@ function calculateNextCycle(): { nextCycleISO: string | null; nextCycleIn: numbe
   const intervalMs = offIntervalMinutes * 60 * 1000;
 
   if (!lastRunTime) {
-    // Never run today - next cycle is NOW
-    return { nextCycleISO: now.toISOString(), nextCycleIn: 0 };
+    // Never run yet - let the UI show an explicit waiting state instead of 00:00
+    return { nextCycleISO: null, nextCycleIn: -1 };
   }
 
   const nextCycleTime = new Date(lastRunTime + intervalMs);

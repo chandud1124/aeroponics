@@ -5,8 +5,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { Sprout } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { StatusCards } from "@/components/tower/StatusCards";
+import { EnhancedStatusCards } from "@/components/tower/EnhancedStatusCards";
 import { ScheduleEditor } from "@/components/tower/ScheduleEditor";
+import { LightScheduleEditor } from "@/components/tower/LightScheduleEditor";
 import { ManualReadings } from "@/components/tower/ManualReadings";
 import { Documentation } from "@/components/tower/Documentation";
 import { PumpStats } from "@/components/tower/PumpStats";
@@ -83,9 +84,10 @@ function Index() {
 
         <main className="mx-auto max-w-5xl px-4 py-6">
           <Tabs defaultValue="status" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 sm:grid-cols-7">
+            <TabsList className="grid w-full grid-cols-4 sm:grid-cols-9">
               <TabsTrigger value="status">Live</TabsTrigger>
               <TabsTrigger value="plan">Plan</TabsTrigger>
+              <TabsTrigger value="light">Light</TabsTrigger>
               <TabsTrigger value="stats">Stats</TabsTrigger>
               <TabsTrigger value="ai">AI Insights</TabsTrigger>
               <TabsTrigger value="admin">Admin</TabsTrigger>
@@ -112,7 +114,7 @@ function Index() {
                       </div>
                     </Card>
 
-                    <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="grid gap-4 xl:grid-cols-2">
                       <RelayStatesCard status={null} online={false} />
                       <Card className="border-dashed p-6">
                         <div className="space-y-2">
@@ -136,6 +138,10 @@ function Index() {
                   </>
                 ) : (
                   <>
+                    {(() => {
+                      const currentStatus = status as LiveStatus;
+                      return (
+                        <>
                     {!telemetryFresh ? (
                       <Card className="border-dashed p-4">
                         <div className="flex items-start justify-between gap-3">
@@ -149,28 +155,31 @@ function Index() {
                         </div>
                       </Card>
                     ) : (
-                      <FaultAlertBanner status={liveStatus} />
+                      <FaultAlertBanner status={currentStatus} />
                     )}
 
                     <ManualControlPanel />
 
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <RelayStatesCard status={liveStatus} online={true} />
-                      <NextCyclePanel status={liveStatus} schedule={schedule} />
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      <RelayStatesCard status={currentStatus} online={true} />
+                      <NextCyclePanel status={currentStatus} schedule={schedule} />
                     </div>
 
-                    <div className="grid gap-4 xl:grid-cols-2">
+                    <div className="grid gap-4 2xl:grid-cols-2">
                       <div className="space-y-4">
-                        <PumpStateDisplay status={liveStatus} />
-                        <FlowPipeline status={liveStatus} />
+                        <PumpStateDisplay status={currentStatus} />
+                        <FlowPipeline status={currentStatus} />
                         <LiveCycleHistoryPanel />
                       </div>
 
                       <div className="space-y-4">
-                        <StatusCards status={liveStatus} />
+                        <EnhancedStatusCards status={currentStatus} />
                         <FaultHistoryPanel />
                       </div>
                     </div>
+                        </>
+                      );
+                    })()}
                   </>
                 )}
 
@@ -182,6 +191,10 @@ function Index() {
 
             <TabsContent value="plan" className="mt-6">
               <ScheduleEditor />
+            </TabsContent>
+
+            <TabsContent value="light" className="mt-6">
+              <LightScheduleEditor />
             </TabsContent>
 
             <TabsContent value="stats" className="mt-6">

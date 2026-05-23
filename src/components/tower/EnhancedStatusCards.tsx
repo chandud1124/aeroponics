@@ -38,9 +38,9 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
       <FaultAlert fault={status.fault} />
 
       {/* Main Status Grid */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {/* Pump Status */}
-        <Card className="p-4">
+        <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Pump</span>
             <Zap className="h-5 w-5 text-primary" />
@@ -53,7 +53,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
         </Card>
 
         {/* Flow Status */}
-        <Card className="p-4">
+        <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Flow</span>
             <Droplet className="h-5 w-5 text-blue-500" />
@@ -66,7 +66,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
         </Card>
 
         {/* Reservoir Temperature */}
-        <Card className="p-4">
+        <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Res. Temp</span>
             <Thermometer className="h-5 w-5 text-orange-500" />
@@ -91,7 +91,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
         </Card>
 
         {/* Tower Temperature */}
-        <Card className="p-4">
+        <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Tower Temp</span>
             <Thermometer className="h-5 w-5 text-green-500" />
@@ -117,7 +117,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
       </div>
 
       {/* Water Level */}
-      <Card className="p-4">
+      <Card className="p-4 sm:p-5">
         <div className="flex items-center justify-between">
           <span className="font-medium">Water Sensor</span>
           <Droplet className="h-5 w-5 text-blue-500" />
@@ -129,7 +129,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
 
       {/* Last Run */}
       {status.lastRunISO && (
-        <Card className="p-4">
+        <Card className="p-4 sm:p-5">
           <span className="text-sm text-muted-foreground">Last pump cycle</span>
           <div className="mt-2 text-sm font-medium">
             {new Date(status.lastRunISO).toLocaleString()}

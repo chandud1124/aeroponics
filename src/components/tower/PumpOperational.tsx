@@ -44,7 +44,7 @@ export function PumpStateDisplay({ status }: { status: LiveStatus }) {
           : "WAITING";
 
   return (
-    <Card className="p-6">
+       <Card className="p-6">
       <div className="space-y-4">
         <div>
           <div className="mb-2 text-sm font-medium text-muted-foreground">Pump Status</div>
@@ -103,10 +103,16 @@ export function PumpStateDisplay({ status }: { status: LiveStatus }) {
 
 export function NextCyclePanel({ status, schedule }: { status: LiveStatus; schedule: Schedule }) {
   const [countdown, setCountdown] = useState<string>("--:--");
+  const manualModes = [status.motorManualMode, status.lightManualMode, status.batteryManualMode].filter(Boolean);
+  const manualOverrideActive = manualModes.some((mode) => mode !== "AUTO");
+  const controlModeLabel = manualOverrideActive ? "MANUAL OVERRIDE" : "AUTOMATIC";
+  const controlModeHint = manualOverrideActive
+    ? `Motor: ${status.motorManualMode ?? "AUTO"} • Light: ${status.lightManualMode ?? "AUTO"} • Battery: ${status.batteryManualMode ?? "AUTO"}`
+    : "ESP32 and backend are following the automatic schedule";
 
   useEffect(() => {
     const updateCountdown = () => {
-      if (!status.nextCycleISO) {
+      if (!status.nextCycleISO || status.nextCycleIn < 0) {
         setCountdown("--:--");
         return;
       }
@@ -135,16 +141,25 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
   }, [status.nextCycleISO]);
 
   if (!status.nextCycleISO) {
+      const waitingText = schedule.enabled
+        ? status.lastRunISO
+          ? "Waiting for the next scheduled run"
+          : "Awaiting first automatic cycle"
+        : "Schedule disabled";
     return (
       <Card className="p-6">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="mb-1 text-sm font-medium text-muted-foreground">Next Cycle</div>
-              <div className="text-xs text-muted-foreground">Schedule disabled</div>
+                <div className="text-xs text-muted-foreground">{waitingText}</div>
             </div>
             <Clock className="h-5 w-5 text-muted-foreground" />
           </div>
+            <div className="rounded-md border border-dashed border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+              Control mode: <span className="font-semibold text-foreground">{controlModeLabel}</span>
+              <div className="mt-1">{controlModeHint}</div>
+            </div>
         </div>
       </Card>
     );
@@ -160,6 +175,8 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
   const expectedOff = isDayMode
     ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes
     : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15);
+  const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
+  const lightEndHour = schedule.lightEndHour ?? schedule.endHour;
   const timeStr = nextDate.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
@@ -212,10 +229,16 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
               <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">next mist</span>
             </div>
             <div className="text-xs text-muted-foreground">Next run: {timeStr}</div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <Badge variant={manualOverrideActive ? "destructive" : "default"}>{controlModeLabel}</Badge>
+              <Badge variant={status.pumpState === PumpState.MANUAL_MODE ? "secondary" : "outline"}>
+                Pump: {status.pumpState === PumpState.MANUAL_MODE ? "Manual" : "Automatic"}
+              </Badge>
+            </div>
             {appliedAtStr && (
               <div className="text-xs text-muted-foreground">Plan applied: {appliedAtStr} {appliedPlanName ? `· ${appliedPlanName}` : null}</div>
             )}
-            <div className="text-xs text-muted-foreground">Lights: {String(schedule.startHour).padStart(2, "0")}:00 - {String(schedule.endHour).padStart(2, "0")}:00</div>
+            <div className="text-xs text-muted-foreground">Lights: {String(lightStartHour).padStart(2, "0")}:00 - {String(lightEndHour).padStart(2, "0")}:00</div>
             <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
               <div className="rounded-md bg-secondary px-3 py-2">
                 <div className="text-muted-foreground">Mode</div>
@@ -494,9 +517,12 @@ type RelayStateCardProps = {
   active: boolean;
   manualMode?: string;
   detail: string;
+  toggleLabel: string;
+  onToggleMode: () => void;
+  toggling?: boolean;
 };
 
-function RelayStateCard({ label, icon, active, manualMode, detail }: RelayStateCardProps) {
+function RelayStateCard({ label, icon, active, manualMode, detail, toggleLabel, onToggleMode, toggling = false }: RelayStateCardProps) {
   return (
     <Card className={`p-5 ${active ? "border-primary/40 bg-primary/5" : "border-border"}`}>
       <div className="flex items-center justify-between gap-3">
@@ -509,7 +535,12 @@ function RelayStateCard({ label, icon, active, manualMode, detail }: RelayStateC
             <div className="mt-1 text-2xl font-semibold tracking-tight">{active ? "ON" : "OFF"}</div>
           </div>
         </div>
-        <Badge variant={active ? "default" : "secondary"}>{active ? "Relay active" : "Relay idle"}</Badge>
+        <div className="flex flex-col items-end gap-2">
+          <Badge variant={active ? "default" : "secondary"}>{active ? "Relay active" : "Relay idle"}</Badge>
+          <Button variant="outline" size="sm" onClick={onToggleMode} disabled={toggling} className="h-7 px-2 text-[11px] uppercase tracking-[0.18em]">
+            {toggleLabel}
+          </Button>
+        </div>
       </div>
       <div className="mt-3 text-xs text-muted-foreground">
         {detail}
@@ -520,6 +551,27 @@ function RelayStateCard({ label, icon, active, manualMode, detail }: RelayStateC
 }
 
 export function RelayStatesCard({ status, online = true }: { status: LiveStatus | null; online?: boolean }) {
+  const [modeLoading, setModeLoading] = useState<{ pump: boolean; light: boolean; battery: boolean }>({
+    pump: false,
+    light: false,
+    battery: false,
+  });
+
+  const toggleRelayMode = async (kind: "pump" | "light" | "battery", active: boolean, manualMode?: string) => {
+    const endpoint = kind === "pump" ? "/api/manual-pump" : kind === "light" ? "/api/manual-light" : "/api/manual-battery";
+    const action = manualMode && manualMode !== "AUTO" ? "auto" : "manual";
+    setModeLoading((current) => ({ ...current, [kind]: true }));
+    try {
+      await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, desiredOn: active }),
+      });
+    } finally {
+      setModeLoading((current) => ({ ...current, [kind]: false }));
+    }
+  };
+
   if (!status) {
     return (
       <Card className="p-6">
@@ -561,6 +613,9 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             active={status.pumpOn}
             manualMode={status.motorManualMode}
             detail={status.flowing ? "Flow verified right now" : "Relay state is on/off only; flow may still be pending"}
+            toggleLabel={status.motorManualMode && status.motorManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
+            onToggleMode={() => toggleRelayMode("pump", status.pumpOn, status.motorManualMode)}
+            toggling={modeLoading.pump}
           />
           <RelayStateCard
             label="LED grow light"
@@ -568,6 +623,9 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             active={Boolean(status.lightOn)}
             manualMode={status.lightManualMode}
             detail={status.lightOn ? "Light relay is supplying the LED strip" : "Light relay is off"}
+            toggleLabel={status.lightManualMode && status.lightManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
+            onToggleMode={() => toggleRelayMode("light", Boolean(status.lightOn), status.lightManualMode)}
+            toggling={modeLoading.light}
           />
           <RelayStateCard
             label="Battery charging"
@@ -575,6 +633,9 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             active={Boolean(status.batteryChargeOn)}
             manualMode={status.batteryManualMode}
             detail={status.batteryChargeOn ? "Battery charge relay is active" : "Battery charge relay is off"}
+            toggleLabel={status.batteryManualMode && status.batteryManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
+            onToggleMode={() => toggleRelayMode("battery", Boolean(status.batteryChargeOn), status.batteryManualMode)}
+            toggling={modeLoading.battery}
           />
         </div>
 
@@ -588,10 +649,34 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
 
 export function FlowPipeline({ status }: { status: LiveStatus }) {
   const stages = [
-    { label: "Water sensor", done: true, icon: Droplets },
-    { label: "Pump", done: status.pumpOn, icon: Zap },
-    { label: "Flow verified", done: status.flowing, icon: Network },
-    { label: "Tower active", done: status.flowing, icon: Sprout },
+    {
+      label: "Flow sensor",
+      done: status.flowRateLpm != null,
+      icon: Droplets,
+      doneText: status.flowRateLpm != null ? "Telemetry present" : "Waiting for flow telemetry",
+      pendingText: "Flow sensor is the only water-related sensor in this build",
+    },
+    {
+      label: "Pump relay",
+      done: status.pumpOn,
+      icon: Zap,
+      doneText: status.pumpState === PumpState.MANUAL_MODE ? "Manual override active" : "Automatic relay active",
+      pendingText: status.motorManualMode && status.motorManualMode !== "AUTO" ? `Manual mode: ${status.motorManualMode}` : "Relay idle",
+    },
+    {
+      label: "Flow check",
+      done: status.flowing,
+      icon: Network,
+      doneText: "Flow verified",
+      pendingText: status.pumpOn ? "Waiting for flow pulses" : "Pump is off",
+    },
+    {
+      label: "Tower misting",
+      done: status.flowing,
+      icon: Sprout,
+      doneText: "Water delivery active",
+      pendingText: status.pumpOn ? "Pending flow verification" : "Idle",
+    },
   ];
 
   return (
@@ -609,7 +694,7 @@ export function FlowPipeline({ status }: { status: LiveStatus }) {
                 <div className="text-sm font-medium">{stage.label}</div>
               </div>
               <div className="mt-2 text-xs text-muted-foreground">
-                {stage.done ? "Verified" : index === 0 ? "Waiting" : "Pending"}
+                {stage.done ? stage.doneText : stage.pendingText}
               </div>
             </div>
           );

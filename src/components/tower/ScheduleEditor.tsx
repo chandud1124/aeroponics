@@ -83,7 +83,7 @@ export function ScheduleEditor() {
           <li>Pump ON duration = how long the motor runs each cycle.</li>
           <li>Pump OFF interval = how long the controller waits before the next cycle.</li>
           <li>Active from / until = the daylight window for the plan.</li>
-          <li>Grow light turns on automatically when it is dark during the active window, and can still be forced on or off from Manual controls.</li>
+          <li>Use the Light tab for the grow-light window and presets.</li>
           <li>Custom plan name = the label you want to remember for this setup.</li>
         </ul>
       </div>
@@ -301,8 +301,8 @@ export function ScheduleEditor() {
             <div className="font-semibold">Every {nightCycleMinutes} min: ON {Math.round(nightRunSeconds / 60)} min, OFF {nightRestMinutes} min</div>
           </div>
           <div className="rounded-md bg-background p-3">
-            <div className="text-xs text-muted-foreground">LED rule</div>
-            <div className="font-semibold">Auto ON in darkness during {s.startHour}:00–{s.endHour}:00</div>
+            <div className="text-xs text-muted-foreground">Light schedule</div>
+            <div className="font-semibold">Manage light hours in the Light tab</div>
           </div>
           <div className="rounded-md bg-background p-3 sm:col-span-2 xl:col-span-2">
             <div className="text-xs text-muted-foreground">Estimated daily activity</div>

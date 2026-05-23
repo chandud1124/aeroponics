@@ -40,8 +40,8 @@ const char* WIFI_PASS = "Whoareu@0000";
 const char* API_BASE_URL = "http://13.234.122.175:8080";// Paste the backend-generated values here after creating the device in Admin UI.
 // DEVICE_ID must match the deviceId returned by the backend.
 // DEVICE_SECRET is the one-time secret returned by the backend and shown only once.
-const char* DEVICE_ID     = "device-q3vgn9";
-const char* DEVICE_SECRET = "8ee844960c7a744c2aa8f77c10d0bcb3008055c489a115ee";
+const char* DEVICE_ID     = "device-3ljzoq";
+const char* DEVICE_SECRET = "5d8b61e327977760175cf87eb1c028351c1bde5031372da5";
 
 const int PIN_DHT_DATA     = 16;
 const int PIN_LDR_SENSOR   = 36;
@@ -161,6 +161,13 @@ struct LogEntry {
   float    volumeLiters;
 };
 
+void fetchSchedule();
+void syncRemoteManualModes();
+void postStatus();
+int httpRequest(const char* method, const char* path, const String& body = "", int* respCode = nullptr);
+void logPumpCycle(float durationSec, bool flowed, String fault, float volumeLiters);
+bool postLogEntryToAPI(const LogEntry& entry);
+
 // ─────────────────────────────────────────────────────────────────────
 //  GLOBALS
 // ─────────────────────────────────────────────────────────────────────
@@ -245,6 +252,10 @@ struct ButtonState {
   bool stableState = HIGH;
   unsigned long lastChangeMs = 0;
 };
+
+const char* manualModeToString(ManualMode mode);
+ManualMode manualModeFromString(const String& value);
+void handleButtonEdge(int pin, ButtonState& button, ManualMode& mode, const char* label, unsigned long now);
 
 ManualMode motorManualMode = MANUAL_AUTO;
 ManualMode lightManualMode = MANUAL_AUTO;
@@ -1086,8 +1097,6 @@ bool isTimeToWater() {
   }
 
   // Use day/night override if present
-  struct tm* t = localtime(&epochNow);
-  int hour = t->tm_hour;
   bool isDay = hour >= schedule.startHour && hour < schedule.endHour;
 
   int effectiveIntervalMinutes = schedule.intervalMinutes;
@@ -1241,7 +1250,7 @@ void checkSafety(unsigned long now) {
 // ─────────────────────────────────────────────────────────────────────
 
 int httpRequest(const char* method, const char* path,
-                const String& body = "", int* respCode = nullptr) {
+                const String& body, int* respCode) {
   if (!wifiConnected) return -1;
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
@@ -1334,6 +1343,8 @@ bool patchPumpLogOnServer(const String& id, int durationSeconds, bool flowed, co
     return true;
   }
   return false;
+
+}
 
 
 void fetchSchedule() {
@@ -1511,7 +1522,7 @@ void sendHeartbeat() {
   }
 }
 
-void logPumpCycle(float durationSec, bool flowed, String fault, float volumeLiters = 0.0f) {
+void logPumpCycle(float durationSec, bool flowed, String fault, float volumeLiters) {
   LogEntry entry;
   entry.timestamp       = getCurrentEpoch();
   entry.durationSeconds = (uint16_t)durationSec;

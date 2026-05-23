@@ -534,9 +534,44 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    const payload = (await request.json()) as { action?: "start" | "stop" };
+    const payload = (await request.json()) as { action?: "start" | "stop" | "auto" | "manual"; desiredOn?: boolean };
     if (!payload.action) {
       return jsonResponse({ error: "Missing action" }, 400);
+    }
+
+    if (payload.action === "auto") {
+      manualPumpStartedAtMs = null;
+      manualPumpLogId = null;
+      updateStatus({
+        pumpOn: false,
+        flowing: false,
+        pumpState: PumpState.IDLE,
+        motorManualMode: "AUTO",
+      });
+      return jsonResponse({ success: true, state: "AUTO" }, 201);
+    }
+
+    if (payload.action === "manual") {
+      const desiredOn = Boolean(payload.desiredOn);
+      manualPumpStartedAtMs = desiredOn ? Date.now() : null;
+      updateStatus({
+        pumpOn: desiredOn,
+        flowing: false,
+        pumpState: PumpState.MANUAL_MODE,
+        motorManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF",
+        fault: null,
+      });
+      if (desiredOn) {
+        try {
+          const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs ?? Date.now() });
+          if (created && created.id) {
+            manualPumpLogId = created.id;
+          }
+        } catch {
+          // ignore log creation failures for manual override
+        }
+      }
+      return jsonResponse({ success: true, state: "MANUAL_MODE", pumpOn: desiredOn }, 201);
     }
 
     if (payload.action === "start") {
@@ -594,9 +629,20 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    const payload = (await request.json()) as { action?: "on" | "off" };
+    const payload = (await request.json()) as { action?: "on" | "off" | "auto" | "manual"; desiredOn?: boolean };
     if (!payload.action) {
       return jsonResponse({ error: "Missing action" }, 400);
+    }
+
+    if (payload.action === "auto") {
+      updateStatus({ lightManualMode: "AUTO" });
+      return jsonResponse({ success: true, lightOn: getStatus()?.lightOn ?? false, mode: "AUTO" }, 201);
+    }
+
+    if (payload.action === "manual") {
+      const desiredOn = Boolean(payload.desiredOn);
+      updateStatus({ lightOn: desiredOn, lightManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" });
+      return jsonResponse({ success: true, lightOn: desiredOn, mode: "MANUAL" }, 201);
     }
 
     if (payload.action === "on") {
@@ -606,6 +652,36 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     updateStatus({ lightOn: false, lightManualMode: "FORCED_OFF" });
     return jsonResponse({ success: true, lightOn: false }, 201);
+  }
+
+  if (url.pathname === "/api/manual-battery") {
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    const payload = (await request.json()) as { action?: "on" | "off" | "auto" | "manual"; desiredOn?: boolean };
+    if (!payload.action) {
+      return jsonResponse({ error: "Missing action" }, 400);
+    }
+
+    if (payload.action === "auto") {
+      updateStatus({ batteryChargeOn: false, batteryManualMode: "AUTO" });
+      return jsonResponse({ success: true, batteryChargeOn: false, mode: "AUTO" }, 201);
+    }
+
+    if (payload.action === "manual") {
+      const desiredOn = Boolean(payload.desiredOn);
+      updateStatus({ batteryChargeOn: desiredOn, batteryManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" });
+      return jsonResponse({ success: true, batteryChargeOn: desiredOn, mode: "MANUAL" }, 201);
+    }
+
+    if (payload.action === "on") {
+      updateStatus({ batteryChargeOn: true, batteryManualMode: "FORCED_ON" });
+      return jsonResponse({ success: true, batteryChargeOn: true }, 201);
+    }
+
+    updateStatus({ batteryChargeOn: false, batteryManualMode: "FORCED_OFF" });
+    return jsonResponse({ success: true, batteryChargeOn: false }, 201);
   }
 
   if (url.pathname === "/api/ai-insights") {

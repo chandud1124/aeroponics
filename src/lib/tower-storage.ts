@@ -7,6 +7,9 @@ export type Schedule = {
   startHour: number;
   endHour: number;
   enabled: boolean;
+  lightEnabled?: boolean;
+  lightStartHour?: number;
+  lightEndHour?: number;
   dayIntervalMinutes?: number;
   dayDurationSeconds?: number;
   nightIntervalMinutes?: number;
@@ -115,6 +118,9 @@ export const defaultSchedule: Schedule = {
   startHour: 6,
   endHour: 19,
   enabled: true,
+  lightEnabled: true,
+  lightStartHour: 5,
+  lightEndHour: 21,
   dayIntervalMinutes: 7,
   dayDurationSeconds: 45,
   nightIntervalMinutes: 20,
