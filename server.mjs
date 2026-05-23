@@ -2,11 +2,13 @@ import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import app from "./dist/server/index.js";
 
 const port = Number(process.env.PORT ?? 8080);
 const host = "0.0.0.0";
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
 
 function toHeaders(nodeHeaders) {
   const headers = new Headers();
@@ -43,14 +45,14 @@ const server = createServer(async (req, res) => {
     const pathname = requestUrl.pathname;
     if (pathname.startsWith("/assets/") || pathname === "/favicon.svg") {
       const relPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
-      const filePath = path.join(process.cwd(), "dist", "client", relPath);
+      const filePath = path.join(appRoot, "dist", "client", relPath);
       console.log(`[static] request ${pathname} -> ${filePath}`);
       try {
         const candidates = [
           filePath,
-          path.join(process.cwd(), relPath),
+          path.join(appRoot, relPath),
           path.join("/", relPath),
-          path.join(process.cwd(), "dist", "client", "assets", path.basename(relPath))
+          path.join(appRoot, "dist", "client", "assets", path.basename(relPath))
         ];
         let found = null;
         for (const cand of candidates) {
