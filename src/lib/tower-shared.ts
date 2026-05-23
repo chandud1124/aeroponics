@@ -74,9 +74,9 @@ export type LiveStatus = {
   pumpEndISO?: string | null;
   fault: string | null;
   plannedNextCycleISO?: string | null;
-  plannedNextCycleIn?: number;
+  plannedNextCycleIn?: number | null;
   retryNextCycleISO?: string | null;
-  retryNextCycleIn?: number;
+  retryNextCycleIn?: number | null;
   sensorDataOk?: boolean;
   dhtOk?: boolean;
   reservoirDsOk?: boolean;
@@ -149,19 +149,19 @@ export type AnalyticsSummary = {
 };
 
 export const defaultSchedule: Schedule = {
-  planName: "Easy start",
-  intervalMinutes: 30,
-  durationSeconds: 60,
-  startHour: 6,
-  endHour: 19,
+  planName: "3 on / 7 off (10m cycle)",
+  intervalMinutes: 10,
+  durationSeconds: 180, // 3 minutes
+  startHour: 0,
+  endHour: 24,
   enabled: true,
   lightEnabled: true,
   lightStartHour: 5,
   lightEndHour: 21,
-  dayIntervalMinutes: 7,
-  dayDurationSeconds: 45,
-  nightIntervalMinutes: 20,
-  nightDurationSeconds: 30,
+  dayIntervalMinutes: 10,
+  dayDurationSeconds: 180,
+  nightIntervalMinutes: 10,
+  nightDurationSeconds: 180,
   temperatureProtection: true,
   rainPause: false,
   heatBoost: true,

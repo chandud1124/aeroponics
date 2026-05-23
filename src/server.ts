@@ -334,6 +334,14 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
   if (url.pathname === "/api/schedule") {
     if (request.method === "GET" || request.method === "POST") {
+      // If a device is calling (provides device headers), require device auth.
+      const deviceIdHeader = request.headers.get("x-device-id");
+      const deviceKeyHeader = request.headers.get("x-api-key");
+      if (deviceIdHeader || deviceKeyHeader) {
+        if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
+          return jsonResponse({ error: "Unauthorized (device)" }, 401);
+        }
+      }
       return jsonResponse(getSchedule());
     }
 
