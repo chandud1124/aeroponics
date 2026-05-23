@@ -1,6 +1,7 @@
 import { PumpState, PUMP_STATE_LABELS, PUMP_STATE_COLORS } from "./tower-server-store";
 
 export type Schedule = {
+  planName?: string;
   intervalMinutes: number;
   durationSeconds: number;
   startHour: number;
@@ -102,6 +103,7 @@ export type AnalyticsSummary = {
 export { PumpState, PUMP_STATE_LABELS, PUMP_STATE_COLORS };
 
 export const defaultSchedule: Schedule = {
+  planName: "Easy start",
   intervalMinutes: 30,
   durationSeconds: 60,
   startHour: 6,

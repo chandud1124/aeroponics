@@ -46,7 +46,8 @@ function Index() {
   const [schedule, setSchedule] = useState<Schedule>(defaultSchedule);
   const [mounted, setMounted] = useState(false);
   const liveStatus = mounted ? status : null;
-  const isOnline = mounted ? Boolean(status?.isOnline) : false;
+  const backendReachable = mounted ? status !== null : false;
+  const telemetryFresh = mounted ? Boolean(status?.isOnline) : false;
 
   useEffect(() => {
     setMounted(true);
@@ -95,16 +96,16 @@ function Index() {
 
             <TabsContent value="status" className="mt-6">
               <div className="space-y-4">
-                {!isOnline ? (
+                {!backendReachable ? (
                   <>
                     <ManualControlPanel />
 
                     <Card className="border-dashed p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-sm font-medium">ESP32 telemetry stale</div>
+                          <div className="text-sm font-medium">Backend unavailable</div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            Relay controls still work, but live sensor updates have stopped. Historical cycles and faults still show below.
+                            The local API could not be reached, so live control and relay status are unavailable.
                           </div>
                         </div>
                         <Badge variant="destructive">OFFLINE</Badge>
@@ -112,12 +113,12 @@ function Index() {
                     </Card>
 
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <RelayStatesCard status={status} online={false} />
+                      <RelayStatesCard status={null} online={false} />
                       <Card className="border-dashed p-6">
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-muted-foreground">Live telemetry hidden</div>
                           <div className="text-sm text-muted-foreground">
-                            The controller will repopulate pump, light, temperature, and flow values once it reconnects.
+                            The controller will repopulate pump, light, temperature, and flow values once the backend returns.
                           </div>
                         </div>
                       </Card>
@@ -135,7 +136,21 @@ function Index() {
                   </>
                 ) : (
                   <>
-                    <FaultAlertBanner status={liveStatus} />
+                    {!telemetryFresh ? (
+                      <Card className="border-dashed p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium">ESP32 telemetry stale</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Relay controls still work, but sensor updates have stopped. The last known relay state remains visible.
+                            </div>
+                          </div>
+                          <Badge variant="secondary">CONNECTED</Badge>
+                        </div>
+                      </Card>
+                    ) : (
+                      <FaultAlertBanner status={liveStatus} />
+                    )}
 
                     <ManualControlPanel />
 

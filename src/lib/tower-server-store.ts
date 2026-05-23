@@ -36,6 +36,7 @@ export const PUMP_STATE_COLORS: Record<PumpState, string> = {
 };
 
 type Schedule = {
+  planName?: string;
   intervalMinutes: number;
   durationSeconds: number;
   startHour: number;
@@ -111,6 +112,8 @@ type PumpLogInput = Omit<PumpLog, "id" | "startedAt" | "endedAt"> & {
   mode?: PumpLog["mode"];
   onDurationSeconds?: number;
   offIntervalMinutes?: number;
+  startedAtMs?: number;
+  endedAtMs?: number;
 };
 
 const DEFAULT_SCHEDULE: Schedule = {
@@ -325,6 +328,42 @@ export function updateStatus(
   return getStatus();
 }
 
+export function touchStatus(options: { source?: "esp32" | "server" } = {}) {
+  const source = options.source ?? "server";
+  if (!status) {
+    status = {
+      pumpOn: false,
+      flowing: false,
+      pumpState: PumpState.IDLE,
+      motorManualMode: "AUTO",
+      lightManualMode: "AUTO",
+      batteryManualMode: "AUTO",
+      reservoirTempC: null,
+      humidityPct: null,
+      lightLux: null,
+      towerTempC: null,
+      lastRunISO: null,
+      fault: null,
+      nextCycleISO: null,
+      nextCycleIn: 0,
+      telemetryUpdatedAt: source === "esp32" ? Date.now() : null,
+      isOnline: source === "esp32",
+    };
+    return getStatus();
+  }
+
+  const telemetryUpdatedAt = source === "esp32" ? Date.now() : status.telemetryUpdatedAt ?? null;
+  const isOnline = telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS;
+
+  status = {
+    ...status,
+    telemetryUpdatedAt,
+    isOnline,
+  };
+
+  return getStatus();
+}
+
 export function getSensorHistory(days = 7) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
   return sensorHistory.filter((snapshot) => snapshot.timestamp >= cutoff).map((snapshot) => ({ ...snapshot }));
@@ -355,13 +394,14 @@ export function getPumpLogs() {
 }
 
 export function addPumpLog(log: PumpLogInput) {
-  const now = new Date();
+  const now = new Date(log.startedAtMs ?? Date.now());
+  const endedAt = new Date(log.endedAtMs ?? (now.getTime() + Math.max(0, log.durationSeconds) * 1000));
   const cycleProfile = getCycleProfile(now);
   const next = {
     ...log,
     id: makeId(),
     startedAt: now.toISOString(),
-    endedAt: new Date(now.getTime() + Math.max(0, log.durationSeconds) * 1000).toISOString(),
+    endedAt: endedAt.toISOString(),
     mode: log.mode ?? cycleProfile.mode,
     onDurationSeconds: log.onDurationSeconds ?? log.durationSeconds,
     offIntervalMinutes: log.offIntervalMinutes ?? cycleProfile.offIntervalMinutes,

@@ -47,7 +47,7 @@ export function ScheduleEditor() {
     setSaving(true);
     try {
       await saveScheduleRemote(s);
-      toast.success("Schedule saved locally. ESP32 will pick it up on next poll.");
+      toast.success("Plan saved. The ESP32 keeps the last saved plan even if the backend is offline.");
     } catch (e) {
       toast.error("Failed to save: " + (e as Error).message);
     } finally {
@@ -55,44 +55,69 @@ export function ScheduleEditor() {
     }
   };
 
-  const cyclesPerDay = Math.max(
-    0,
-    Math.floor(((s.endHour - s.startHour) * 60) / s.intervalMinutes),
-  );
-  const litresEstimate = ((cyclesPerDay * s.durationSeconds) / 60) * 2;
-  const dayCycles = Math.max(0, Math.floor(((s.endHour - s.startHour) * 60) / (s.dayIntervalMinutes ?? s.intervalMinutes)));
-  const nightCycles = Math.max(0, Math.floor((24 - (s.endHour - s.startHour)) * 60 / (s.nightIntervalMinutes ?? s.intervalMinutes)));
+  const activeWindowHours = Math.max(0, s.endHour - s.startHour);
+  const inactiveWindowHours = Math.max(0, 24 - activeWindowHours);
+  const dayRestMinutes = s.dayIntervalMinutes ?? s.intervalMinutes;
+  const nightRestMinutes = s.nightIntervalMinutes ?? Math.max(s.intervalMinutes, 15);
+  const dayRunSeconds = s.dayDurationSeconds ?? s.durationSeconds;
+  const nightRunSeconds = s.nightDurationSeconds ?? Math.max(15, Math.round(s.durationSeconds * 0.75));
+  const dayCycles = activeWindowHours > 0 ? Math.max(0, Math.floor((activeWindowHours * 60) / dayRestMinutes)) : 0;
+  const nightCycles = inactiveWindowHours > 0 ? Math.max(0, Math.floor((inactiveWindowHours * 60) / nightRestMinutes)) : 0;
+  const totalCycles = dayCycles + nightCycles;
+  const litresEstimate = (((dayCycles * dayRunSeconds) + (nightCycles * nightRunSeconds)) / 60) * 2;
+  const dayCycleMinutes = Math.round((dayRunSeconds + dayRestMinutes * 60) / 60);
+  const nightCycleMinutes = Math.round((nightRunSeconds + nightRestMinutes * 60) / 60);
 
   return (
     <Card className="p-6">
       <div className="mb-4">
         <h3 className="text-lg font-semibold">Watering plan</h3>
         <p className="text-sm text-muted-foreground">
-          Set day and night watering behavior, then let the ESP32 enforce safety checks locally.
+          Set pump timing in plain language. A 10 minute plan means the pump rests for 10 minutes between runs.
         </p>
       </div>
 
-      <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-5 rounded-lg border border-border bg-secondary/40 p-4 text-sm text-secondary-foreground">
+        <div className="font-semibold">How the plan works</div>
+        <ul className="mt-2 space-y-1">
+          <li>Pump ON duration = how long the motor runs each cycle.</li>
+          <li>Pump OFF interval = how long the controller waits before the next cycle.</li>
+          <li>Active from / until = the daylight window for the plan.</li>
+          <li>Grow light turns on automatically when it is dark during the active window, and can still be forced on or off from Manual controls.</li>
+          <li>Custom plan name = the label you want to remember for this setup.</li>
+        </ul>
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <div className="space-y-2 sm:col-span-2">
+          <Label htmlFor="planName">Plan name</Label>
+          <Input
+            id="planName"
+            type="text"
+            value={s.planName ?? ""}
+            placeholder="Example: Tomato morning plan"
+            onChange={(e) => update("planName", e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {
-            label: "Leafy Greens - Normal",
-            preset: { dayDurationSeconds: 45, dayIntervalMinutes: 7, nightDurationSeconds: 30, nightIntervalMinutes: 15 },
+            label: "Easy start",
+            preset: { planName: "Easy start", dayDurationSeconds: 45, dayIntervalMinutes: 7, nightDurationSeconds: 30, nightIntervalMinutes: 15 },
           },
           {
-            label: "Leafy Greens - Hot Weather",
-            preset: { dayDurationSeconds: 50, dayIntervalMinutes: 6, nightDurationSeconds: 30, nightIntervalMinutes: 12, heatBoost: true },
+            label: "Hot weather",
+            preset: { planName: "Hot weather", dayDurationSeconds: 50, dayIntervalMinutes: 6, nightDurationSeconds: 30, nightIntervalMinutes: 12, heatBoost: true },
           },
           {
-            label: "Herbs",
-            preset: { dayDurationSeconds: 35, dayIntervalMinutes: 8, nightDurationSeconds: 20, nightIntervalMinutes: 18 },
+            label: "Short cycles",
+            preset: { planName: "Short cycles", dayDurationSeconds: 35, dayIntervalMinutes: 8, nightDurationSeconds: 20, nightIntervalMinutes: 18 },
           },
           {
-            label: "Seedling Stage",
-            preset: { dayDurationSeconds: 20, dayIntervalMinutes: 5, nightDurationSeconds: 15, nightIntervalMinutes: 10 },
-          },
-          {
-            label: "Custom",
-            preset: {},
+            label: "Seedlings",
+            preset: { planName: "Seedlings", dayDurationSeconds: 20, dayIntervalMinutes: 5, nightDurationSeconds: 15, nightIntervalMinutes: 10 },
           },
         ].map((preset) => (
           <Button key={preset.label} variant="outline" onClick={() => applyPreset(preset.preset)}>
@@ -103,7 +128,7 @@ export function ScheduleEditor() {
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="interval">Day OFF interval (minutes)</Label>
+          <Label htmlFor="interval">Pump rest time during the day (OFF interval, minutes)</Label>
           <Input
             id="interval"
             type="number"
@@ -116,9 +141,10 @@ export function ScheduleEditor() {
               update("intervalMinutes", value);
             }}
           />
+          <div className="text-xs text-muted-foreground">Example: set 7 if you want the pump to stay off for 7 minutes.</div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="duration">Day ON duration (seconds)</Label>
+          <Label htmlFor="duration">Pump run time during the day (ON duration, seconds)</Label>
           <Input
             id="duration"
             type="number"
@@ -131,9 +157,10 @@ export function ScheduleEditor() {
               update("durationSeconds", value);
             }}
           />
+          <div className="text-xs text-muted-foreground">Example: set 180 to run the pump for 3 minutes each cycle.</div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="start">Active from (hour, 0–23)</Label>
+          <Label htmlFor="start">Daylight start hour (0–23)</Label>
           <Input
             id="start"
             type="number"
@@ -144,7 +171,7 @@ export function ScheduleEditor() {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="end">Active until (hour, 0–23)</Label>
+          <Label htmlFor="end">Daylight end hour (0–23)</Label>
           <Input
             id="end"
             type="number"
@@ -158,7 +185,7 @@ export function ScheduleEditor() {
           <div>
             <div className="font-medium">Schedule enabled</div>
             <div className="text-xs text-muted-foreground">
-              When OFF, ESP32 stays in manual/maintenance mode.
+              When OFF, the controller stops automatic timing and keeps only manual controls active.
             </div>
           </div>
           <Switch checked={s.enabled} onCheckedChange={(v) => update("enabled", v)} />
@@ -168,12 +195,12 @@ export function ScheduleEditor() {
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-lg border border-border p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h4 className="font-semibold">Day mode</h4>
+            <h4 className="font-semibold">Day pump timing</h4>
             <Badge variant="secondary">Heat aware</Badge>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="dayDuration">ON duration</Label>
+              <Label htmlFor="dayDuration">Pump run time</Label>
               <Input
                 id="dayDuration"
                 type="number"
@@ -184,7 +211,7 @@ export function ScheduleEditor() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="dayInterval">OFF interval</Label>
+              <Label htmlFor="dayInterval">Pump rest time (OFF interval)</Label>
               <Input
                 id="dayInterval"
                 type="number"
@@ -199,12 +226,12 @@ export function ScheduleEditor() {
 
         <div className="rounded-lg border border-border p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h4 className="font-semibold">Night mode</h4>
+            <h4 className="font-semibold">Night pump timing</h4>
             <Badge variant="secondary">Water saving</Badge>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="nightDuration">ON duration</Label>
+              <Label htmlFor="nightDuration">Pump run time</Label>
               <Input
                 id="nightDuration"
                 type="number"
@@ -215,7 +242,7 @@ export function ScheduleEditor() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="nightInterval">OFF interval</Label>
+              <Label htmlFor="nightInterval">Pump rest time (OFF interval)</Label>
               <Input
                 id="nightInterval"
                 type="number"
@@ -257,34 +284,45 @@ export function ScheduleEditor() {
 
       <div className="mt-6 rounded-lg border border-border bg-secondary/40 p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h4 className="font-semibold">Live cycle preview</h4>
+          <h4 className="font-semibold">What these settings do</h4>
           <Badge variant="outline">Preview only</Badge>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-md bg-background p-3">
-            <div className="text-xs text-muted-foreground">Current cycle</div>
-            <div className="font-semibold">ON {s.dayDurationSeconds ?? s.durationSeconds}s / OFF {s.dayIntervalMinutes ?? s.intervalMinutes}m</div>
+            <div className="text-xs text-muted-foreground">Current plan</div>
+            <div className="font-semibold">{s.planName?.trim() || "Untitled plan"}</div>
           </div>
           <div className="rounded-md bg-background p-3">
-            <div className="text-xs text-muted-foreground">Expected next mist</div>
-            <div className="font-semibold">After controller verification + countdown</div>
+            <div className="text-xs text-muted-foreground">Day pump cycle</div>
+            <div className="font-semibold">Every {dayCycleMinutes} min: ON {Math.round(dayRunSeconds / 60)} min, OFF {dayRestMinutes} min</div>
           </div>
           <div className="rounded-md bg-background p-3">
-            <div className="text-xs text-muted-foreground">Est. daily usage</div>
-            <div className="font-semibold">{litresEstimate.toFixed(1)} L/day</div>
+            <div className="text-xs text-muted-foreground">Night pump cycle</div>
+            <div className="font-semibold">Every {nightCycleMinutes} min: ON {Math.round(nightRunSeconds / 60)} min, OFF {nightRestMinutes} min</div>
+          </div>
+          <div className="rounded-md bg-background p-3">
+            <div className="text-xs text-muted-foreground">LED rule</div>
+            <div className="font-semibold">Auto ON in darkness during {s.startHour}:00–{s.endHour}:00</div>
+          </div>
+          <div className="rounded-md bg-background p-3 sm:col-span-2 xl:col-span-2">
+            <div className="text-xs text-muted-foreground">Estimated daily activity</div>
+            <div className="font-semibold">{totalCycles} cycles, {litresEstimate.toFixed(1)} L/day</div>
           </div>
         </div>
       </div>
 
       <div className="mt-5 rounded-md bg-secondary p-4 text-sm text-secondary-foreground">
         <div>
-          ≈ <strong>{cyclesPerDay}</strong> pump cycles / day
-        </div>
-        <div>
-          ≈ <strong>{dayCycles}</strong> day cycles, <strong>{nightCycles}</strong> night cycles
+          ≈ <strong>{dayCycles}</strong> day cycles and <strong>{nightCycles}</strong> night cycles per day
         </div>
         <div>
           ≈ <strong>{litresEstimate.toFixed(1)} L</strong> water moved / day (assuming 2 L/min pump)
+        </div>
+        <div>
+          For a 10-minute plan, use about 3 minutes ON and 7 minutes OFF.
+        </div>
+        <div>
+          If backend is offline, the ESP32 keeps using the last saved plan from its own memory.
         </div>
       </div>
 

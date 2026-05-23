@@ -13,6 +13,7 @@ import {
   getFaultHistory,
   getSensorHistory,
   getAnalyticsSummary,
+  touchStatus,
   updateSchedule,
   updateStatus,
   PumpState,
@@ -33,6 +34,7 @@ type ServerEntry = {
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
+let manualPumpStartedAtMs: number | null = null;
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -227,6 +229,28 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
+  if (url.pathname === "/api/heartbeat") {
+    if (request.method !== "POST" && request.method !== "PUT") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    const deviceIdHeader = request.headers.get("x-device-id");
+    const deviceKeyHeader = request.headers.get("x-api-key");
+    if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
+      return jsonResponse({ error: "Unauthorized (device)" }, 401);
+    }
+
+    const status = touchStatus({ source: "esp32" });
+    return jsonResponse(
+      {
+        success: true,
+        telemetryUpdatedAt: status?.telemetryUpdatedAt ?? Date.now(),
+        isOnline: status?.isOnline ?? true,
+      },
+      200,
+    );
+  }
+
   if (url.pathname === "/api/schedule") {
     if (request.method === "GET" || request.method === "POST") {
       return jsonResponse(getSchedule());
@@ -234,6 +258,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     if (request.method === "PUT") {
       const payload = (await request.json()) as {
+        planName?: string;
         intervalMinutes: number;
         durationSeconds: number;
         startHour: number;
@@ -410,6 +435,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (payload.action === "start") {
+      manualPumpStartedAtMs = Date.now();
       updateStatus({
         pumpOn: true,
         flowing: false,
@@ -417,9 +443,12 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         motorManualMode: "FORCED_ON",
         fault: null,
       });
-      addPumpLog({ durationSeconds: 0, flowed: false, fault: null });
-      return jsonResponse({ success: true, state: "MANUAL_MODE" }, 201);
+      return jsonResponse({ success: true, state: "MANUAL_MODE", startedAt: manualPumpStartedAtMs }, 201);
     }
+
+    const startedAtMs = manualPumpStartedAtMs ?? Date.now();
+    const endedAtMs = Date.now();
+    const durationSeconds = Math.max(0, Math.round((endedAtMs - startedAtMs) / 1000));
 
     updateStatus({
       pumpOn: false,
@@ -427,8 +456,18 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       pumpState: PumpState.MANUAL_MODE,
       motorManualMode: "FORCED_OFF",
     });
-    addPumpLog({ durationSeconds: 0, flowed: false, fault: null });
-    return jsonResponse({ success: true, state: "IDLE" }, 201);
+    if (manualPumpStartedAtMs != null) {
+      addPumpLog({
+        durationSeconds: Math.max(1, durationSeconds),
+        flowed: durationSeconds > 0,
+        fault: null,
+        mode: "MANUAL",
+        startedAtMs,
+        endedAtMs,
+      });
+    }
+    manualPumpStartedAtMs = null;
+    return jsonResponse({ success: true, state: "IDLE", durationSeconds }, 201);
   }
 
   if (url.pathname === "/api/manual-light") {

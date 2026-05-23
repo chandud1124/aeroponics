@@ -8,6 +8,8 @@
 #include <esp_system.h>
 #include <esp_log.h>
 
+void sendHeartbeat();
+
 // ─────────────────────────────────────────────────────────────────────
 //  STATE MACHINE ENUM
 // ─────────────────────────────────────────────────────────────────────
@@ -76,6 +78,7 @@ const unsigned long API_TIMEOUT_MS    = 8000UL;
 const unsigned long IV_SENSOR         = 30000UL;
 const unsigned long IV_SCHEDULE       = 60000UL;
 const unsigned long IV_STATUS_POST    = 10000UL;
+const unsigned long IV_HEARTBEAT      = 5000UL;
 const unsigned long IV_WIFI_CHECK     = 10000UL;
 const unsigned long IV_REMOTE_SYNC    = 3000UL;
 // Feed the watchdog well below the core's active TWDT window.
@@ -163,6 +166,7 @@ String        lastFaultCode        = "NONE";
 unsigned long tsLastSensor         = 0;
 unsigned long tsLastScheduleFetch  = 0;
 unsigned long tsLastStatusPost     = 0;
+unsigned long tsLastHeartbeat      = 0;
 unsigned long tsLastWifiCheck      = 0;
 unsigned long tsLastRemoteSync     = 0;
 unsigned long tsLastWdtFeed        = 0;
@@ -734,6 +738,7 @@ void setup() {
   tsLastSensor        = now;
   tsLastScheduleFetch = now;
   tsLastStatusPost    = now;
+  tsLastHeartbeat     = now;
   tsLastWifiCheck     = 0;
   tsLastRemoteSync    = now;
   tsLastWdtFeed       = now;
@@ -786,6 +791,11 @@ void loop() {
   if (backendReady && now - tsLastStatusPost >= IV_STATUS_POST) {
     postStatus();
     tsLastStatusPost = now;
+  }
+
+  if (backendReady && now - tsLastHeartbeat >= IV_HEARTBEAT) {
+    sendHeartbeat();
+    tsLastHeartbeat = now;
   }
 
   if (backendReady && now - tsLastLogFlush >= IV_LOG_FLUSH) {
@@ -1163,6 +1173,20 @@ void postStatus() {
   int code = httpRequest("PUT", "/api/status", body);
   if (code != 200 && code != 204) {
     Serial.printf("[API] Backend unreachable: status update failed (HTTP %d)\n", code);
+  }
+}
+
+void sendHeartbeat() {
+  if (!wifiConnected) return;
+
+  String body = "{";
+  body += "\"uptimeSec\":" + String((uint32_t)(millis() / 1000UL)) + ",";
+  body += "\"wifiConnected\":" + String(wifiConnected ? "true" : "false");
+  body += "}";
+
+  int code = httpRequest("POST", "/api/heartbeat", body);
+  if (code != 200 && code != 204) {
+    Serial.printf("[API] Backend unreachable: heartbeat failed (HTTP %d)\n", code);
   }
 }
 
