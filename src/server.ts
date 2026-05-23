@@ -160,7 +160,11 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
   if (url.pathname === "/api/status") {
     if (request.method === "GET") {
       const status = getStatus();
-      return jsonResponse(status ?? null);
+      // Include the current schedule so devices can pull it with a single call
+      const schedule = getSchedule();
+      if (!status) return jsonResponse({ status: null, schedule });
+      // Merge status fields and attach schedule under `schedule` key
+      return jsonResponse({ ...status, schedule });
     }
 
     if (request.method === "PATCH" || request.method === "PUT") {

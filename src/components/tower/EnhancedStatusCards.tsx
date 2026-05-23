@@ -59,8 +59,8 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
             <Droplet className="h-5 w-5 text-blue-500" />
           </div>
           <div className="mt-2">
-            <Badge variant={status.flowing ? "default" : "secondary"}>
-              {status.flowing ? "Flowing" : "No flow"}
+            <Badge variant={status.flowing && status.pumpOn ? "default" : "secondary"}>
+              {status.flowing && status.pumpOn ? "Flowing" : "No flow"}
             </Badge>
           </div>
         </Card>

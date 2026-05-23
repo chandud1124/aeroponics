@@ -56,8 +56,8 @@ export function PumpStateDisplay({ status }: { status: LiveStatus }) {
 
         <div className="flex flex-wrap gap-2 text-xs">
           <Badge variant="secondary">Current cycle: {cycleLabel}</Badge>
-          <Badge variant={status.flowing ? "default" : "outline"}>
-            {status.flowing ? "Flow verified" : state === PumpState.VERIFYING_FLOW ? "Verifying flow" : "Oxygen break"}
+          <Badge variant={status.flowing && status.pumpOn ? "default" : "outline"}>
+            {status.flowing && status.pumpOn ? "Flow verified" : state === PumpState.VERIFYING_FLOW ? "Verifying flow" : "Oxygen break"}
           </Badge>
         </div>
 
@@ -118,7 +118,13 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
       }
 
       if (status.nextCycleIn === 0) {
-        setCountdown("DUE NOW");
+        // If schedule is due but the pump hasn't reported as running yet,
+        // show a clearer message so users know we're awaiting device confirmation.
+        if (!status.pumpOn) {
+          setCountdown("DUE NOW — awaiting device");
+        } else {
+          setCountdown("RUNNING");
+        }
         return;
       }
 
@@ -143,7 +149,7 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [status.nextCycleISO]);
+  }, [status.nextCycleISO, status.pumpOn]);
 
   if (!status.nextCycleISO) {
       const waitingText = schedule.enabled
