@@ -936,146 +936,125 @@ int httpRequest(const char* method, const char* path,
   return code;
 }
 
-// Fetch schedule AND remote manual mode overrides from backend.
-// [FIX-10] Combined into one function called every IV_SCHEDULE (60s)
-//          instead of syncRemoteManualModes() every 3s.
-void fetchScheduleAndSync() {
+bool fetchHandshakeAndSync() {
   if (!wifiConnected) {
     Serial.println("[API] Offline — NVS schedule in use");
+    return false;
+  }
+
+  HTTPClient http;
+  http.setTimeout(API_TIMEOUT_MS);
+  http.begin(String(API_BASE_URL) + "/api/device/handshake");
+  http.addHeader("X-Device-ID", DEVICE_ID);
+  http.addHeader("X-API-Key",   DEVICE_SECRET);
+
+  int code = http.GET();
+  if (code != 200) {
+    Serial.printf("[API] Handshake failed (HTTP %d)\n", code);
+    http.end();
+    return false;
+  }
+
+  String resp = http.getString();
+  http.end();
+
+  int ni = extractJsonInt(resp, "intervalMinutes");
+  int nd = extractJsonInt(resp, "durationSeconds");
+  int ns = extractJsonInt(resp, "startHour");
+  int ne = extractJsonInt(resp, "endHour");
+  int ncs = extractJsonInt(resp, "chargeStartHour");
+  int nce = extractJsonInt(resp, "chargeEndHour");
+  bool nen = (resp.indexOf("\"enabled\":true") >= 0);
+
+  if (ni > 0 && ni <= 1440 &&
+      nd > 0 && nd <= 600  &&
+      ns >= 0 && ns <= 23  &&
+      ne >= 0 && ne <= 23) {
+    bool changed = (ni != schedule.intervalMinutes ||
+                    nd != schedule.durationSeconds ||
+                    ns != schedule.startHour       ||
+                    ne != schedule.endHour         ||
+                    nen != schedule.enabled);
+
+    schedule.intervalMinutes = ni;
+    schedule.durationSeconds = nd;
+    schedule.startHour = ns;
+    schedule.endHour = ne;
+    schedule.enabled = nen;
+
+    if (ncs >= 0 && ncs <= 23 && nce >= 0 && nce <= 23 && nce > ncs) {
+      unsigned long newStart = (unsigned long)ncs * 3600UL;
+      unsigned long newDur = (unsigned long)(nce - ncs) * 3600UL;
+      if (newStart != batteryChargeStartSec || newDur != batteryChargeDurSec) {
+        batteryChargeStartSec = newStart;
+        batteryChargeDurSec = newDur;
+        changed = true;
+        Serial.printf("[API] Charge window updated: %02d:00–%02d:00\n", ncs, nce);
+      }
+    }
+
+    String planName = extractJsonString(resp, "planName");
+    if (planName.length() > 0 && planName != appliedPlanName) {
+      appliedPlanName = planName;
+      changed = true;
+    }
+
+    if (changed) {
+      scheduleAppliedAt = getCurrentEpoch();
+      saveScheduleToNVS();
+      savePlanNameToNVS(appliedPlanName);
+
+      String ack = "{";
+      ack += "\"scheduleAppliedAt\":" + String((uint32_t)scheduleAppliedAt);
+      if (appliedPlanName.length() > 0) {
+        ack += ",\"planName\":\"" + appliedPlanName + "\"";
+      }
+      ack += "}";
+      int ackCode = httpRequest("PUT", "/api/status", ack);
+      if (ackCode != 200 && ackCode != 204) {
+        Serial.printf("[API] Failed to notify backend of applied schedule (HTTP %d)\n", ackCode);
+      }
+    }
+  } else {
+    Serial.printf("[API] Rejected invalid handshake schedule (i=%d d=%d s=%d e=%d)\n", ni, nd, ns, ne);
+  }
+
+  String pm = extractJsonString(resp, "motorManualMode");
+  String lm = extractJsonString(resp, "lightManualMode");
+  int retryIn = extractJsonInt(resp, "retryNextCycleIn");
+
+  if (pm.length() > 0) {
+    ManualMode newMotor = manualModeFromString(pm);
+    if (newMotor != motorManualMode) {
+      motorManualMode = newMotor;
+      Serial.printf("[API] Remote motor mode: %s\n", manualModeToString(motorManualMode));
+    }
+  }
+  if (lm.length() > 0) {
+    ManualMode newLight = manualModeFromString(lm);
+    if (newLight != lightManualMode) {
+      lightManualMode = newLight;
+      Serial.printf("[API] Remote light mode: %s\n", manualModeToString(lightManualMode));
+    }
+  }
+
+  if (retryIn >= 0 && retryIn <= 2) {
+    Serial.printf("[API] Retry requested in %ds\n", retryIn);
+    if (curState == STATE_IDLE && motorManualMode == MANUAL_AUTO && schedule.enabled) {
+      Serial.println("[API] Triggering immediate retry cycle");
+      pumpStartMs = millis();
+      curState = STATE_CHECK_WATER;
+    }
+  }
+
+  return true;
+}
+
+// Fetch authenticated schedule + remote manual mode state from backend.
+// [FIX-10] Handshake runs every IV_SCHEDULE (60s), and once immediately after boot.
+void fetchScheduleAndSync() {
+  if (!fetchHandshakeAndSync()) {
     return;
-  }
-
-  // ── 1. Fetch schedule ─────────────────────────────────────────────
-  {
-    HTTPClient http;
-    http.setTimeout(API_TIMEOUT_MS);
-    http.begin(String(API_BASE_URL) + "/api/schedule");
-    http.addHeader("X-Device-ID", DEVICE_ID);
-    http.addHeader("X-API-Key",   DEVICE_SECRET);
-
-    int code = http.GET();
-    if (code == 200) {
-      String resp = http.getString();
-
-      int ni = extractJsonInt(resp, "intervalMinutes");
-      int nd = extractJsonInt(resp, "durationSeconds");
-      int ns = extractJsonInt(resp, "startHour");
-      int ne = extractJsonInt(resp, "endHour");
-      // [FIX-11] Battery charge window from backend
-      int ncs = extractJsonInt(resp, "chargeStartHour");
-      int nce = extractJsonInt(resp, "chargeEndHour");
-      bool nen = (resp.indexOf("\"enabled\":true") >= 0);
-
-      // Validate before applying
-      if (ni <= 0 || ni > 1440 ||
-          nd <= 0 || nd > 600  ||
-          ns < 0  || ns > 23   ||
-          ne < 0  || ne > 23)  {
-        Serial.printf("[API] Rejected invalid schedule (i=%d d=%d s=%d e=%d)\n",
-                      ni, nd, ns, ne);
-      } else {
-        bool changed = (ni != schedule.intervalMinutes ||
-                        nd != schedule.durationSeconds ||
-                        ns != schedule.startHour       ||
-                        ne != schedule.endHour         ||
-                        nen != schedule.enabled);
-
-        schedule.intervalMinutes = ni;
-        schedule.durationSeconds = nd;
-        schedule.startHour       = ns;
-        schedule.endHour         = ne;
-        schedule.enabled         = nen;
-
-        // [FIX-11] Apply charge window from backend if provided
-        if (ncs >= 0 && ncs <= 23 && nce >= 0 && nce <= 23 && nce > ncs) {
-          unsigned long newStart = (unsigned long)ncs * 3600UL;
-          unsigned long newDur   = (unsigned long)(nce - ncs) * 3600UL;
-          if (newStart != batteryChargeStartSec || newDur != batteryChargeDurSec) {
-            batteryChargeStartSec = newStart;
-            batteryChargeDurSec   = newDur;
-            changed = true;
-            Serial.printf("[API] Charge window updated: %02d:00–%02d:00\n", ncs, nce);
-          }
-        }
-
-        // Parse optional planName and scheduleAppliedAt
-        String planName = extractJsonString(resp, "planName");
-        if (planName.length() > 0 && planName != appliedPlanName) {
-          appliedPlanName = planName;
-          scheduleAppliedAt = (time_t)extractJsonInt(resp, "scheduleAppliedAt");
-        }
-
-        if (changed) {
-          scheduleAppliedAt = getCurrentEpoch();
-          saveScheduleToNVS();
-          savePlanNameToNVS(appliedPlanName);
-          if (scheduleAppliedAt > 0 && wifiConnected) {
-            String ack = "{";
-            ack += "\"scheduleAppliedAt\":" + String((uint32_t)scheduleAppliedAt);
-            if (appliedPlanName.length() > 0) {
-              ack += ",\"planName\":\"" + appliedPlanName + "\"";
-            }
-            ack += "}";
-            int ackCode = httpRequest("PUT", "/api/status", ack);
-            if (ackCode != 200 && ackCode != 204) {
-              Serial.printf("[API] Failed to notify backend of applied schedule (HTTP %d)\n", ackCode);
-            }
-          }
-          Serial.printf("[API] Schedule updated: every %dmin for %ds (%02d:00–%02d:00)\n",
-                        ni, nd, ns, ne);
-        }
-      }
-    } else {
-      Serial.printf("[API] Schedule fetch failed (HTTP %d)\n", code);
-    }
-    http.end();
-  }
-
-  // ── 2. Fetch remote manual mode overrides ─────────────────────────
-  // [FIX-10] Was previously syncRemoteManualModes() called every 3s.
-  // Now runs at the same 60s cadence — backend changes are picked up
-  // within one minute which is acceptable for manual control.
-  {
-    HTTPClient http;
-    http.setTimeout(API_TIMEOUT_MS);
-    http.begin(String(API_BASE_URL) + "/api/status");
-    http.addHeader("X-Device-ID", DEVICE_ID);
-    http.addHeader("X-API-Key",   DEVICE_SECRET);
-
-    int code = http.GET();
-    if (code == 200) {
-      String resp = http.getString();
-
-      String pm = extractJsonString(resp, "motorManualMode");
-      String lm = extractJsonString(resp, "lightManualMode");
-      // Parse retry hint from server (in seconds)
-      int retryIn = extractJsonInt(resp, "retryNextCycleIn");
-
-      if (pm.length() > 0) {
-        ManualMode newMotor = manualModeFromString(pm);
-        if (newMotor != motorManualMode) {
-          motorManualMode = newMotor;
-          Serial.printf("[API] Remote motor mode: %s\n", manualModeToString(motorManualMode));
-        }
-      }
-      if (lm.length() > 0) {
-        ManualMode newLight = manualModeFromString(lm);
-        if (newLight != lightManualMode) {
-          lightManualMode = newLight;
-          Serial.printf("[API] Remote light mode: %s\n", manualModeToString(lightManualMode));
-        }
-      }
-      // If a retry is requested within the next couple seconds, trigger immediate cycle
-      if (retryIn >= 0 && retryIn <= 2) {
-        Serial.printf("[API] Retry requested in %ds\n", retryIn);
-        if (curState == STATE_IDLE && motorManualMode == MANUAL_AUTO && schedule.enabled) {
-          Serial.println("[API] Triggering immediate retry cycle");
-          pumpStartMs = millis();
-          curState = STATE_CHECK_WATER; // state machine will validate and start pump
-        }
-      }
-    }
-    http.end();
   }
 }
 
@@ -1206,7 +1185,7 @@ void setup() {
   // ── Timestamp init ────────────────────────────────────────────────
   unsigned long now    = millis();
   tsLastSensor         = now;
-  tsLastScheduleFetch  = now;
+  tsLastScheduleFetch  = now - IV_SCHEDULE;
   tsLastStatusPost     = now;
   tsLastWifiCheck      = 0;   // Force immediate WiFi check
   tsLastWdtFeed        = now;

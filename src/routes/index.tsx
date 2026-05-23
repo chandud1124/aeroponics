@@ -5,8 +5,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { Sprout } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { EnhancedStatusCards } from "@/components/tower/EnhancedStatusCards";
 import { ScheduleEditor } from "@/components/tower/ScheduleEditor";
@@ -16,7 +16,7 @@ import { Documentation } from "@/components/tower/Documentation";
 import { PumpStats } from "@/components/tower/PumpStats";
 import { AIInsightsCard } from "@/components/tower/AIInsightsCard";
 import AdminDevices from "@/components/tower/AdminDevices";
-import { defaultSchedule, fetchSchedule, fetchStatus, type LiveStatus, type Schedule } from "@/lib/tower-storage";
+import { defaultSchedule, fetchDevices, fetchSchedule, fetchStatusEnvelope, type LiveStatus, type Schedule, type DeviceListEntry } from "@/lib/tower-storage";
 import {
   FaultAlertBanner,
   FaultHistoryPanel,
@@ -48,10 +48,14 @@ function Index() {
   const [status, setStatus] = useState<LiveStatus | null>(null);
   const [schedule, setSchedule] = useState<Schedule>(defaultSchedule);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [hasRegisteredDevice, setHasRegisteredDevice] = useState(false);
+  const [devices, setDevices] = useState<DeviceListEntry[]>([]);
+  const [deviceListLoaded, setDeviceListLoaded] = useState(false);
   const [mounted, setMounted] = useState(false);
   const liveStatus = mounted ? status : null;
   const backendReachable = mounted ? status !== null : false;
   const telemetryFresh = mounted ? Boolean(status?.isOnline) : false;
+  const controlsAllowed = mounted ? telemetryFresh && hasRegisteredDevice : false;
   const activeDeviceId = selectedDeviceId.trim() || (status?.deviceId ?? null);
 
   useEffect(() => {
@@ -75,14 +79,32 @@ function Index() {
   }, [mounted, selectedDeviceId]);
 
   useEffect(() => {
+    if (!mounted || deviceListLoaded) return;
+
+    fetchDevices().then((nextDevices) => {
+      setDevices(nextDevices);
+      setDeviceListLoaded(true);
+      if (!selectedDeviceId.trim() && nextDevices.length > 0) {
+        setSelectedDeviceId(nextDevices[0].deviceId);
+      }
+    });
+  }, [mounted, deviceListLoaded, selectedDeviceId]);
+
+  useEffect(() => {
     if (!mounted) return;
-    
+
     // Initial fetch
-    fetchStatus(selectedDeviceId.trim() || null).then((s) => setStatus(s));
+    fetchStatusEnvelope(selectedDeviceId.trim() || null).then((payload) => {
+      setStatus(payload?.status ?? null);
+      setHasRegisteredDevice(Boolean(payload?.hasRegisteredDevice));
+    });
     fetchSchedule().then((s) => s && setSchedule(s));
 
     const interval = setInterval(() => {
-      fetchStatus(selectedDeviceId.trim() || null).then((s) => setStatus(s));
+      fetchStatusEnvelope(selectedDeviceId.trim() || null).then((payload) => {
+        setStatus(payload?.status ?? null);
+        setHasRegisteredDevice(Boolean(payload?.hasRegisteredDevice));
+      });
       fetchSchedule().then((s) => s && setSchedule(s));
     }, 2000);
 
@@ -111,20 +133,26 @@ function Index() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div className="space-y-1">
                 <Label htmlFor="device-id-selector" className="text-sm font-medium">
-                  Device ID selector
+                  Device selector
                 </Label>
                 <div className="text-xs text-muted-foreground">
-                  Leave this blank to use the currently reported device. Enter a device ID to scope live data and controls.
+                  Pick a registered device to scope live data and controls.
                 </div>
               </div>
               <div className="flex w-full flex-col gap-2 sm:max-w-md sm:flex-row">
-                <Input
-                  id="device-id-selector"
-                  value={selectedDeviceId}
-                  onChange={(event) => setSelectedDeviceId(event.target.value)}
-                  placeholder={status?.deviceId ?? "default"}
-                  autoComplete="off"
-                />
+                <Select value={selectedDeviceId || "__current__"} onValueChange={(value) => setSelectedDeviceId(value === "__current__" ? "" : value)}>
+                  <SelectTrigger id="device-id-selector" className="w-full">
+                    <SelectValue placeholder={devices.length > 0 ? "Select a device" : "No registered devices"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__current__">Follow current device</SelectItem>
+                    {devices.map((device) => (
+                      <SelectItem key={device.deviceId} value={device.deviceId}>
+                        {device.name ?? device.deviceId}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   type="button"
                   variant="outline"
@@ -157,7 +185,7 @@ function Index() {
               <div className="space-y-4">
                 {!backendReachable ? (
                   <>
-                    <ManualControlPanel status={null} deviceId={activeDeviceId} online={false} />
+                    <ManualControlPanel status={null} deviceId={activeDeviceId} online={false} controlsAllowed={false} />
 
                     <Card className="border-dashed p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -172,7 +200,7 @@ function Index() {
                     </Card>
 
                     <div className="grid gap-4 xl:grid-cols-2">
-                      <RelayStatesCard status={null} online={false} deviceId={activeDeviceId} />
+                      <RelayStatesCard status={null} online={false} deviceId={activeDeviceId} controlsAllowed={false} />
                       <Card className="border-dashed p-6">
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-muted-foreground">Live telemetry hidden</div>
@@ -215,10 +243,20 @@ function Index() {
                       <FaultAlertBanner status={currentStatus} />
                     )}
 
-                    <ManualControlPanel status={currentStatus} deviceId={activeDeviceId} online={telemetryFresh} />
+                    <ManualControlPanel
+                      status={currentStatus}
+                      deviceId={activeDeviceId}
+                      online={telemetryFresh}
+                      controlsAllowed={controlsAllowed}
+                    />
 
                     <div className="grid gap-4 xl:grid-cols-2">
-                      <RelayStatesCard status={currentStatus} online={telemetryFresh} deviceId={activeDeviceId} />
+                      <RelayStatesCard
+                        status={currentStatus}
+                        online={telemetryFresh}
+                        deviceId={activeDeviceId}
+                        controlsAllowed={controlsAllowed}
+                      />
                       <NextCyclePanel status={currentStatus} schedule={schedule} online={telemetryFresh} />
                     </div>
 

@@ -486,17 +486,19 @@ export function ManualControlPanel({
   status,
   deviceId,
   online = true,
+  controlsAllowed = true,
 }: {
   status: LiveStatus | null;
   deviceId?: string | null;
   online?: boolean;
+  controlsAllowed?: boolean;
 }) {
   const [pumpLoading, setPumpLoading] = useState(false);
   const [pumpModeLoading, setPumpModeLoading] = useState(false);
   const [lightLoading, setLightLoading] = useState(false);
   const [optimisticLightOn, setOptimisticLightOn] = useState<boolean | null>(null);
   const pumpModeIsManual = status?.motorManualMode !== "AUTO";
-  const controlsEnabled = online && Boolean(status);
+  const controlsEnabled = online && controlsAllowed && Boolean(status);
 
   const handleStart = async () => {
     if (!controlsEnabled || !pumpModeIsManual) return;
@@ -722,10 +724,12 @@ export function RelayStatesCard({
   status,
   online = true,
   deviceId,
+  controlsAllowed = true,
 }: {
   status: LiveStatus | null;
   online?: boolean;
   deviceId?: string | null;
+  controlsAllowed?: boolean;
 }) {
   const [modeLoading, setModeLoading] = useState<{ pump: boolean; light: boolean; battery: boolean }>({
     pump: false,
@@ -734,7 +738,7 @@ export function RelayStatesCard({
   });
 
   const toggleRelayMode = async (kind: "pump" | "light" | "battery", active: boolean, manualMode?: string) => {
-    if (!online || !status) return;
+    if (!online || !controlsAllowed || !status) return;
     const endpoint = kind === "pump" ? "/api/manual-pump" : kind === "light" ? "/api/manual-light" : "/api/manual-battery";
     const action = manualMode && manualMode !== "AUTO" ? "auto" : "manual";
     setModeLoading((current) => ({ ...current, [kind]: true }));
@@ -808,7 +812,7 @@ export function RelayStatesCard({
             detail={online ? (status.lightOn ? "Light relay is supplying the LED strip" : "Light relay is off") : "Last known relay state"}
             toggleLabel={status.lightManualMode && status.lightManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
             onToggleMode={() => toggleRelayMode("light", Boolean(status.lightOn), status.lightManualMode)}
-            toggling={modeLoading.light || !online}
+            toggling={modeLoading.light || !online || !controlsAllowed}
           />
           <RelayStateCard
             label="Battery charging"
@@ -819,7 +823,7 @@ export function RelayStatesCard({
             detail={online ? (status.batteryChargeOn ? "Battery charge relay is active" : "Battery charge relay is off") : "Last known relay state"}
             toggleLabel={status.batteryManualMode && status.batteryManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
             onToggleMode={() => toggleRelayMode("battery", Boolean(status.batteryChargeOn), status.batteryManualMode)}
-            toggling={modeLoading.battery || !online}
+            toggling={modeLoading.battery || !online || !controlsAllowed}
           />
         </div>
 

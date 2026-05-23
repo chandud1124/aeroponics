@@ -78,11 +78,37 @@ function requireRegisteredDeviceForControl() {
   );
 }
 
-async function handleLocalApi(request: Request): Promise<Response | null> {
-
 function getTargetDeviceId(request: Request): string | null {
-  return request.headers.get("x-device-id") ?? listDevices()[0]?.deviceId ?? null;
+  return request.headers.get("x-device-id")?.trim() ?? null;
 }
+
+function requireRegisteredTargetDevice(request: Request): Response | null {
+  const deviceId = getTargetDeviceId(request);
+  if (!deviceId) {
+    return jsonResponse(
+      {
+        error: "Missing device",
+        message: "Select a registered device before using manual controls.",
+      },
+      400,
+    );
+  }
+
+  const registered = listDevices().some((device) => device.deviceId === deviceId);
+  if (!registered) {
+    return jsonResponse(
+      {
+        error: "Unknown device",
+        message: "The selected device is not registered.",
+      },
+      404,
+    );
+  }
+
+  return null;
+}
+
+async function handleLocalApi(request: Request): Promise<Response | null> {
   await initializeTowerStore();
   const url = new URL(request.url);
 
@@ -177,15 +203,24 @@ function getTargetDeviceId(request: Request): string | null {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
+    if (url.pathname === "/api/devices") {
+      if (request.method !== "GET") {
+        return jsonResponse({ error: "Method not allowed" }, 405);
+      }
+
+      return jsonResponse({ devices: listDevices() });
+    }
+
   if (url.pathname === "/api/status") {
     if (request.method === "GET") {
       const targetDevice = getTargetDeviceId(request);
       const status = getStatus(targetDevice);
+      const hasRegisteredDevice = listDevices().length > 0;
       // Include the current schedule so devices can pull it with a single call
       const schedule = getSchedule();
-      if (!status) return jsonResponse({ status: null, schedule });
+      if (!status) return jsonResponse({ status: null, schedule, hasRegisteredDevice });
       // Merge status fields and attach schedule under `schedule` key
-      return jsonResponse({ ...status, schedule });
+      return jsonResponse({ ...status, schedule, hasRegisteredDevice });
     }
 
     if (request.method === "PATCH" || request.method === "PUT") {
@@ -281,6 +316,44 @@ function getTargetDeviceId(request: Request): string | null {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
+  if (url.pathname === "/api/device/handshake") {
+    if (request.method !== "GET") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    const deviceIdHeader = request.headers.get("x-device-id")?.trim() ?? "";
+    const deviceKeyHeader = request.headers.get("x-api-key")?.trim() ?? "";
+    if (!deviceIdHeader) {
+      return jsonResponse({ error: "Missing device id" }, 400);
+    }
+
+    const deviceExists = listDevices().some((device) => device.deviceId === deviceIdHeader);
+    if (!deviceExists) {
+      return jsonResponse({ error: "Device not registered" }, 404);
+    }
+
+    if (!deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
+      return jsonResponse({ error: "Unauthorized (device)" }, 401);
+    }
+
+    touchStatus({ source: "esp32", deviceId: deviceIdHeader });
+    const status = getStatus(deviceIdHeader);
+    const schedule = getSchedule();
+
+    return jsonResponse(
+      {
+        ok: true,
+        authenticated: true,
+        deviceId: deviceIdHeader,
+        serverTime: Date.now(),
+        hasRegisteredDevice: true,
+        ...schedule,
+        ...(status ?? {}),
+      },
+      200,
+    );
+  }
+
   if (url.pathname === "/api/pump-log/start") {
     if (request.method !== "POST") {
       return jsonResponse({ error: "Method not allowed" }, 405);
@@ -313,8 +386,10 @@ function getTargetDeviceId(request: Request): string | null {
   if (url.pathname === "/api/test/no-sensor") {
     if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
     // Create a minimal status update (pump off) with no sensor fields
-    const deviceIdHeader = request.headers.get("x-device-id") ?? null;
-    const targetDevice = deviceIdHeader ?? (listDevices()[0]?.deviceId ?? null);
+    const targetDeviceGate = requireRegisteredTargetDevice(request);
+    if (targetDeviceGate) return targetDeviceGate;
+
+    const targetDevice = getTargetDeviceId(request);
     const updated = updateStatus({ pumpOn: false, flowing: false }, { source: "server", deviceId: targetDevice });
     return jsonResponse({ success: true, status: updated }, 200);
   }
@@ -572,8 +647,10 @@ function getTargetDeviceId(request: Request): string | null {
       return jsonResponse({ error: "Missing action" }, 400);
     }
 
-    const deviceIdHeader = request.headers.get("x-device-id") ?? null;
-    const targetDevice = deviceIdHeader ?? (listDevices()[0]?.deviceId ?? null);
+    const targetDeviceGate = requireRegisteredTargetDevice(request);
+    if (targetDeviceGate) return targetDeviceGate;
+
+    const targetDevice = getTargetDeviceId(request);
 
     if (payload.action === "auto") {
       manualPumpStartedAtMs = null;
@@ -644,7 +721,7 @@ function getTargetDeviceId(request: Request): string | null {
     }, { deviceId: targetDevice });
     if (manualPumpStartedAtMs != null) {
       if (manualPumpLogId) {
-        updatePumpLog(manualPumpLogId, { durationSeconds: Math.max(1, durationSeconds), flowed: durationSeconds > 0, endedAtMs, deviceId: targetDevice });
+        updatePumpLog(manualPumpLogId, { durationSeconds: Math.max(1, durationSeconds), flowed: durationSeconds > 0, endedAtMs, deviceId: targetDevice ?? undefined });
       } else {
         addPumpLog({
           durationSeconds: Math.max(1, durationSeconds),
@@ -655,7 +732,7 @@ function getTargetDeviceId(request: Request): string | null {
           offIntervalMinutes: getCycleProfile().offIntervalMinutes,
           startedAtMs,
           endedAtMs,
-          deviceId: targetDevice,
+          deviceId: targetDevice ?? undefined,
         });
       }
     }
@@ -677,8 +754,10 @@ function getTargetDeviceId(request: Request): string | null {
       return jsonResponse({ error: "Missing action" }, 400);
     }
 
-    const deviceIdHeader = request.headers.get("x-device-id") ?? null;
-    const targetDevice = deviceIdHeader ?? (listDevices()[0]?.deviceId ?? null);
+    const targetDeviceGate = requireRegisteredTargetDevice(request);
+    if (targetDeviceGate) return targetDeviceGate;
+
+    const targetDevice = getTargetDeviceId(request);
 
     if (payload.action === "auto") {
       updateStatus({ lightManualMode: "AUTO" }, { deviceId: targetDevice });
@@ -712,29 +791,28 @@ function getTargetDeviceId(request: Request): string | null {
       return jsonResponse({ error: "Missing action" }, 400);
     }
 
+    const targetDeviceGate = requireRegisteredTargetDevice(request);
+    if (targetDeviceGate) return targetDeviceGate;
+
+    const targetDevice = getTargetDeviceId(request);
+
     if (payload.action === "auto") {
-      const targetDevice = getTargetDeviceId(request);
       updateStatus({ batteryChargeOn: false, batteryManualMode: "AUTO" }, { deviceId: targetDevice });
       return jsonResponse({ success: true, batteryChargeOn: getStatus(targetDevice)?.batteryChargeOn ?? false, mode: "AUTO" }, 201);
     }
 
     if (payload.action === "manual") {
       const desiredOn = Boolean(payload.desiredOn);
-      const targetDevice = getTargetDeviceId(request);
       updateStatus({ batteryChargeOn: desiredOn, batteryManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" }, { deviceId: targetDevice });
       return jsonResponse({ success: true, batteryChargeOn: desiredOn, mode: "MANUAL" }, 201);
     }
 
     if (payload.action === "on") {
-      const targetDevice = getTargetDeviceId(request);
       updateStatus({ batteryChargeOn: true, batteryManualMode: "FORCED_ON" }, { deviceId: targetDevice });
       return jsonResponse({ success: true, batteryChargeOn: true }, 201);
     }
 
-    {
-      const targetDevice = getTargetDeviceId(request);
-      updateStatus({ batteryChargeOn: false, batteryManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
-    }
+    updateStatus({ batteryChargeOn: false, batteryManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
     return jsonResponse({ success: true, batteryChargeOn: false }, 201);
   }
 

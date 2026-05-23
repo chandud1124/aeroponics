@@ -14,6 +14,12 @@ export type {
   AnalyticsSummary,
 } from "./tower-shared";
 
+export type StatusEnvelope = {
+  status: LiveStatus | null;
+  schedule: Schedule;
+  hasRegisteredDevice: boolean;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export function withDeviceHeaders(init: RequestInit = {}, deviceId?: string | null): RequestInit {
@@ -86,7 +92,16 @@ export async function deleteReadingRemote(id: string) {
 
 export async function fetchStatus(deviceId?: string | null): Promise<LiveStatus | null> {
   try {
-    return await requestJson<LiveStatus>("/api/status", { method: "GET" }, deviceId);
+    const payload = await fetchStatusEnvelope(deviceId);
+    return payload?.status ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchStatusEnvelope(deviceId?: string | null): Promise<StatusEnvelope | null> {
+  try {
+    return await requestJson<StatusEnvelope>("/api/status", { method: "GET" }, deviceId);
   } catch {
     return null;
   }
@@ -142,6 +157,14 @@ export type DeviceListEntry = { id: string; name: string | null; deviceId: strin
 export type DeviceCreateSuccess = { deviceId: string; secret: string };
 export type DeviceCreateDuplicate = { error: string; existingDevice: DeviceListEntry };
 export type DeviceCreateResult = DeviceCreateSuccess | DeviceCreateDuplicate;
+
+export async function fetchDevices(): Promise<DeviceListEntry[]> {
+  try {
+    return await requestJson<{ devices: DeviceListEntry[] }>("/api/devices", { method: "GET" }).then((r) => r.devices ?? []);
+  } catch {
+    return [];
+  }
+}
 
 export async function fetchAdminDevices(adminPasskey: string): Promise<DeviceListEntry[]> {
   return requestJson<{ devices: DeviceListEntry[] }>("/api/admin/devices", {
