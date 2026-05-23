@@ -1,34 +1,64 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { createAdminDevice, deleteAdminDevice, fetchAdminDevices, rotateAdminDeviceSecret, type DeviceCreateDuplicate, type DeviceListEntry } from "@/lib/tower-storage";
 
+async function copyText(text: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard is not available");
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Clipboard copy failed");
+  }
+}
+
 export function AdminDevices() {
   const [passkey, setPasskey] = useState<string>("");
   const [unlocked, setUnlocked] = useState(false);
   const [devices, setDevices] = useState<DeviceListEntry[]>([]);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [mac, setMac] = useState("");
   const [ip, setIp] = useState("");
   const [secretShown, setSecretShown] = useState<string | null>(null);
   const [duplicateDevice, setDuplicateDevice] = useState<DeviceCreateDuplicate["existingDevice"] | null>(null);
 
-  async function load() {
+  async function load(nextPasskey = passkey) {
     try {
-      const list = await fetchAdminDevices(passkey);
+      const list = await fetchAdminDevices(nextPasskey);
       setDevices(list);
+      setAdminError(null);
+      return true;
     } catch (err) {
-      console.error(err);
+      const message = err instanceof Error ? err.message : String(err);
+      const isUnauthorized = message.includes("Unauthorized") || message.includes("401");
+      if (!isUnauthorized) {
+        console.error(err);
+      }
+      setAdminError(isUnauthorized ? "Wrong admin passkey." : "Unable to load admin devices right now.");
       setDevices([]);
+      return false;
     }
   }
-
-  useEffect(() => {
-    if (unlocked) {
-      load();
-    }
-  }, [unlocked]);
 
   async function handleUnlock() {
     if (!passkey.trim()) {
@@ -36,16 +66,25 @@ export function AdminDevices() {
       return;
     }
 
+    setBusy(true);
     try {
-      await load();
-      setUnlocked(true);
+      const ok = await load(passkey);
+      setUnlocked(ok);
     } catch (err) {
       console.error(err);
       alert("Failed to unlock admin panel — check the admin passkey");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleCreate() {
+    if (!unlocked) {
+      alert("Unlock the admin panel first");
+      return;
+    }
+
+    setBusy(true);
     try {
       const result = await createAdminDevice(passkey, name || undefined, mac || undefined, ip || undefined);
       if ("existingDevice" in result) {
@@ -59,22 +98,28 @@ export function AdminDevices() {
     } catch (err) {
       console.error(err);
       alert("Failed to create device — check admin passkey in headers");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleDelete(deviceId: string) {
     if (!confirm(`Delete device ${deviceId}?`)) return;
+    setBusy(true);
     try {
       await deleteAdminDevice(passkey, deviceId);
       await load();
     } catch (err) {
       console.error(err);
       alert("Failed to delete device");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleRotateSecret(deviceId: string) {
     if (!confirm(`Regenerate secret for ${deviceId}? Existing secret will be invalidated.`)) return;
+    setBusy(true);
     try {
       const resp = await rotateAdminDeviceSecret(passkey, deviceId);
       setSecretShown(resp.secret);
@@ -82,6 +127,8 @@ export function AdminDevices() {
     } catch (err) {
       console.error(err);
       alert("Failed to rotate device secret — check admin passkey");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -102,9 +149,17 @@ export function AdminDevices() {
                 placeholder="Enter admin passkey"
                 value={passkey}
                 onChange={(e) => setPasskey((e.target as HTMLInputElement).value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    void handleUnlock();
+                  }
+                }}
               />
-              <Button onClick={handleUnlock}>Unlock</Button>
+              <Button onClick={handleUnlock} disabled={busy}>
+                {busy ? "Checking" : "Unlock"}
+              </Button>
             </div>
+            {adminError ? <div className="text-xs text-destructive">{adminError}</div> : null}
           </div>
         </Card>
       ) : null}
@@ -129,8 +184,8 @@ export function AdminDevices() {
             <Input value={name} onChange={(e) => setName((e.target as HTMLInputElement).value)} />
           </div>
           <div className="flex items-end gap-2">
-            <Button onClick={handleCreate}>Create device</Button>
-            <Button onClick={load} variant="outline">Refresh</Button>
+            <Button onClick={handleCreate} disabled={busy}>Create device</Button>
+            <Button onClick={() => load()} variant="outline" disabled={busy}>Refresh</Button>
           </div>
         </div>
         {secretShown ? (
@@ -142,9 +197,14 @@ export function AdminDevices() {
             <div className="mt-2 flex items-center justify-between gap-2">
               <pre className="break-all text-xs">{secretShown}</pre>
               <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(secretShown);
-                  alert("Copied secret to clipboard");
+                onClick={async () => {
+                  try {
+                    await copyText(secretShown);
+                    alert("Copied secret to clipboard");
+                  } catch (err) {
+                    console.error(err);
+                    alert("Copy failed. You can select and copy the secret manually.");
+                  }
                 }}
               >
                 Copy
@@ -177,7 +237,20 @@ export function AdminDevices() {
                       <div className="text-xs text-muted-foreground">{d.deviceId} • {d.macAddress ?? 'no-mac'} • {new Date(d.createdAt).toLocaleString()}</div>
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={() => navigator.clipboard.writeText(d.deviceId)} variant="outline">Copy ID</Button>
+                  <Button
+                    onClick={async () => {
+                      try {
+                        await copyText(d.deviceId);
+                        alert("Copied device ID to clipboard");
+                      } catch (err) {
+                        console.error(err);
+                        alert("Copy failed. You can select and copy the device ID manually.");
+                      }
+                    }}
+                    variant="outline"
+                  >
+                    Copy ID
+                  </Button>
                   <Button onClick={() => handleRotateSecret(d.deviceId)} variant="secondary">Regenerate Secret</Button>
                   <Button onClick={() => handleDelete(d.deviceId)} variant="destructive">Delete</Button>
                 </div>

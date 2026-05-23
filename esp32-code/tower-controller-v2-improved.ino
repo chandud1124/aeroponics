@@ -33,12 +33,11 @@ const char* const STATE_NAMES[] = {
 
 const char* WIFI_SSID = "I am Not A Witch I am Your Wifi";
 const char* WIFI_PASS = "Whoareu@0000";
-const char* API_BASE_URL = "http://192.168.0.147:8080";
-// Paste the backend-generated values here after creating the device in Admin UI.
+const char* API_BASE_URL = "http://13.234.122.175:8080";// Paste the backend-generated values here after creating the device in Admin UI.
 // DEVICE_ID must match the deviceId returned by the backend.
 // DEVICE_SECRET is the one-time secret returned by the backend and shown only once.
-const char* DEVICE_ID     = "device-gwusft";
-const char* DEVICE_SECRET = "bd111a764bf9d9108c386645ab0fb4a95896601cd17bb5c5";
+const char* DEVICE_ID     = "device-q3vgn9";
+const char* DEVICE_SECRET = "8ee844960c7a744c2aa8f77c10d0bcb3008055c489a115ee";
 
 const int PIN_DHT_DATA     = 16;
 const int PIN_LDR_SENSOR   = 36;
@@ -189,6 +188,8 @@ bool wifiConnected  = false;
 bool ntpSynced      = false;  // [IMP-5] Better time validity tracking
 bool reservoirDsMissingLogged = false;
 bool towerDsMissingLogged     = false;
+bool dhtMissingLogged         = false;
+bool sensorFaultLatched       = false;
 String bootResetReason = "UNKNOWN";
 String bootLastFault = "NONE";
 
@@ -972,6 +973,27 @@ void readSensors() {
   // Update humidity immediately if available
   if (dhtOk) {
     sensors.humidityPct = humidity;
+    status.dhtOk = true;
+    status.sensorDataOk = true;
+    if (sensorFaultLatched && status.fault == "SENSOR_FAIL") {
+      status.fault = "OK";
+    }
+    sensorFaultLatched = false;
+    if (dhtMissingLogged) {
+      Serial.println("[SENSOR] DHT22 recovered");
+      dhtMissingLogged = false;
+    }
+  } else {
+    status.dhtOk = false;
+    status.sensorDataOk = false;
+    if (!dhtMissingLogged) {
+      Serial.println("[SENSOR] DHT22 missing or unreadable; continuing without reboot");
+      dhtMissingLogged = true;
+    }
+    if (status.fault == "OK") {
+      status.fault = "SENSOR_FAIL";
+      sensorFaultLatched = true;
+    }
   }
 
   // Read LDR immediately (fast)
@@ -981,8 +1003,6 @@ void readSensors() {
   sensors.valid = dhtOk;
   status.humidityPct    = sensors.humidityPct;
   status.lightRaw       = sensors.lightRaw;
-  status.dhtOk = dhtOk;
-  status.sensorDataOk = sensors.valid;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1125,6 +1145,7 @@ void postStatus() {
   String body = "{";
   body += "\"pumpOn\":"           + String(status.pumpOn ? "true" : "false") + ",";
   body += "\"lightOn\":"          + String(status.lightOn ? "true" : "false") + ",";
+  body += "\"batteryChargeOn\":" + String(status.batteryChargeOn ? "true" : "false") + ",";
   body += "\"flowing\":"          + String(status.flowing ? "true" : "false") + ",";
   body += "\"humidityPct\":"      + String(sensors.humidityPct, 1) + ",";
   body += "\"lightLux\":"         + String(sensors.lightRaw) + ",";

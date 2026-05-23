@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LED Light Hours + All Sensor Specs — Indoor Aeroponic Tower</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;font-size:14px;line-height:1.6}
+.cover{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#14532d 100%);padding:28px 18px;text-align:center;border-bottom:1px solid #1e293b}
+.cover h1{font-size:22px;font-weight:800;color:#f1f5f9;margin-bottom:6px}
+.cover p{font-size:12px;color:#94a3b8;max-width:560px;margin:0 auto 12px}
+.ctags{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.ctag{background:rgba(255,255,255,.08);padding:3px 10px;border-radius:12px;font-size:11px;color:#94a3b8;border:1px solid rgba(255,255,255,.12)}
+/* NAV */
+.topbar{background:#0f172a;border-bottom:1px solid #1e293b;padding:0 16px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;position:sticky;top:0;z-index:200}
+.topbar-title{font-size:12px;font-weight:700;color:#4ade80;padding:10px 0;margin-right:6px;white-space:nowrap}
+.nb{font-size:11px;font-weight:600;padding:5px 11px;border-radius:14px;border:1px solid #1e293b;background:transparent;color:#94a3b8;cursor:pointer;margin:4px 2px;transition:all .15s;white-space:nowrap}
+.nb.on,.nb:hover{background:#14532d;color:#bbf7d0;border-color:#14532d}
+/* PAGES */
+.pg{display:none;padding:20px 16px 48px;max-width:1060px;margin:0 auto}
+.pg.on{display:block}
+.ph h2{font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+.ph p{font-size:12px;color:#64748b;margin-bottom:16px}
+.sh{font-size:14px;font-weight:700;color:#f1f5f9;margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid #1e293b}
+/* CARDS */
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.ct{font-size:13px;font-weight:700;color:#f1f5f9;margin-bottom:8px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+@media(max-width:620px){.g2,.g3,.g4{grid-template-columns:1fr}}
+/* ALERTS */
+.tip{border-left:4px solid #22c55e;background:#052e16;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#86efac;margin:10px 0}
+.warn{border-left:4px solid #f59e0b;background:#1c1203;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#fcd34d;margin:10px 0}
+.danger{border-left:4px solid #ef4444;background:#1c0505;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#fca5a5;margin:10px 0}
+.info{border-left:4px solid #3b82f6;background:#0c1a2e;padding:9px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#93c5fd;margin:10px 0}
+/* TABLE */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#0f172a;color:#86efac;padding:8px 10px;text-align:left;font-weight:600;border-bottom:1px solid #334155}
+td{padding:7px 10px;border-bottom:1px solid #1e293b;color:#cbd5e1;vertical-align:top}
+tr:nth-child(even) td{background:#162032}
+td:first-child{color:#f1f5f9;font-weight:600}
+.num{text-align:center;font-family:monospace;font-size:13px}
+.good{color:#4ade80;font-weight:700}
+.warn-val{color:#fbbf24;font-weight:700}
+.bad{color:#f87171;font-weight:700}
+/* BADGES */
+.bg{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#052e16;color:#4ade80;border:1px solid #14532d}
+.ba{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#1c1203;color:#fcd34d;border:1px solid #b45309}
+.br{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#1c0505;color:#f87171;border:1px solid #dc2626}
+.bb{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#0c1a2e;color:#93c5fd;border:1px solid #2563eb}
+.bp{display:inline-block;font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;background:#1a0f2e;color:#c4b5fd;border:1px solid #7c3aed}
+/* SENSOR CARD */
+.sensor-card{border-radius:12px;padding:14px 16px;margin-bottom:14px;border:1.5px solid}
+.sc-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px}
+.sc-name{font-size:15px;font-weight:700}
+.pin-chip{display:inline-block;background:#0f172a;border:1px solid #334155;padding:3px 8px;border-radius:6px;font-family:monospace;font-size:11px;color:#86efac;margin:2px}
+/* LIGHT BAR */
+.light-bar{height:28px;border-radius:8px;display:flex;overflow:hidden;margin:8px 0}
+.lb-seg{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
+/* WIRING TABLE */
+.wire-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #1e293b;font-size:12px}
+.wire-row:last-child{border-bottom:none}
+.wire-from{min-width:110px;font-family:monospace;color:#86efac}
+.wire-arrow{color:#334155;flex-shrink:0}
+.wire-to{min-width:130px;font-family:monospace;color:#93c5fd}
+.wire-note{color:#64748b;font-size:11px}
+.wire-color{width:14px;height:14px;border-radius:3px;flex-shrink:0;border:1px solid rgba(255,255,255,.15)}
+/* LED TIMELINE */
+.led-timeline{display:flex;overflow-x:auto;gap:0;margin:12px 0;padding-bottom:4px}
+.led-stage{min-width:120px;flex:1;padding:10px;text-align:center;border-right:1px solid #1e293b;cursor:pointer;border-top:3px solid transparent;transition:all .2s}
+.led-stage:last-child{border-right:none}
+.led-stage.on,.led-stage:hover{background:#162032;border-top-color:#22c55e}
+.led-stage .ls-name{font-size:11px;font-weight:700;color:#86efac;margin-bottom:3px}
+.led-stage .ls-days{font-size:10px;color:#475569;margin-bottom:5px}
+.led-stage .ls-hrs{font-size:18px;font-weight:700;color:#f1f5f9}
+.led-stage .ls-dark{font-size:10px;color:#64748b}
+/* CODE BLOCK */
+pre{background:#0a0f1a;border:1px solid #1e293b;border-radius:8px;padding:14px;font-size:12px;color:#86efac;overflow-x:auto;line-height:1.8;margin:10px 0}
+pre .cm{color:#475569}
+pre .kw{color:#93c5fd}
+pre .st{color:#fcd34d}
+pre .num-c{color:#fb7185}
+pre .fn{color:#a78bfa}
+/* STAT BOX */
+.stat{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px;text-align:center}
+.stat .sv{font-size:22px;font-weight:700;color:#4ade80;display:block;margin-bottom:2px;font-family:monospace}
+.stat .sl{font-size:10px;color:#64748b}
+/* CIRCUIT DIAGRAM */
+.circuit{background:#0a0f1a;border:1px solid #1e293b;border-radius:12px;padding:16px;overflow-x:auto}
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>Regular LED Lights — Hours, Specs & All Waterproof Sensors</h1>
+  <p>How long to run regular LED lights for lettuce — plus complete wiring, specs, pinout and data for every sensor in your indoor aeroponic tower (humidity, light, nutrition/EC, temperature, water level)</p>
+  <div class="ctags">
+    <span class="ctag">Regular LED (not grow light)</span>
+    <span class="ctag">BH1750 light sensor</span>
+    <span class="ctag">DHT22 humidity + temp</span>
+    <span class="ctag">DS18B20 waterproof water temp</span>
+    <span class="ctag">Gravity EC/TDS sensor</span>
+    <span class="ctag">pH sensor v2</span>
+    <span class="ctag">Ultrasonic water level</span>
+    <span class="ctag">Full GPIO wiring diagram</span>
+    <span class="ctag">Calibration data</span>
+    <span class="ctag">ESP32 code for all sensors</span>
+  </div>
+</div>
+
+<div class="topbar">
+  <span class="topbar-title">Indoor Tower Sensors</span>
+  <button class="nb on" onclick="show('led',this)">Regular LED Hours</button>
+  <button class="nb" onclick="show('sensors',this)">All Sensors Overview</button>
+  <button class="nb" onclick="show('bh1750',this)">BH1750 Light Sensor</button>
+  <button class="nb" onclick="show('dht22',this)">DHT22 Humidity</button>
+  <button class="nb" onclick="show('ds18b20',this)">DS18B20 Water Temp</button>
+  <button class="nb" onclick="show('ec',this)">EC/TDS Nutrition</button>
+  <button class="nb" onclick="show('ph',this)">pH Sensor</button>
+  <button class="nb" onclick="show('level',this)">Water Level</button>
+  <button class="nb" onclick="show('wiring',this)">Full Wiring Diagram</button>
+  <button class="nb" onclick="show('code',this)">ESP32 Code</button>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 1 — REGULAR LED LIGHT HOURS
+══════════════════════════════════════ -->
+<div id="p-led" class="pg on">
+  <div class="ph">
+    <h2>Regular LED tube/bulb light — hours per day for lettuce</h2>
+    <p>Using normal white LED tube lights or LED bulbs (not grow lights) — how long to keep them ON, what to expect, and how to make them work well for your aeroponic tower</p>
+  </div>
+
+  <div class="sh">Regular LED vs Grow Light — key differences</div>
+  <div class="card">
+    <table>
+      <tr><th>Feature</th><th>Regular LED (tube/bulb)</th><th>Grow Light LED</th><th>Impact on lettuce</th></tr>
+      <tr><td>Spectrum</td><td>Full white (CCT 4000–6500K)</td><td>Tuned red+blue ratio</td><td>Both work — regular LED is less efficient but adequate for leafy greens</td></tr>
+      <tr><td>PPFD output</td><td>30–80 µmol/m²/s at 30cm</td><td>200–400 µmol/m²/s</td><td>Regular LED needs longer hours or closer placement to compensate</td></tr>
+      <tr><td>Blue spectrum %</td><td>15–25% (varies by CCT)</td><td>30–40% blue (optimised)</td><td>Use 5000–6500K (cool white) LEDs — higher blue fraction than warm white</td></tr>
+      <tr><td>Heat output</td><td>Low (LED)</td><td>Low (LED)</td><td>Both are safe close to plants</td></tr>
+      <tr><td>Electricity cost</td><td>Lower (15–20W tubes)</td><td>Higher (45–240W)</td><td>Regular LED is cheaper to run</td></tr>
+      <tr><td>India cost</td><td>₹80–300 per tube</td><td>₹1,500–15,000</td><td>Regular LED is far more accessible for beginners</td></tr>
+      <tr><td>Best CCT to use</td><td>5000–6500K (cool daylight)</td><td>Specified by manufacturer</td><td>Never use warm white (2700K) — not enough blue for lettuce leaf growth</td></tr>
+    </table>
+  </div>
+
+  <div class="sh">Regular LED light hours — by lettuce stage</div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="led-timeline">
+      <div class="led-stage on" onclick="showLed(0)">
+        <div class="ls-name">Germination</div>
+        <div class="ls-days">Day 0–5</div>
+        <div class="ls-hrs">0–4 hrs</div>
+        <div class="ls-dark">20–24 hrs dark</div>
+      </div>
+      <div class="led-stage" onclick="showLed(1)">
+        <div class="ls-name">Baby seedling</div>
+        <div class="ls-days">Day 5–10</div>
+        <div class="ls-hrs">16 hrs</div>
+        <div class="ls-dark">8 hrs dark</div>
+      </div>
+      <div class="led-stage" onclick="showLed(2)">
+        <div class="ls-name">Young plant</div>
+        <div class="ls-days">Day 10–18</div>
+        <div class="ls-hrs">16–18 hrs</div>
+        <div class="ls-dark">6–8 hrs dark</div>
+      </div>
+      <div class="led-stage" onclick="showLed(3)">
+        <div class="ls-name">Vegetative</div>
+        <div class="ls-days">Day 18–28</div>
+        <div class="ls-hrs">18 hrs</div>
+        <div class="ls-dark">6 hrs dark</div>
+      </div>
+      <div class="led-stage" onclick="showLed(4)">
+        <div class="ls-name">Pre-harvest</div>
+        <div class="ls-days">Day 28–35</div>
+        <div class="ls-hrs">14–16 hrs</div>
+        <div class="ls-dark">8–10 hrs dark</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LED STAGE DETAIL PANELS -->
+  <div id="ld0" style="display:block">
+    <div class="card" style="border-color:#334155">
+      <div class="ct" style="color:#86efac">Stage: Germination (Day 0–5) — Light OFF or very dim</div>
+      <div class="g2">
+        <div>
+          <div class="g4" style="margin-bottom:10px">
+            <div class="stat"><span class="sv">0</span><span class="sl">Light hours/day</span></div>
+            <div class="stat"><span class="sv" style="color:#fbbf24">24</span><span class="sl">Dark hours/day</span></div>
+            <div class="stat"><span class="sv">N/A</span><span class="sl">Lux needed</span></div>
+            <div class="stat"><span class="sv">None</span><span class="sl">LED required</span></div>
+          </div>
+          <div class="tip">Seeds do NOT need light to germinate. In fact, light can inhibit germination in some lettuce varieties. Keep seeds in a dark or very dim tray with a humidity dome. Light the tray only AFTER cotyledons (seed leaves) open and stand upright.</div>
+          <div class="info">When cotyledons appear (Day 3–5): turn on LED for 4 hours/day at very low intensity — 500–1000 lux is enough. This is just to prevent etiolation (stretching toward darkness).</div>
+        </div>
+        <div>
+          <table>
+            <tr><td>Regular LED needed?</td><td class="good">No — turn off completely</td></tr>
+            <tr><td>Room light OK?</td><td class="good">Yes — dim room light fine</td></tr>
+            <tr><td>Temperature</td><td>18–22°C for fast germination</td></tr>
+            <tr><td>Humidity dome?</td><td>Yes — keeps humidity 80–90%</td></tr>
+            <tr><td>Check for germination</td><td>White root tip at cube bottom</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ld1" style="display:none">
+    <div class="card" style="border-color:#14532d">
+      <div class="ct" style="color:#86efac">Stage: Baby Seedling (Day 5–10) — Start 16 hrs LED</div>
+      <div class="g2">
+        <div>
+          <div class="g4" style="margin-bottom:10px">
+            <div class="stat"><span class="sv good">16</span><span class="sl">Light hours/day</span></div>
+            <div class="stat"><span class="sv">8</span><span class="sl">Dark hours/day</span></div>
+            <div class="stat"><span class="sv" style="color:#fbbf24">5,000–8,000</span><span class="sl">Lux at leaf level</span></div>
+            <div class="stat"><span class="sv">5000K+</span><span class="sl">CCT to use</span></div>
+          </div>
+          <div class="tip"><strong>Timer setting: 6:00 AM ON → 10:00 PM OFF</strong><br>This mimics a long summer day for maximum vegetative growth.</div>
+          <div class="warn">If stems are stretching/leaning toward the light, move the LED closer or increase hours slightly. Leggy stems = not enough light intensity.</div>
+        </div>
+        <div>
+          <div class="sh" style="margin-top:0">Regular LED placement for 5,000–8,000 lux</div>
+          <table>
+            <tr><td>9W LED bulb (600 lm)</td><td>Place 10–15 cm from seedlings</td></tr>
+            <tr><td>20W LED tube (2000 lm)</td><td>Place 20–30 cm from seedlings</td></tr>
+            <tr><td>40W LED tube (4000 lm)</td><td>Place 40–50 cm from seedlings</td></tr>
+            <tr><td>Check with BH1750 sensor</td><td>Read lux — adjust distance until 5,000–8,000</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ld2" style="display:none">
+    <div class="card" style="border-color:#14532d">
+      <div class="ct" style="color:#86efac">Stage: Young Plant / Post-Transplant (Day 10–18) — 16–18 hrs LED</div>
+      <div class="g2">
+        <div>
+          <div class="g4" style="margin-bottom:10px">
+            <div class="stat"><span class="sv good">16–18</span><span class="sl">Light hours/day</span></div>
+            <div class="stat"><span class="sv">6–8</span><span class="sl">Dark hours/day</span></div>
+            <div class="stat"><span class="sv" style="color:#fbbf24">8,000–15,000</span><span class="sl">Lux at leaf level</span></div>
+            <div class="stat"><span class="sv">6500K</span><span class="sl">Best CCT</span></div>
+          </div>
+          <div class="info"><strong>Timer: 5:00 AM ON → 11:00 PM OFF (18 hrs)</strong><br>Seedlings just moved to tower need maximum light to recover from transplant stress and establish roots in the mist zone.</div>
+          <div class="tip">Use the BH1750 light sensor reading to verify 8,000+ lux is reaching the leaves on the tower. Adjust light height accordingly. Regular LED tubes placed 25–40 cm above canopy should achieve this range.</div>
+        </div>
+        <div>
+          <div class="sh" style="margin-top:0">How many LED tubes for a tower?</div>
+          <table>
+            <tr><td>1 tower (0.6m wide)</td><td>1× 20W 6500K LED tube, 25–35 cm above</td></tr>
+            <tr><td>2 towers side by side</td><td>2× 20W tubes, one over each tower</td></tr>
+            <tr><td>4 towers in a row</td><td>4× 20W tubes or 2× 40W long tubes</td></tr>
+            <tr><td>Multi-tower room</td><td>Mount tubes on adjustable rail system</td></tr>
+          </table>
+          <div class="warn">After transplant, some wilting is normal for 24–48 hours. Don't increase nutrients. Check that misting is running every 10 min. Light stress + transplant stress together can kill seedlings — lower light for first 48 hrs post-transplant if wilting is severe.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ld3" style="display:none">
+    <div class="card" style="border-color:#22c55e">
+      <div class="ct" style="color:#86efac">Stage: Vegetative Growth (Day 18–28) — PEAK 18 hrs LED</div>
+      <div class="g2">
+        <div>
+          <div class="g4" style="margin-bottom:10px">
+            <div class="stat"><span class="sv good">18</span><span class="sl">Light hours/day</span></div>
+            <div class="stat"><span class="sv warn-val">6</span><span class="sl">Dark hours MINIMUM</span></div>
+            <div class="stat"><span class="sv" style="color:#4ade80">10,000–20,000</span><span class="sl">Lux at leaf level</span></div>
+            <div class="stat"><span class="sv">6500K</span><span class="sl">Best CCT</span></div>
+          </div>
+          <div class="danger"><strong>NEVER run lights 24 hours/day for lettuce.</strong> Lettuce requires a minimum 6-hour dark period daily for proper cellular respiration and nutrient uptake. 24-hour light causes tipburn, premature bolting, leaf edge whitening, and poor flavour. Always give 6 hours minimum darkness.</div>
+          <div class="tip"><strong>Timer: 4:00 AM ON → 10:00 PM OFF = 18 hrs light, 6 hrs dark</strong><br>This is the maximum photoperiod for lettuce. Longer than this accelerates bolting.</div>
+        </div>
+        <div>
+          <div class="sh" style="margin-top:0">Lux level targets with regular LED</div>
+          <table>
+            <tr><td class="good">10,000–20,000 lux</td><td>Optimal — good growth rate</td></tr>
+            <tr><td class="warn-val">5,000–10,000 lux</td><td>Acceptable — slower growth, may need extra hours</td></tr>
+            <tr><td class="bad">Below 5,000 lux</td><td>Too dim — etiolation, pale leaves, poor yield</td></tr>
+            <tr><td class="bad">Above 40,000 lux</td><td>Too bright for lettuce — leaf bleaching risk</td></tr>
+          </table>
+          <div class="info">Use the BH1750 sensor (see Tab 3) to measure actual lux at the top of the tower. Adjust LED height until 10,000–20,000 lux is reading at canopy level.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ld4" style="display:none">
+    <div class="card" style="border-color:#334155">
+      <div class="ct" style="color:#86efac">Stage: Pre-Harvest (Day 28–35) — Reduce to 14–16 hrs</div>
+      <div class="g2">
+        <div>
+          <div class="g4" style="margin-bottom:10px">
+            <div class="stat"><span class="sv warn-val">14–16</span><span class="sl">Light hours/day</span></div>
+            <div class="stat"><span class="sv good">8–10</span><span class="sl">Dark hours/day</span></div>
+            <div class="stat"><span class="sv" style="color:#4ade80">8,000–15,000</span><span class="sl">Lux at leaf level</span></div>
+            <div class="stat"><span class="sv">Same CCT</span><span class="sl">No change</span></div>
+          </div>
+          <div class="tip"><strong>Timer: 6:00 AM ON → 10:00 PM OFF = 16 hrs light, 8 hrs dark</strong><br>Reducing photoperiod in final week delays bolting and improves flavour compounds. Longer dark period = sweeter, crisper lettuce.</div>
+          <div class="info">3 days before harvest, some growers switch to just 12 hours light to fully develop sweetness. This is optional but recommended for restaurant-quality produce.</div>
+        </div>
+        <div>
+          <table>
+            <tr><td>Harvest signal (LED-grown)</td><td>Outer leaves 15–20 cm wide, full and firm</td></tr>
+            <tr><td>Bolt watch</td><td>If centre stem shoots upright — harvest immediately</td></tr>
+            <tr><td>Taste check</td><td>Pinch one leaf — should not taste bitter</td></tr>
+            <tr><td>Final flush</td><td>3 days before harvest switch reservoir to plain pH 5.8 water</td></tr>
+            <tr><td>Turn off LED</td><td>Harvest in dim light — strong LED causes wilting within 30 min of harvest</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sh">Complete regular LED recommendation for indoor tower (India)</div>
+  <div class="card">
+    <table>
+      <tr><th>Tower setup</th><th>LED to buy</th><th>Quantity</th><th>CCT</th><th>Height above tower</th><th>India price</th><th>Where to buy</th></tr>
+      <tr><td>1 tower (20 plants)</td><td>Philips/Syska 20W LED batten tube</td><td>1</td><td>6500K (cool daylight)</td><td>25–35 cm</td><td>₹250–400</td><td>Amazon, local electrical</td></tr>
+      <tr><td>2 towers</td><td>20W LED tubes or 36W LED panel</td><td>2 tubes / 1 panel</td><td>6500K</td><td>30–40 cm</td><td>₹500–800</td><td>Amazon, Flipkart</td></tr>
+      <tr><td>4 towers (row)</td><td>40W LED batten (4ft) or 4×20W</td><td>2 battens</td><td>6500K</td><td>35–45 cm</td><td>₹800–1,500</td><td>Amazon, LYCOS, Wipro</td></tr>
+      <tr><td>Small room (6–8 towers)</td><td>4ft LED battens on aluminium rail</td><td>4–6 battens</td><td>6500K + some 4000K mix</td><td>40–50 cm</td><td>₹2,000–4,000</td><td>Amazon, local electrical</td></tr>
+    </table>
+    <div class="tip">Best Indian brands for regular LED that work well for plants: <strong>Philips 20W 6500K LED batten (₹280)</strong>, <strong>Syska 18W 6500K</strong>, <strong>Wipro 22W 6500K</strong>. Always buy 6500K — do NOT buy 2700K warm white or 3000K natural white — they don't have enough blue spectrum for lettuce leaf growth.</div>
+  </div>
+
+  <div class="sh">Automated light control using BH1750 sensor</div>
+  <div class="card">
+    <p style="font-size:12px;color:#94a3b8;margin-bottom:10px">With a BH1750 light sensor connected to ESP32, you can automatically extend or reduce light hours based on actual measured lux — compensating for cloudy days or varying room brightness.</p>
+    <table>
+      <tr><th>BH1750 reads (lux)</th><th>Light action</th><th>Why</th></tr>
+      <tr><td class="bad">Below 3,000 lux</td><td>Turn LED ON immediately</td><td>Too dim — plants need more light regardless of time</td></tr>
+      <tr><td class="warn-val">3,000–8,000 lux</td><td>Keep LED ON</td><td>Adequate but not optimal — maintain lighting</td></tr>
+      <tr><td class="good">8,000–20,000 lux</td><td>LED ON for scheduled hours</td><td>Optimal zone — follow timer schedule</td></tr>
+      <tr><td class="warn-val">20,000–35,000 lux</td><td>LED OFF — natural light sufficient</td><td>Enough natural/ambient light — save electricity</td></tr>
+      <tr><td class="bad">Above 40,000 lux</td><td>LED OFF + shade needed</td><td>Too bright — risk of lettuce leaf bleaching</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 2 — ALL SENSORS OVERVIEW
+══════════════════════════════════════ -->
+<div id="p-sensors" class="pg">
+  <div class="ph">
+    <h2>All sensors — complete overview for indoor aeroponic tower</h2>
+    <p>6 sensor types, all waterproof or weather-resistant. Full specs, where to buy in India, and what each measures.</p>
+  </div>
+
+  <div class="g3">
+    <div class="card" style="border-top:3px solid #3b82f6;cursor:pointer" onclick="show('bh1750',document.querySelector('.nb:nth-child(4)'))">
+      <div class="ct" style="color:#93c5fd">BH1750 — Light sensor</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px">I2C digital ambient light sensor</div>
+      <table>
+        <tr><td>Measures</td><td>Lux (light intensity)</td></tr>
+        <tr><td>Range</td><td>1–65,535 lux</td></tr>
+        <tr><td>Waterproof?</td><td><span class="ba">Splash-proof only</span></td></tr>
+        <tr><td>India price</td><td>₹60–120</td></tr>
+        <tr><td>Interface</td><td>I2C (GPIO21/22)</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #22c55e;cursor:pointer" onclick="show('dht22',document.querySelector('.nb:nth-child(5)'))">
+      <div class="ct" style="color:#86efac">DHT22 — Humidity + Air Temp</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px">Digital sensor — air temperature and relative humidity</div>
+      <table>
+        <tr><td>Measures</td><td>RH% + Air °C</td></tr>
+        <tr><td>Range</td><td>0–100% RH, -40 to 80°C</td></tr>
+        <tr><td>Waterproof?</td><td><span class="ba">Not waterproof — keep dry</span></td></tr>
+        <tr><td>India price</td><td>₹150–280</td></tr>
+        <tr><td>Interface</td><td>Single digital GPIO</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #f59e0b;cursor:pointer" onclick="show('ds18b20',document.querySelector('.nb:nth-child(6)'))">
+      <div class="ct" style="color:#fcd34d">DS18B20 — Water Temperature</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px">Waterproof stainless steel probe — submersible</div>
+      <table>
+        <tr><td>Measures</td><td>Water temperature °C</td></tr>
+        <tr><td>Range</td><td>-55 to 125°C</td></tr>
+        <tr><td>Waterproof?</td><td><span class="bg">Fully waterproof (IP68)</span></td></tr>
+        <tr><td>India price</td><td>₹80–180</td></tr>
+        <tr><td>Interface</td><td>1-Wire (any digital GPIO)</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #a855f7;cursor:pointer" onclick="show('ec',document.querySelector('.nb:nth-child(7)'))">
+      <div class="ct" style="color:#c4b5fd">Gravity EC/TDS — Nutrition Sensor</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px">Analog probe — measures dissolved nutrients (EC/PPM)</div>
+      <table>
+        <tr><td>Measures</td><td>EC (mS/cm) / TDS (PPM)</td></tr>
+        <tr><td>Range</td><td>0–20 mS/cm</td></tr>
+        <tr><td>Waterproof?</td><td><span class="bg">Probe waterproof — board is not</span></td></tr>
+        <tr><td>India price</td><td>₹800–2,000</td></tr>
+        <tr><td>Interface</td><td>Analog (ADC GPIO)</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #ef4444;cursor:pointer" onclick="show('ph',document.querySelector('.nb:nth-child(8)'))">
+      <div class="ct" style="color:#f87171">pH Sensor V2 — Acidity sensor</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px">Analog BNC probe — pH 0 to 14</div>
+      <table>
+        <tr><td>Measures</td><td>pH (0–14)</td></tr>
+        <tr><td>Range</td><td>0–14 pH</td></tr>
+        <tr><td>Waterproof?</td><td><span class="bg">Probe waterproof — board is not</span></td></tr>
+        <tr><td>India price</td><td>₹900–2,500</td></tr>
+        <tr><td>Interface</td><td>Analog (ADC GPIO)</td></tr>
+      </table>
+    </div>
+    <div class="card" style="border-top:3px solid #06b6d4;cursor:pointer" onclick="show('level',document.querySelector('.nb:nth-child(9)'))">
+      <div class="ct" style="color:#67e8f9">A02YYUW — Water Level</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px">Waterproof ultrasonic sensor — reservoir level</div>
+      <table>
+        <tr><td>Measures</td><td>Distance → water height</td></tr>
+        <tr><td>Range</td><td>3–450 cm</td></tr>
+        <tr><td>Waterproof?</td><td><span class="bg">Fully waterproof (IP67)</span></td></tr>
+        <tr><td>India price</td><td>₹400–800</td></tr>
+        <tr><td>Interface</td><td>UART (TX/RX pins)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="sh">All sensors at a glance — GPIO assignments</div>
+  <div class="card" style="background:#0a0f1a">
+    <table>
+      <tr><th>Sensor</th><th>ESP32 GPIO</th><th>Protocol</th><th>Supply voltage</th><th>Calibration needed?</th><th>Update rate</th></tr>
+      <tr><td>BH1750 (light)</td><td>GPIO21 (SDA), GPIO22 (SCL)</td><td>I2C</td><td>3.3V</td><td><span class="bg">No — factory calibrated</span></td><td>Every 2 seconds</td></tr>
+      <tr><td>DHT22 (humidity+air temp)</td><td>GPIO19</td><td>Single-wire digital</td><td>3.3V or 5V</td><td><span class="bg">No — factory calibrated</span></td><td>Every 2 seconds (min)</td></tr>
+      <tr><td>DS18B20 (water temp)</td><td>GPIO18</td><td>1-Wire</td><td>3.3V</td><td><span class="ba">Ice water check recommended</span></td><td>Every 1 second</td></tr>
+      <tr><td>Gravity EC probe</td><td>GPIO34 (ADC)</td><td>Analog</td><td>5V (needs level shift)</td><td><span class="br">YES — 3-point calibration</span></td><td>Every 30 seconds</td></tr>
+      <tr><td>pH probe V2</td><td>GPIO35 (ADC)</td><td>Analog</td><td>5V (needs level shift)</td><td><span class="br">YES — 2-point calibration</span></td><td>Every 30 seconds</td></tr>
+      <tr><td>A02YYUW (water level)</td><td>GPIO16 (RX2), GPIO17 (TX2)</td><td>UART</td><td>5V</td><td><span class="ba">Zero-point setup once</span></td><td>Every 5 seconds</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 3 — BH1750
+══════════════════════════════════════ -->
+<div id="p-bh1750" class="pg">
+  <div class="ph"><h2>BH1750 — Digital ambient light sensor</h2>
+  <p>Measures actual lux in your grow room. Used to auto-control LED lights and verify your plants are getting enough light intensity.</p></div>
+
+  <div class="sensor-card" style="background:#0c1a2e;border-color:#2563eb">
+    <div class="sc-header">
+      <div>
+        <div class="sc-name" style="color:#93c5fd">BH1750 Light Sensor</div>
+        <div style="font-size:11px;color:#475569;margin-top:3px">16-bit ambient light sensor, I2C protocol — ROHM Semiconductor</div>
+      </div>
+      <div><span class="bg">I2C</span> <span class="ba">Splash-proof only</span> <span class="bb">₹60–120</span></div>
+    </div>
+    <div class="g2">
+      <div>
+        <div class="sh" style="margin-top:0">Specifications</div>
+        <table>
+          <tr><td>Measurement range</td><td class="good">1 – 65,535 lux</td></tr>
+          <tr><td>Resolution modes</td><td>Low (4 lux), High (1 lux), High-2 (0.5 lux)</td></tr>
+          <tr><td>Accuracy</td><td>±20% (typical under normal conditions)</td></tr>
+          <tr><td>Supply voltage</td><td>2.4V – 3.6V (use 3.3V from ESP32)</td></tr>
+          <tr><td>Current draw</td><td>0.19 mA active, 1 µA sleep</td></tr>
+          <tr><td>I2C address</td><td>0x23 (ADDR pin LOW) / 0x5C (ADDR pin HIGH)</td></tr>
+          <tr><td>Response time</td><td>120ms (high-res), 16ms (low-res)</td></tr>
+          <tr><td>Operating temp</td><td>-40°C to 85°C</td></tr>
+          <tr><td>India price</td><td>₹60–120 on Robu.in or Amazon.in</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Wiring to ESP32</div>
+        <div class="wire-row"><div class="wire-color" style="background:#e53e3e"></div><div class="wire-from">BH1750 VCC</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 3.3V</div><div class="wire-note">Power supply pin</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#1a1a1a;border-color:#555"></div><div class="wire-from">BH1750 GND</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GND</div><div class="wire-note">Ground</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#ecc94b"></div><div class="wire-from">BH1750 SCL</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO22</div><div class="wire-note">I2C clock (default)</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#48bb78"></div><div class="wire-from">BH1750 SDA</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO21</div><div class="wire-note">I2C data (default)</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#2b6cb0"></div><div class="wire-from">BH1750 ADDR</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GND</div><div class="wire-note">Address = 0x23 (LOW)</div></div>
+        <div class="tip" style="margin-top:10px">Install library: <code style="color:#86efac">BH1750 by Christopher Laws</code> in Arduino IDE Library Manager.</div>
+      </div>
+    </div>
+    <div class="sh">Lux values — what the sensor should read for lettuce</div>
+    <table>
+      <tr><th>Reading (lux)</th><th>Condition</th><th>Lettuce health</th><th>Action</th></tr>
+      <tr><td class="bad num">0–500</td><td>Nearly dark / moonlight</td><td>Insufficient — plants die or etiolate</td><td>Turn on LED immediately</td></tr>
+      <tr><td class="warn-val num">500–3,000</td><td>Dim room / corridor light</td><td>Survival only — very slow growth</td><td>Move LED closer or add more tubes</td></tr>
+      <tr><td class="warn-val num">3,000–8,000</td><td>Bright room / office light</td><td>Acceptable for seedlings only</td><td>OK for Days 5–10. Add more light for vegetative stage.</td></tr>
+      <tr><td class="good num">8,000–20,000</td><td>Bright LED at 30–40cm</td><td>Good growth — 28–32 day cycle</td><td>Maintain this range</td></tr>
+      <tr><td class="good num">20,000–35,000</td><td>Very bright LED or indirect sun</td><td>Excellent — 21–25 day cycle</td><td>Optimal — maintain</td></tr>
+      <tr><td class="warn-val num">35,000–50,000</td><td>Direct sun through window</td><td>Slightly too bright for lettuce</td><td>Diffuse with net or move LED higher</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 4 — DHT22
+══════════════════════════════════════ -->
+<div id="p-dht22" class="pg">
+  <div class="ph"><h2>DHT22 — Humidity and air temperature sensor</h2>
+  <p>Monitors room humidity and air temperature. Critical for preventing tip burn (high humidity) and heat stress. Must be kept dry — not waterproof.</p></div>
+
+  <div class="sensor-card" style="background:#052e16;border-color:#14532d">
+    <div class="sc-header">
+      <div>
+        <div class="sc-name" style="color:#86efac">DHT22 / AM2302 Temperature + Humidity</div>
+        <div style="font-size:11px;color:#475569;margin-top:3px">Digital combined sensor — capacitive humidity + NTC thermistor</div>
+      </div>
+      <div><span class="bg">Digital</span> <span class="ba">Not waterproof — keep dry</span> <span class="bb">₹150–280</span></div>
+    </div>
+    <div class="g2">
+      <div>
+        <div class="sh" style="margin-top:0">Specifications</div>
+        <table>
+          <tr><td>Humidity range</td><td class="good">0 – 100% RH</td></tr>
+          <tr><td>Humidity accuracy</td><td>±2% RH (0–80%), ±5% RH (80–100%)</td></tr>
+          <tr><td>Humidity resolution</td><td>0.1% RH</td></tr>
+          <tr><td>Temperature range</td><td class="good">-40°C to +80°C</td></tr>
+          <tr><td>Temperature accuracy</td><td>±0.5°C</td></tr>
+          <tr><td>Temperature resolution</td><td>0.1°C</td></tr>
+          <tr><td>Supply voltage</td><td>3.3V – 5.5V</td></tr>
+          <tr><td>Current draw</td><td>1–1.5 mA active, 40–50 µA standby</td></tr>
+          <tr><td>Sampling interval</td><td>Minimum 2 seconds between readings</td></tr>
+          <tr><td>Response time (humidity)</td><td>6 seconds (63% step change)</td></tr>
+          <tr><td>India price</td><td>₹150–280 on Robu.in / Amazon.in</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Wiring to ESP32</div>
+        <div class="wire-row"><div class="wire-color" style="background:#e53e3e"></div><div class="wire-from">DHT22 Pin 1 (VCC)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 3.3V</div><div class="wire-note">Power supply</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#48bb78"></div><div class="wire-from">DHT22 Pin 2 (DATA)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO19</div><div class="wire-note">+ 10kΩ pull-up to 3.3V</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#1a1a1a;border-color:#555"></div><div class="wire-from">DHT22 Pin 4 (GND)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GND</div><div class="wire-note">Pin 3 = not connected</div></div>
+        <div class="danger" style="margin-top:10px"><strong>10kΩ pull-up resistor is mandatory</strong> between DATA pin and 3.3V. Without it, readings will be all zeros or NaN. The DHT22 module board (with breakout PCB) usually has this resistor already built in.</div>
+        <div class="sh">Mounting position in grow room</div>
+        <table>
+          <tr><td>Mount height</td><td>At canopy level of plants — same height as leaves</td></tr>
+          <tr><td>Distance from mist</td><td>Minimum 30 cm from tower — mist will damage sensor</td></tr>
+          <tr><td>Enclosure</span></td><td>Louvered plastic housing — keeps mist out, lets air in</td></tr>
+          <tr><td>Not near AC vent</td><td>Keep away from direct airflow — gives false readings</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="sh">Target readings for indoor lettuce tower</div>
+    <table>
+      <tr><th>Measurement</th><th>Target range</th><th>Too low</th><th>Too high</th><th>Action if wrong</th></tr>
+      <tr><td>Room humidity (RH%)</td><td class="good">55–65%</td><td class="bad">Below 45% — tip burn risk</td><td class="bad">Above 75% — fungal risk</td><td>Low: add humidifier or water tray. High: improve ventilation, run fan.</td></tr>
+      <tr><td>Air temperature (°C)</td><td class="good">18–22°C</td><td class="warn-val">Below 15°C — slow growth</td><td class="bad">Above 26°C — bolting risk</td><td>High: lower AC, move fans. Low: reduce AC, add small heater.</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 5 — DS18B20
+══════════════════════════════════════ -->
+<div id="p-ds18b20" class="pg">
+  <div class="ph"><h2>DS18B20 — Waterproof water temperature sensor</h2>
+  <p>Stainless steel probe — fully submersible in reservoir. Measures water temperature to prevent root rot and monitor nutrient absorption efficiency.</p></div>
+
+  <div class="sensor-card" style="background:#1c1203;border-color:#b45309">
+    <div class="sc-header">
+      <div>
+        <div class="sc-name" style="color:#fcd34d">DS18B20 Waterproof Temperature Probe</div>
+        <div style="font-size:11px;color:#475569;margin-top:3px">Dallas 1-Wire protocol, 12-bit resolution, IP68 stainless steel housing</div>
+      </div>
+      <div><span class="bg">IP68 Waterproof</span> <span class="bg">1-Wire bus</span> <span class="bb">₹80–180</span></div>
+    </div>
+    <div class="g2">
+      <div>
+        <div class="sh" style="margin-top:0">Specifications</div>
+        <table>
+          <tr><td>Temperature range</td><td class="good">-55°C to +125°C</td></tr>
+          <tr><td>Accuracy</td><td>±0.5°C (-10°C to +85°C range)</td></tr>
+          <tr><td>Resolution</td><td>9-bit to 12-bit selectable (0.5°C to 0.0625°C)</td></tr>
+          <tr><td>Resolution (12-bit)</td><td>0.0625°C — use this for reservoir</td></tr>
+          <tr><td>Conversion time (12-bit)</td><td>750ms maximum — wait before reading</td></tr>
+          <tr><td>Supply voltage</td><td>3.0V – 5.5V (use 3.3V from ESP32)</td></tr>
+          <tr><td>Cable length (standard)</td><td>1 metre stainless probe cable</td></tr>
+          <tr><td>Waterproof rating</td><td>IP68 — fully submersible</td></tr>
+          <tr><td>Multiple on one wire?</td><td class="good">Yes — up to 127 sensors on one GPIO</td></tr>
+          <tr><td>India price</td><td>₹80–180 on Robu.in / Amazon.in</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Wiring to ESP32</div>
+        <div class="wire-row"><div class="wire-color" style="background:#e53e3e"></div><div class="wire-from">DS18B20 Red wire</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 3.3V</div><div class="wire-note">VCC (power)</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#1a1a1a;border-color:#555"></div><div class="wire-from">DS18B20 Black wire</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GND</div><div class="wire-note">Ground</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#ecc94b"></div><div class="wire-from">DS18B20 Yellow wire</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO18</div><div class="wire-note">Data + 4.7kΩ to 3.3V</div></div>
+        <div class="tip" style="margin-top:8px"><strong>4.7kΩ pull-up resistor is mandatory</strong> between DATA wire and 3.3V. Without it, sensor reads -127°C (error state).</div>
+        <div class="sh">Two sensors on same wire (reservoir + tower air)</div>
+        <div style="font-size:12px;color:#94a3b8">Run both DS18B20 sensors on the same GPIO18 data line — 1-Wire bus supports multiple sensors. Each sensor has a unique 64-bit address. Use <code style="color:#fcd34d">sensors.getDeviceCount()</code> to verify both are detected.</div>
+        <div class="info" style="margin-top:8px">Libraries needed: <code style="color:#86efac">OneWire</code> + <code style="color:#86efac">DallasTemperature</code> — both available in Arduino IDE Library Manager.</div>
+      </div>
+    </div>
+    <div class="sh">Target water temperatures</div>
+    <table>
+      <tr><th>Temperature</th><th>Status</th><th>Effect on lettuce roots</th><th>Action</th></tr>
+      <tr><td class="good">16–20°C</td><td><span class="bg">Optimal</span></td><td>Maximum oxygen dissolved, minimum pathogen growth, best nutrient uptake</td><td>Maintain — this is the target zone</td></tr>
+      <tr><td class="warn-val">20–24°C</td><td><span class="ba">Acceptable</span></td><td>Good growth, slightly reduced oxygen. Acceptable for most of the year indoors with AC.</td><td>Monitor closely — add aeration pump if near 24°C</td></tr>
+      <tr><td class="warn-val">24–26°C</td><td><span class="ba">Warning</span></td><td>Pythium growth begins. Oxygen levels drop. Root zone stress increases.</td><td>Add frozen 500ml PET bottle to reservoir. Check AC temperature.</td></tr>
+      <tr><td class="bad">26–28°C</td><td><span class="br">Danger</span></td><td>Active root rot risk. Pythium multiplies rapidly. Roots may brown.</td><td>Emergency cooling. Add ice. Increase H₂O₂ dose. Check pump timing.</td></tr>
+      <tr><td class="bad">Above 28°C</td><td><span class="br">Critical</span></td><td>Severe root rot, plant collapse within 24–48 hours without intervention</td><td>Stop pump briefly. Replace 50% reservoir with cold water. Add Trichoderma.</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 6 — EC/TDS SENSOR
+══════════════════════════════════════ -->
+<div id="p-ec" class="pg">
+  <div class="ph"><h2>Gravity EC/TDS sensor — Nutrition monitor</h2>
+  <p>Measures electrical conductivity of nutrient solution — tells you PPM (how rich or dilute your nutrient solution is) in real time.</p></div>
+
+  <div class="sensor-card" style="background:#1a0f2e;border-color:#7c3aed">
+    <div class="sc-header">
+      <div>
+        <div class="sc-name" style="color:#c4b5fd">DFRobot Gravity Analog TDS/EC Sensor V1.0</div>
+        <div style="font-size:11px;color:#475569;margin-top:3px">Analog output, dual-electrode probe, temperature-compensated</div>
+      </div>
+      <div><span class="bg">Probe IP65</span> <span class="ba">Board not waterproof</span> <span class="bb">₹800–2,000</span></div>
+    </div>
+    <div class="g2">
+      <div>
+        <div class="sh" style="margin-top:0">Specifications</div>
+        <table>
+          <tr><td>Measurement</td><td>TDS (ppm) and EC (mS/cm)</td></tr>
+          <tr><td>TDS range</td><td class="good">0 – 1,000 ppm (TDS500 scale)</td></tr>
+          <tr><td>EC range</td><td class="good">0 – 2 mS/cm (or 0–20 mS/cm pro version)</td></tr>
+          <tr><td>Resolution</td><td>0.5 ppm / 0.001 mS/cm</td></tr>
+          <tr><td>Accuracy</td><td>±10% full scale</td></tr>
+          <tr><td>Supply voltage</td><td>3.3V – 5.5V</td></tr>
+          <tr><td>Output signal</td><td>0 – 2.3V analog (read with ADC)</td></tr>
+          <tr><td>Interface</td><td>Analog (needs 12-bit ADC — ESP32 has this)</td></tr>
+          <tr><td>Probe material</td><td>Graphite electrodes — DO NOT use in bleach/H₂O₂</td></tr>
+          <tr><td>Calibration solution</td><td>1413 µS/cm standard needed for calibration</td></tr>
+          <tr><td>India price</td><td>₹800–2,000 on Robu.in / Amazon.in</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Wiring to ESP32</div>
+        <div class="wire-row"><div class="wire-color" style="background:#e53e3e"></div><div class="wire-from">EC board VCC</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 3.3V</div><div class="wire-note">Use 3.3V (board supports it)</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#1a1a1a;border-color:#555"></div><div class="wire-from">EC board GND</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GND</div><div class="wire-note">Common ground</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#48bb78"></div><div class="wire-from">EC board A0 (output)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO34</div><div class="wire-note">ADC input-only pin</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#63b3ed"></div><div class="wire-from">DS18B20 data</div><div class="wire-arrow">→</div><div class="wire-to">EC board TEMP pin</div><div class="wire-note">Temperature compensation</div></div>
+        <div class="danger" style="margin-top:8px">GPIO34 and GPIO35 on ESP32 are input-ONLY — no internal pull-up. Never connect output devices here. Use only for ADC sensor readings.</div>
+        <div class="sh">3-point calibration procedure</div>
+        <div style="font-size:12px;color:#94a3b8">
+          1. Rinse probe with distilled water, dry<br>
+          2. Place in 1413 µS/cm standard solution<br>
+          3. Note ADC voltage reading — set as calibration point<br>
+          4. Adjust K value in code to match known EC<br>
+          5. Verify with second known solution (500 ppm or 2000 ppm)
+        </div>
+      </div>
+    </div>
+    <div class="sh">EC readings — what they mean for lettuce nutrition</div>
+    <table>
+      <tr><th>EC (mS/cm)</th><th>PPM (approx)</th><th>Stage</th><th>Meaning</th><th>Action</th></tr>
+      <tr><td class="bad">0.0–0.3</td><td>0–200</td><td>Any</td><td>Plain water — no nutrients</td><td>Add Part A + Part B nutrients immediately</td></tr>
+      <tr><td class="warn-val">0.3–0.5</td><td>200–350</td><td>Germination only</td><td>Very low — seed/sprout stage</td><td>Correct for Day 1–5 only. Increase for transplant.</td></tr>
+      <tr><td class="good">0.5–0.8</td><td>350–560</td><td>Baby seedling</td><td>Quarter strength — Day 5–10</td><td>Correct for nursery stage</td></tr>
+      <tr><td class="good">0.8–1.0</td><td>560–700</td><td>Young plant</td><td>Half strength — post-transplant</td><td>Correct for Day 10–18</td></tr>
+      <tr><td class="good">1.0–1.2</td><td>700–840</td><td>Vegetative</td><td>Full strength — peak growth</td><td>Correct for Day 18–28</td></tr>
+      <tr><td class="warn-val">1.2–1.4</td><td>840–980</td><td>Any</td><td>Slightly high for lettuce</td><td>Dilute with plain pH water — tip burn risk</td></tr>
+      <tr><td class="bad">Above 1.4</td><td>980+</td><td>Any</td><td>Too high — salt stress</td><td>Drain 20% reservoir, replace with clean pH water</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 7 — pH SENSOR
+══════════════════════════════════════ -->
+<div id="p-ph" class="pg">
+  <div class="ph"><h2>pH Sensor V2 — Acidity of nutrient solution</h2>
+  <p>Most critical sensor for aeroponics. Wrong pH locks out nutrients even if EC is perfect. Target 5.8–6.0 for lettuce at all times.</p></div>
+
+  <div class="sensor-card" style="background:#1c0505;border-color:#dc2626">
+    <div class="sc-header">
+      <div>
+        <div class="sc-name" style="color:#f87171">DFRobot Gravity Analog pH Sensor V2</div>
+        <div style="font-size:11px;color:#475569;margin-top:3px">BNC electrode, 3.3V/5V compatible, analog output, ATC (auto temperature compensation)</div>
+      </div>
+      <div><span class="bg">Probe waterproof</span> <span class="ba">Board: keep dry</span> <span class="bb">₹900–2,500</span></div>
+    </div>
+    <div class="g2">
+      <div>
+        <div class="sh" style="margin-top:0">Specifications</div>
+        <table>
+          <tr><td>pH range</td><td class="good">0 – 14 pH</td></tr>
+          <tr><td>Accuracy</td><td>±0.1 pH</td></tr>
+          <tr><td>Resolution</td><td>0.01 pH</td></tr>
+          <tr><td>Response time</td><td>Less than 1 minute (≤60 sec to stabilise)</td></tr>
+          <tr><td>Supply voltage</td><td>3.3V or 5V (V2 is 3.3V compatible — use 3.3V)</td></tr>
+          <tr><td>Output signal</td><td>0 – 3.3V analog</td></tr>
+          <tr><td>Temperature comp.</td><td>0°C to 60°C (manual temp input needed)</td></tr>
+          <tr><td>Electrode fill</td><td>KCl gel (sealed — no refilling)</td></tr>
+          <tr><td>Electrode life</td><td>12–18 months in continuous use</td></tr>
+          <tr><td>Storage</td><td>Keep probe wet in pH 7 buffer solution when not in use</td></tr>
+          <tr><td>India price</td><td>₹900–2,500 on Robu.in / Amazon.in</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Wiring to ESP32</div>
+        <div class="wire-row"><div class="wire-color" style="background:#e53e3e"></div><div class="wire-from">pH board VCC</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 3.3V</div><div class="wire-note">V2 works at 3.3V</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#1a1a1a;border-color:#555"></div><div class="wire-from">pH board GND</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GND</div><div class="wire-note">Common ground</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#48bb78"></div><div class="wire-from">pH board A0 (output)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO35</div><div class="wire-note">ADC input-only pin</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#63b3ed"></div><div class="wire-from">DS18B20 data</div><div class="wire-arrow">→</div><div class="wire-to">pH board T pin</div><div class="wire-note">Temperature compensation input</div></div>
+        <div class="tip" style="margin-top:8px"><strong>2-point calibration (mandatory before first use):</strong><br>Step 1: Rinse probe, place in pH 7.00 buffer. Wait 2 min. Note ADC value.<br>Step 2: Rinse, place in pH 4.00 buffer. Wait 2 min. Note ADC value.<br>Step 3: Enter both values in code — linear interpolation gives accurate pH.</div>
+        <div class="warn" style="margin-top:6px">Never let electrode dry out. Store in pH 7 buffer between uses. Dry electrode = permanent damage.</div>
+      </div>
+    </div>
+    <div class="sh">pH readings — nutrient absorption chart for lettuce</div>
+    <table>
+      <tr><th>pH reading</th><th>Status</th><th>Nutrients available</th><th>Action</th></tr>
+      <tr><td class="bad">Below 5.0</td><td><span class="br">Dangerous</span></td><td>Heavy metal toxicity, P and Ca locked out</td><td>Add pH Up (KOH) 0.5ml at a time. Recheck in 5 min.</td></tr>
+      <tr><td class="warn-val">5.0–5.5</td><td><span class="ba">Slightly low</span></td><td>Ca and Mg less available</td><td>Small dose pH Up. Monitor.</td></tr>
+      <tr><td class="good">5.5–6.0</td><td><span class="bg">Ideal for lettuce</span></td><td>All nutrients fully available</td><td>No action — maintain this zone</td></tr>
+      <tr><td class="good">6.0–6.2</td><td><span class="bg">Acceptable</span></td><td>Good availability, slight Fe reduction</td><td>Fine for most stages</td></tr>
+      <tr><td class="warn-val">6.2–6.5</td><td><span class="ba">Drifting high</span></td><td>Fe, Mn, B reduction begins</td><td>Add pH Down (phosphoric acid) 1ml at a time</td></tr>
+      <tr><td class="bad">Above 6.5</td><td><span class="br">Lockout zone</span></td><td>Fe, Mn, Zn severely locked out</td><td>Add pH Down until below 6.2. Look for yellow new leaves.</td></tr>
+      <tr><td class="bad">Above 7.0</td><td><span class="br">Critical lockout</span></td><td>Multiple nutrient lockouts</td><td>Emergency: add pH Down 2ml, stir, wait 10 min. Do partial reservoir change.</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 8 — WATER LEVEL
+══════════════════════════════════════ -->
+<div id="p-level" class="pg">
+  <div class="ph"><h2>A02YYUW — Waterproof ultrasonic water level sensor</h2>
+  <p>Mounted above reservoir — measures distance to water surface. Calculates water level % without any contact with the water. Fully waterproof.</p></div>
+
+  <div class="sensor-card" style="background:#0c1a2e;border-color:#0284c7">
+    <div class="sc-header">
+      <div>
+        <div class="sc-name" style="color:#67e8f9">A02YYUW Waterproof Ultrasonic Distance Sensor</div>
+        <div style="font-size:11px;color:#475569;margin-top:3px">UART output, IP67 waterproof, 3–450cm range, non-contact measurement</div>
+      </div>
+      <div><span class="bg">IP67 Waterproof</span> <span class="bb">UART</span> <span class="bb">₹400–800</span></div>
+    </div>
+    <div class="g2">
+      <div>
+        <div class="sh" style="margin-top:0">Specifications</div>
+        <table>
+          <tr><td>Measurement range</td><td class="good">3 cm – 450 cm</td></tr>
+          <tr><td>Accuracy</td><td>±1 cm (at 20°C)</td></tr>
+          <tr><td>Resolution</td><td>1 mm</td></tr>
+          <tr><td>Interface</td><td>UART (9600 baud, 8N1)</td></tr>
+          <tr><td>Supply voltage</td><td>3.3V – 5V</td></tr>
+          <tr><td>Current draw</td><td>≤8 mA</td></tr>
+          <tr><td>Waterproof rating</td><td>IP67 — splash and brief submersion</td></tr>
+          <tr><td>Operating temp</td><td>-10°C to +70°C</td></tr>
+          <tr><td>Ultrasonic frequency</td><td>40 kHz</td></tr>
+          <tr><td>Output format</td><td>4 bytes: 0xFF + High + Low + Checksum</td></tr>
+          <tr><td>India price</td><td>₹400–800 on Robu.in / Amazon.in</td></tr>
+        </table>
+      </div>
+      <div>
+        <div class="sh" style="margin-top:0">Wiring to ESP32</div>
+        <div class="wire-row"><div class="wire-color" style="background:#e53e3e"></div><div class="wire-from">A02YYUW Red (VCC)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 3.3V or 5V</div><div class="wire-note">Power supply</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#1a1a1a;border-color:#555"></div><div class="wire-from">A02YYUW Black (GND)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GND</div><div class="wire-note">Ground</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#ecc94b"></div><div class="wire-from">A02YYUW Yellow (TX)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO16 (RX2)</div><div class="wire-note">Sensor TX → ESP32 RX</div></div>
+        <div class="wire-row"><div class="wire-color" style="background:#fff;border-color:#555"></div><div class="wire-from">A02YYUW White (RX)</div><div class="wire-arrow">→</div><div class="wire-to">ESP32 GPIO17 (TX2)</div><div class="wire-note">Sensor RX ← ESP32 TX</div></div>
+        <div class="tip" style="margin-top:8px"><strong>Mounting:</strong> Mount sensor at the top of reservoir lid, pointing down at water surface. Measure total reservoir height from sensor to empty bottom. Calculate fill %: <code style="color:#86efac">level% = (tankHeight - distance) / tankHeight × 100</code></div>
+        <div class="info">Use <code style="color:#86efac">Serial2.begin(9600)</code> on ESP32 for this sensor. Read 4 bytes: distance(mm) = (byte2 × 256) + byte3. Verify checksum = (0xFF + byte2 + byte3) & 0xFF == byte4.</div>
+      </div>
+    </div>
+    <div class="sh">Water level thresholds for pump control</div>
+    <table>
+      <tr><th>Level %</th><th>Status</th><th>ESP32 action</th><th>Dashboard alert</th></tr>
+      <tr><td class="good">80–100%</td><td><span class="bg">FULL</span></td><td>Normal pump operation</td><td>No alert</td></tr>
+      <tr><td class="good">50–80%</td><td><span class="bg">NORMAL</span></td><td>Normal pump operation</td><td>No alert</td></tr>
+      <tr><td class="warn-val">25–50%</td><td><span class="ba">LOW</span></td><td>Normal pump but send alert</td><td>"Reservoir low — add water today"</td></tr>
+      <tr><td class="bad">10–25%</td><td><span class="br">CRITICAL</span></td><td>Reduce misting cycle — protect pump</td><td>"CRITICAL — add water NOW"</td></tr>
+      <tr><td class="bad">Below 10%</td><td><span class="br">EMPTY — PUMP OFF</span></td><td>STOP PUMP IMMEDIATELY — dry run kills pump</td><td>"EMERGENCY — pump stopped"</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 9 — FULL WIRING DIAGRAM
+══════════════════════════════════════ -->
+<div id="p-wiring" class="pg">
+  <div class="ph"><h2>Complete ESP32 wiring diagram — all sensors</h2>
+  <p>All 6 sensors wired to a single ESP32 board. Full GPIO map, power requirements, and important notes.</p></div>
+
+  <div class="circuit">
+    <svg width="100%" viewBox="0 0 740 500">
+      <!-- ESP32 board centre -->
+      <rect x="270" y="160" width="200" height="180" rx="8" fill="#0a1628" stroke="#334155" stroke-width="1.5"/>
+      <text x="370" y="182" text-anchor="middle" font-size="13" font-weight="700" fill="#86efac">ESP32 DevKit</text>
+      <text x="370" y="196" text-anchor="middle" font-size="10" fill="#475569">30-pin or 38-pin</text>
+      <!-- Left pins -->
+      <text x="278" y="218" font-size="9" fill="#93c5fd">3.3V</text>
+      <text x="278" y="232" font-size="9" fill="#475569">GND</text>
+      <text x="278" y="246" font-size="9" fill="#86efac">GPIO21 SDA</text>
+      <text x="278" y="260" font-size="9" fill="#86efac">GPIO22 SCL</text>
+      <text x="278" y="274" font-size="9" fill="#fcd34d">GPIO18</text>
+      <text x="278" y="288" font-size="9" fill="#f87171">GPIO19</text>
+      <text x="278" y="302" font-size="9" fill="#c4b5fd">GPIO34 ADC</text>
+      <text x="278" y="316" font-size="9" fill="#f87171">GPIO35 ADC</text>
+      <!-- Right pins -->
+      <text x="462" y="218" font-size="9" fill="#93c5fd" text-anchor="end">5V / VIN</text>
+      <text x="462" y="232" font-size="9" fill="#475569" text-anchor="end">GND</text>
+      <text x="462" y="246" font-size="9" fill="#67e8f9" text-anchor="end">GPIO16 (RX2)</text>
+      <text x="462" y="260" font-size="9" fill="#67e8f9" text-anchor="end">GPIO17 (TX2)</text>
+      <text x="462" y="274" font-size="9" fill="#f59e0b" text-anchor="end">GPIO27 RELAY</text>
+      <text x="462" y="288" font-size="9" fill="#f59e0b" text-anchor="end">GPIO26 FLOW</text>
+
+      <!-- BH1750 top left -->
+      <rect x="30" y="30" width="110" height="70" rx="6" fill="#0c1a2e" stroke="#2563eb" stroke-width="1.5"/>
+      <text x="85" y="50" text-anchor="middle" font-size="11" font-weight="700" fill="#93c5fd">BH1750</text>
+      <text x="85" y="64" text-anchor="middle" font-size="9" fill="#475569">Light sensor</text>
+      <text x="85" y="78" text-anchor="middle" font-size="9" fill="#475569">I2C — GPIO21/22</text>
+      <text x="85" y="92" text-anchor="middle" font-size="9" fill="#475569">3.3V · 0x23</text>
+      <line x1="140" y1="65" x2="270" y2="246" stroke="#86efac" stroke-width="1" stroke-dasharray="4 2"/>
+      <line x1="140" y1="65" x2="270" y2="260" stroke="#ecc94b" stroke-width="1" stroke-dasharray="4 2"/>
+
+      <!-- DHT22 left -->
+      <rect x="30" y="130" width="110" height="70" rx="6" fill="#052e16" stroke="#14532d" stroke-width="1.5"/>
+      <text x="85" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#86efac">DHT22</text>
+      <text x="85" y="164" text-anchor="middle" font-size="9" fill="#475569">Humidity + Air Temp</text>
+      <text x="85" y="178" text-anchor="middle" font-size="9" fill="#475569">GPIO19 · 3.3V</text>
+      <text x="85" y="192" text-anchor="middle" font-size="9" fill="#fcd34d">10kΩ pull-up needed</text>
+      <line x1="140" y1="165" x2="270" y2="288" stroke="#f87171" stroke-width="1" stroke-dasharray="4 2"/>
+
+      <!-- DS18B20 left bottom -->
+      <rect x="30" y="230" width="110" height="70" rx="6" fill="#1c1203" stroke="#b45309" stroke-width="1.5"/>
+      <text x="85" y="250" text-anchor="middle" font-size="11" font-weight="700" fill="#fcd34d">DS18B20</text>
+      <text x="85" y="264" text-anchor="middle" font-size="9" fill="#475569">Water temp (IP68)</text>
+      <text x="85" y="278" text-anchor="middle" font-size="9" fill="#475569">GPIO18 · 3.3V</text>
+      <text x="85" y="292" text-anchor="middle" font-size="9" fill="#fcd34d">4.7kΩ pull-up needed</text>
+      <line x1="140" y1="265" x2="270" y2="274" stroke="#fcd34d" stroke-width="1" stroke-dasharray="4 2"/>
+
+      <!-- EC Sensor bottom left -->
+      <rect x="30" y="340" width="110" height="70" rx="6" fill="#1a0f2e" stroke="#7c3aed" stroke-width="1.5"/>
+      <text x="85" y="360" text-anchor="middle" font-size="11" font-weight="700" fill="#c4b5fd">EC/TDS Sensor</text>
+      <text x="85" y="374" text-anchor="middle" font-size="9" fill="#475569">Nutrition monitor</text>
+      <text x="85" y="388" text-anchor="middle" font-size="9" fill="#475569">GPIO34 (ADC) · 3.3V</text>
+      <text x="85" y="402" text-anchor="middle" font-size="9" fill="#fcd34d">3-point calibration</text>
+      <line x1="140" y1="375" x2="270" y2="302" stroke="#c4b5fd" stroke-width="1" stroke-dasharray="4 2"/>
+
+      <!-- pH Sensor right bottom -->
+      <rect x="600" y="340" width="120" height="70" rx="6" fill="#1c0505" stroke="#dc2626" stroke-width="1.5"/>
+      <text x="660" y="360" text-anchor="middle" font-size="11" font-weight="700" fill="#f87171">pH Sensor V2</text>
+      <text x="660" y="374" text-anchor="middle" font-size="9" fill="#475569">Acidity monitor</text>
+      <text x="660" y="388" text-anchor="middle" font-size="9" fill="#475569">GPIO35 (ADC) · 3.3V</text>
+      <text x="660" y="402" text-anchor="middle" font-size="9" fill="#fcd34d">2-point calibration</text>
+      <line x1="600" y1="375" x2="470" y2="316" stroke="#f87171" stroke-width="1" stroke-dasharray="4 2"/>
+
+      <!-- Ultrasonic right -->
+      <rect x="600" y="130" width="120" height="70" rx="6" fill="#0c1a2e" stroke="#0284c7" stroke-width="1.5"/>
+      <text x="660" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">A02YYUW</text>
+      <text x="660" y="164" text-anchor="middle" font-size="9" fill="#475569">Water level (IP67)</text>
+      <text x="660" y="178" text-anchor="middle" font-size="9" fill="#475569">GPIO16/17 UART</text>
+      <text x="660" y="192" text-anchor="middle" font-size="9" fill="#475569">5V supply</text>
+      <line x1="600" y1="165" x2="470" y2="246" stroke="#67e8f9" stroke-width="1" stroke-dasharray="4 2"/>
+      <line x1="600" y1="170" x2="470" y2="260" stroke="#67e8f9" stroke-width="1" stroke-dasharray="4 2"/>
+
+      <!-- Relay + Pump right top -->
+      <rect x="600" y="30" width="120" height="70" rx="6" fill="#0a1628" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="660" y="50" text-anchor="middle" font-size="11" font-weight="700" fill="#fcd34d">4CH Relay</text>
+      <text x="660" y="64" text-anchor="middle" font-size="9" fill="#475569">Pump control</text>
+      <text x="660" y="78" text-anchor="middle" font-size="9" fill="#475569">GPIO27 · 5V coil</text>
+      <text x="660" y="92" text-anchor="middle" font-size="9" fill="#f87171">230V load side!</text>
+      <line x1="600" y1="65" x2="470" y2="274" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 2"/>
+
+      <!-- LED relay top -->
+      <rect x="390" y="30" width="140" height="55" rx="6" fill="#0a1628" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="460" y="50" text-anchor="middle" font-size="11" font-weight="700" fill="#fef08a">LED Light Relay</text>
+      <text x="460" y="64" text-anchor="middle" font-size="9" fill="#475569">GPIO28 or same relay board</text>
+      <text x="460" y="76" text-anchor="middle" font-size="9" fill="#475569">Timer-controlled on/off</text>
+
+      <!-- SMPS bottom -->
+      <rect x="270" y="395" width="200" height="60" rx="6" fill="#0a1628" stroke="#334155" stroke-width="1.5"/>
+      <text x="370" y="418" text-anchor="middle" font-size="11" font-weight="700" fill="#94a3b8">12V SMPS Power Supply</text>
+      <text x="370" y="432" text-anchor="middle" font-size="9" fill="#475569">12V → 5V USB (pump) + 3.3V (ESP32)</text>
+      <text x="370" y="446" text-anchor="middle" font-size="9" fill="#475569">MCB 10A + ELCB 30mA at mains input</text>
+      <line x1="370" y1="395" x2="370" y2="340" stroke="#334155" stroke-width="1" stroke-dasharray="3 2"/>
+    </svg>
+  </div>
+
+  <div class="sh">Full GPIO mapping table</div>
+  <div class="card" style="background:#0a0f1a">
+    <table>
+      <tr><th>GPIO</th><th>Direction</th><th>Sensor / Device</th><th>Protocol</th><th>Voltage</th><th>Pull-up needed?</th><th>Notes</th></tr>
+      <tr><td>GPIO18</td><td>INPUT</td><td>DS18B20 water temp (1-Wire)</td><td>1-Wire</td><td>3.3V</td><td class="warn-val">YES — 4.7kΩ to 3.3V</td><td>Up to 127 sensors on same pin</td></tr>
+      <tr><td>GPIO19</td><td>INPUT</td><td>DHT22 humidity + air temp</td><td>Single-wire</td><td>3.3V</td><td class="warn-val">YES — 10kΩ to 3.3V</td><td>Module board usually has it built in</td></tr>
+      <tr><td>GPIO21</td><td>I2C SDA</td><td>BH1750 light sensor (SDA)</td><td>I2C</td><td>3.3V</td><td>Built into ESP32 I2C</td><td>Default SDA pin</td></tr>
+      <tr><td>GPIO22</td><td>I2C SCL</td><td>BH1750 light sensor (SCL)</td><td>I2C</td><td>3.3V</td><td>Built into ESP32 I2C</td><td>Default SCL pin</td></tr>
+      <tr><td>GPIO34</td><td>ADC INPUT only</td><td>EC/TDS nutrition sensor</td><td>Analog</td><td>3.3V output</td><td class="bad">NO — input-only pin</td><td>Use 12-bit ADC. No internal pull-up on GPIO34.</td></tr>
+      <tr><td>GPIO35</td><td>ADC INPUT only</td><td>pH sensor V2</td><td>Analog</td><td>3.3V output</td><td class="bad">NO — input-only pin</td><td>Use 12-bit ADC. No internal pull-up on GPIO35.</td></tr>
+      <tr><td>GPIO16 (RX2)</td><td>INPUT</td><td>A02YYUW ultrasonic (TX→RX)</td><td>UART2</td><td>3.3V</td><td>NO</td><td>Sensor TX → ESP32 RX</td></tr>
+      <tr><td>GPIO17 (TX2)</td><td>OUTPUT</td><td>A02YYUW ultrasonic (RX←TX)</td><td>UART2</td><td>3.3V</td><td>NO</td><td>ESP32 TX → Sensor RX (rarely used)</td></tr>
+      <tr><td>GPIO27</td><td>OUTPUT</td><td>Relay channel 1 (pump)</td><td>Digital</td><td>5V coil</td><td>NO</td><td>Active LOW relay — HIGH=OFF, LOW=ON</td></tr>
+      <tr><td>GPIO26</td><td>INPUT</td><td>YF-S201 flow sensor</td><td>Interrupt</td><td>5V signal</td><td>YES — INPUT_PULLUP</td><td>Use attachInterrupt RISING edge</td></tr>
+      <tr><td>GPIO25</td><td>OUTPUT</td><td>Relay channel 2 (LED light)</td><td>Digital</td><td>5V coil</td><td>NO</td><td>Controls LED ON/OFF via timer</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PAGE 10 — ESP32 CODE FOR ALL SENSORS
+══════════════════════════════════════ -->
+<div id="p-code" class="pg">
+  <div class="ph"><h2>ESP32 code — reading all sensors</h2>
+  <p>Complete working code snippets for every sensor. Add these to your main controller firmware.</p></div>
+
+  <div class="sh">Libraries to install (Arduino IDE → Library Manager)</div>
+  <div class="card">
+    <table>
+      <tr><th>Library name</th><th>Author</th><th>Sensor it supports</th></tr>
+      <tr><td>BH1750</td><td>Christopher Laws</td><td>BH1750 light sensor</td></tr>
+      <tr><td>DHT sensor library</td><td>Adafruit</td><td>DHT22 humidity + temp</td></tr>
+      <tr><td>Adafruit Unified Sensor</td><td>Adafruit</td><td>Required by DHT library</td></tr>
+      <tr><td>OneWire</td><td>Paul Stoffregen</td><td>DS18B20 (1-Wire bus)</td></tr>
+      <tr><td>DallasTemperature</td><td>Miles Burton</td><td>DS18B20 temperature reading</td></tr>
+      <tr><td>GravityTDS</td><td>DFRobot</td><td>EC/TDS nutrition sensor</td></tr>
+    </table>
+  </div>
+
+  <div class="sh">Complete sensor reading code</div>
+<pre>
+<span class="cm">// ─────────────────────────────────────────────────────
+//  ALL SENSOR INCLUDES
+// ─────────────────────────────────────────────────────</span>
+<span class="kw">#include</span> <span class="st">&lt;Wire.h&gt;</span>
+<span class="kw">#include</span> <span class="st">&lt;BH1750.h&gt;</span>
+<span class="kw">#include</span> <span class="st">&lt;DHT.h&gt;</span>
+<span class="kw">#include</span> <span class="st">&lt;OneWire.h&gt;</span>
+<span class="kw">#include</span> <span class="st">&lt;DallasTemperature.h&gt;</span>
+<span class="kw">#include</span> <span class="st">&lt;GravityTDS.h&gt;</span>
+
+<span class="cm">// ─── GPIO PINS ─────────────────────────────────────</span>
+<span class="kw">#define</span> PIN_DS18B20   <span class="num-c">18</span>   <span class="cm">// Water temp probe</span>
+<span class="kw">#define</span> PIN_DHT22     <span class="num-c">19</span>   <span class="cm">// Humidity + air temp</span>
+<span class="kw">#define</span> PIN_EC_ANALOG <span class="num-c">34</span>   <span class="cm">// EC/TDS sensor (ADC)</span>
+<span class="kw">#define</span> PIN_PH_ANALOG <span class="num-c">35</span>   <span class="cm">// pH sensor (ADC)</span>
+<span class="kw">#define</span> PIN_PUMP_RELAY <span class="num-c">27</span>  <span class="cm">// Pump relay</span>
+<span class="kw">#define</span> PIN_LED_RELAY  <span class="num-c">25</span>  <span class="cm">// LED light relay</span>
+<span class="cm">// BH1750: GPIO21 (SDA), GPIO22 (SCL) — default I2C</span>
+<span class="cm">// A02YYUW: GPIO16 (RX2), GPIO17 (TX2) — UART2</span>
+
+<span class="cm">// ─── OBJECTS ───────────────────────────────────────</span>
+BH1750 lightMeter;
+DHT dht(<span class="num-c">PIN_DHT22</span>, DHT22);
+OneWire oneWire(<span class="num-c">PIN_DS18B20</span>);
+DallasTemperature waterTempSensor(&amp;oneWire);
+GravityTDS gravityTds;
+
+<span class="cm">// ─── pH calibration constants (set after calibration) ──</span>
+<span class="kw">const float</span> PH_SLOPE     = <span class="num-c">-5.7</span>;   <span class="cm">// Adjust after 2-point cal</span>
+<span class="kw">const float</span> PH_INTERCEPT = <span class="num-c">20.5</span>;   <span class="cm">// Adjust after 2-point cal</span>
+
+<span class="cm">// ─── LED light control ──────────────────────────────</span>
+<span class="kw">const int</span> LED_ON_HOUR    = <span class="num-c">5</span>;    <span class="cm">// 5:00 AM lights ON</span>
+<span class="kw">const int</span> LED_OFF_HOUR   = <span class="num-c">23</span>;   <span class="cm">// 11:00 PM lights OFF (18hr photoperiod)</span>
+<span class="kw">const int</span> LED_PREHARVEST_OFF = <span class="num-c">21</span>; <span class="cm">// 9:00 PM for pre-harvest (16hr)</span>
+
+<span class="cm">// ─────────────────────────────────────────────────────
+//  SETUP
+// ─────────────────────────────────────────────────────</span>
+<span class="kw">void</span> <span class="fn">setup</span>() {
+  Serial.begin(<span class="num-c">115200</span>);
+
+  <span class="cm">// I2C for BH1750</span>
+  Wire.begin(<span class="num-c">21</span>, <span class="num-c">22</span>);
+  lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
+
+  <span class="cm">// DHT22</span>
+  dht.begin();
+
+  <span class="cm">// DS18B20 water temp</span>
+  waterTempSensor.begin();
+  waterTempSensor.setResolution(<span class="num-c">12</span>); <span class="cm">// 12-bit = 0.0625°C resolution</span>
+
+  <span class="cm">// EC/TDS sensor</span>
+  gravityTds.setPin(<span class="num-c">PIN_EC_ANALOG</span>);
+  gravityTds.setAref(<span class="num-c">3.3</span>);         <span class="cm">// ESP32 ADC reference</span>
+  gravityTds.setAdcRange(<span class="num-c">4096</span>);    <span class="cm">// ESP32 = 12-bit = 4096</span>
+  gravityTds.begin();
+
+  <span class="cm">// UART2 for A02YYUW ultrasonic</span>
+  Serial2.begin(<span class="num-c">9600</span>, SERIAL_8N1, <span class="num-c">16</span>, <span class="num-c">17</span>); <span class="cm">// RX=16, TX=17</span>
+
+  <span class="cm">// Relay pins</span>
+  pinMode(<span class="num-c">PIN_PUMP_RELAY</span>, OUTPUT);
+  pinMode(<span class="num-c">PIN_LED_RELAY</span>,  OUTPUT);
+  digitalWrite(<span class="num-c">PIN_PUMP_RELAY</span>, HIGH); <span class="cm">// HIGH = relay OFF (active LOW)</span>
+  digitalWrite(<span class="num-c">PIN_LED_RELAY</span>,  HIGH);
+}
+
+<span class="cm">// ─────────────────────────────────────────────────────
+//  READ ALL SENSORS (call every 30 seconds)
+// ─────────────────────────────────────────────────────</span>
+<span class="kw">struct</span> SensorReadings {
+  <span class="kw">float</span>   lux;           <span class="cm">// BH1750 — light intensity</span>
+  <span class="kw">float</span>   humidity;      <span class="cm">// DHT22</span>
+  <span class="kw">float</span>   airTempC;      <span class="cm">// DHT22</span>
+  <span class="kw">float</span>   waterTempC;    <span class="cm">// DS18B20</span>
+  <span class="kw">float</span>   ecMS;          <span class="cm">// EC sensor mS/cm</span>
+  <span class="kw">float</span>   ppm;           <span class="cm">// TDS/PPM (EC × 700)</span>
+  <span class="kw">float</span>   pH;            <span class="cm">// pH sensor</span>
+  <span class="kw">int</span>     waterLevelPct; <span class="cm">// A02YYUW level %</span>
+  <span class="kw">bool</span>    valid;
+};
+
+<span class="kw">const float</span> TANK_HEIGHT_CM = <span class="num-c">60.0</span>; <span class="cm">// Edit: your reservoir height in cm</span>
+
+SensorReadings <span class="fn">readAllSensors</span>() {
+  SensorReadings r;
+  r.valid = <span class="kw">true</span>;
+
+  <span class="cm">// 1. BH1750 — light (lux)</span>
+  r.lux = lightMeter.readLightLevel();
+  Serial.printf(<span class="st">"Light: %.0f lux\n"</span>, r.lux);
+
+  <span class="cm">// 2. DHT22 — humidity and air temperature</span>
+  r.humidity  = dht.readHumidity();
+  r.airTempC  = dht.readTemperature();
+  <span class="kw">if</span> (isnan(r.humidity) || isnan(r.airTempC)) {
+    Serial.println(<span class="st">"DHT22 read error!"</span>);
+    r.valid = <span class="kw">false</span>;
+  } <span class="kw">else</span> {
+    Serial.printf(<span class="st">"Air: %.1f°C  RH: %.1f%%\n"</span>, r.airTempC, r.humidity);
+  }
+
+  <span class="cm">// 3. DS18B20 — water temperature (wait for 12-bit conversion)</span>
+  waterTempSensor.requestTemperatures();
+  <span class="kw">unsigned long</span> convStart = millis();
+  <span class="kw">while</span> (!waterTempSensor.isConversionComplete()) {
+    <span class="kw">if</span> (millis() - convStart > <span class="num-c">900</span>) <span class="kw">break</span>; <span class="cm">// 900ms timeout</span>
+    yield();
+  }
+  r.waterTempC = waterTempSensor.getTempCByIndex(<span class="num-c">0</span>);
+  <span class="kw">if</span> (r.waterTempC == DEVICE_DISCONNECTED_C) {
+    Serial.println(<span class="st">"DS18B20 disconnected!"</span>);
+    r.valid = <span class="kw">false</span>;
+  } <span class="kw">else</span> {
+    Serial.printf(<span class="st">"Water temp: %.2f°C\n"</span>, r.waterTempC);
+  }
+
+  <span class="cm">// 4. EC/TDS sensor (with temperature compensation)</span>
+  gravityTds.setTemperature(r.waterTempC); <span class="cm">// temp compensation</span>
+  gravityTds.update();
+  r.ppm  = gravityTds.getTdsValue();      <span class="cm">// PPM reading</span>
+  r.ecMS = r.ppm / <span class="num-c">700.0</span>;               <span class="cm">// Convert to EC mS/cm</span>
+  Serial.printf(<span class="st">"EC: %.2f mS/cm  TDS: %.0f PPM\n"</span>, r.ecMS, r.ppm);
+
+  <span class="cm">// 5. pH sensor (averaged 10 readings for stability)</span>
+  <span class="kw">long</span> adcSum = <span class="num-c">0</span>;
+  <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num-c">0</span>; i &lt; <span class="num-c">10</span>; i++) {
+    adcSum += analogRead(<span class="num-c">PIN_PH_ANALOG</span>);
+    delay(<span class="num-c">5</span>);
+  }
+  <span class="kw">float</span> adcAvg     = adcSum / <span class="num-c">10.0</span>;
+  <span class="kw">float</span> voltage    = adcAvg * (<span class="num-c">3.3</span> / <span class="num-c">4095.0</span>); <span class="cm">// 12-bit ADC, 3.3V ref</span>
+  r.pH = PH_SLOPE * voltage + PH_INTERCEPT;   <span class="cm">// Linear from calibration</span>
+  Serial.printf(<span class="st">"pH: %.2f (voltage: %.3fV)\n"</span>, r.pH, voltage);
+
+  <span class="cm">// 6. A02YYUW — water level (ultrasonic, UART2)</span>
+  r.waterLevelPct = <span class="fn">readUltrasonicLevel</span>();
+  Serial.printf(<span class="st">"Water level: %d%%\n"</span>, r.waterLevelPct);
+
+  <span class="kw">return</span> r;
+}
+
+<span class="cm">// A02YYUW UART parser — returns distance in cm</span>
+<span class="kw">int</span> <span class="fn">readUltrasonicLevel</span>() {
+  <span class="kw">while</span> (Serial2.available()) Serial2.read(); <span class="cm">// flush stale data</span>
+  <span class="kw">unsigned long</span> t = millis();
+  <span class="kw">while</span> (Serial2.available() &lt; <span class="num-c">4</span>) {
+    <span class="kw">if</span> (millis() - t > <span class="num-c">500</span>) <span class="kw">return</span> <span class="num-c">-1</span>; <span class="cm">// timeout</span>
+    yield();
+  }
+  <span class="kw">uint8_t</span> buf[<span class="num-c">4</span>];
+  Serial2.readBytes(buf, <span class="num-c">4</span>);
+  <span class="kw">if</span> (buf[<span class="num-c">0</span>] != <span class="num-c">0xFF</span>) <span class="kw">return</span> <span class="num-c">-1</span>; <span class="cm">// check header</span>
+  <span class="kw">uint8_t</span> checksum = (buf[<span class="num-c">0</span>] + buf[<span class="num-c">1</span>] + buf[<span class="num-c">2</span>]) &amp; <span class="num-c">0xFF</span>;
+  <span class="kw">if</span> (checksum != buf[<span class="num-c">3</span>]) <span class="kw">return</span> <span class="num-c">-1</span>; <span class="cm">// checksum fail</span>
+  <span class="kw">int</span> distanceMM = (buf[<span class="num-c">1</span>] &lt;&lt; <span class="num-c">8</span>) | buf[<span class="num-c">2</span>];
+  <span class="kw">float</span> distanceCM = distanceMM / <span class="num-c">10.0</span>;
+  <span class="cm">// Convert distance to level percentage</span>
+  <span class="kw">float</span> levelCM  = TANK_HEIGHT_CM - distanceCM;
+  <span class="kw">int</span>   levelPct = (<span class="kw">int</span>)((levelCM / TANK_HEIGHT_CM) * <span class="num-c">100.0</span>);
+  <span class="kw">return</span> constrain(levelPct, <span class="num-c">0</span>, <span class="num-c">100</span>);
+}
+
+<span class="cm">// ─────────────────────────────────────────────────────
+//  LED LIGHT AUTO-CONTROL (sensor-driven)
+// ─────────────────────────────────────────────────────</span>
+<span class="kw">void</span> <span class="fn">controlLED</span>(<span class="kw">int</span> currentHour, <span class="kw">float</span> luxReading, <span class="kw">bool</span> preHarvestMode) {
+  <span class="kw">int</span> offHour = preHarvestMode ? LED_PREHARVEST_OFF : LED_OFF_HOUR;
+  <span class="kw">bool</span> inSchedule = (currentHour >= LED_ON_HOUR &amp;&amp; currentHour &lt; offHour);
+
+  <span class="cm">// Turn LED OFF if it's dark hours (plants need rest)</span>
+  <span class="kw">if</span> (!inSchedule) {
+    digitalWrite(<span class="num-c">PIN_LED_RELAY</span>, HIGH); <span class="cm">// OFF</span>
+    <span class="kw">return</span>;
+  }
+
+  <span class="cm">// During scheduled hours: auto-control based on lux</span>
+  <span class="kw">if</span> (luxReading > <span class="num-c">25000</span>) {
+    <span class="cm">// Too bright (direct sunlight) — LED not needed</span>
+    digitalWrite(<span class="num-c">PIN_LED_RELAY</span>, HIGH); <span class="cm">// OFF</span>
+  } <span class="kw">else if</span> (luxReading > <span class="num-c">8000</span>) {
+    <span class="cm">// Good light — LED ON for boost</span>
+    digitalWrite(<span class="num-c">PIN_LED_RELAY</span>, LOW);  <span class="cm">// ON</span>
+  } <span class="kw">else</span> {
+    <span class="cm">// Too dim — LED ON always during schedule</span>
+    digitalWrite(<span class="num-c">PIN_LED_RELAY</span>, LOW);  <span class="cm">// ON</span>
+  }
+  Serial.printf(<span class="st">"LED: %s (lux=%.0f hour=%d)\n"</span>,
+    digitalRead(<span class="num-c">PIN_LED_RELAY</span>) == LOW ? <span class="st">"ON"</span> : <span class="st">"OFF"</span>,
+    luxReading, currentHour);
+}
+
+<span class="cm">// ─────────────────────────────────────────────────────
+//  SAFETY CHECKS — run after every sensor read
+// ─────────────────────────────────────────────────────</span>
+<span class="kw">void</span> <span class="fn">runSafetyChecks</span>(<span class="kw">const</span> SensorReadings&amp; r) {
+  <span class="cm">// Water level too low — stop pump</span>
+  <span class="kw">if</span> (r.waterLevelPct &lt; <span class="num-c">10</span>) {
+    digitalWrite(<span class="num-c">PIN_PUMP_RELAY</span>, HIGH); <span class="cm">// STOP PUMP</span>
+    Serial.println(<span class="st">"SAFETY: Pump stopped — water level critical"</span>);
+  }
+  <span class="cm">// Water too hot — alert (in real code: send API alert)</span>
+  <span class="kw">if</span> (r.waterTempC > <span class="num-c">26.0</span>) {
+    Serial.printf(<span class="st">"ALERT: Water temp %.1f°C — add cooling!\n"</span>, r.waterTempC);
+  }
+  <span class="cm">// Humidity too high — risk of fungal disease</span>
+  <span class="kw">if</span> (r.humidity > <span class="num-c">75.0</span>) {
+    Serial.printf(<span class="st">"ALERT: Humidity %.1f%% — improve ventilation!\n"</span>, r.humidity);
+  }
+  <span class="cm">// pH out of range for lettuce</span>
+  <span class="kw">if</span> (r.pH &lt; <span class="num-c">5.0</span> || r.pH > <span class="num-c">7.0</span>) {
+    Serial.printf(<span class="st">"ALERT: pH %.2f out of range (5.0-7.0)!\n"</span>, r.pH);
+  }
+  <span class="cm">// EC too high for lettuce</span>
+  <span class="kw">if</span> (r.ecMS > <span class="num-c">1.4</span>) {
+    Serial.printf(<span class="st">"ALERT: EC %.2f mS/cm too high for lettuce!\n"</span>, r.ecMS);
+  }
+}
+</pre>
+
+  <div class="sh">Sensor calibration quick reference</div>
+  <div class="card">
+    <table>
+      <tr><th>Sensor</th><th>Calibration frequency</th><th>What you need</th><th>How to do it</th></tr>
+      <tr><td>BH1750 (light)</td><td class="good">Never — factory done</td><td>Nothing</td><td>Self-calibrated at factory. Just use it.</td></tr>
+      <tr><td>DHT22 (humidity/temp)</td><td class="good">Never — factory done</td><td>Nothing</td><td>Accuracy ±2% RH, ±0.5°C from factory.</td></tr>
+      <tr><td>DS18B20 (water temp)</td><td class="warn-val">Every 3 months</td><td>Ice + boiling water (optional)</td><td>Dip in ice water (0°C check) or compare to lab thermometer. Adjust offset in code if needed.</td></tr>
+      <tr><td>EC/TDS sensor</td><td class="bad">Before first use + every month</td><td>1413 µS/cm standard solution (₹200–400)</td><td>Place probe in standard solution. Adjust K value in GravityTDS until reading = 1413 µS/cm.</td></tr>
+      <tr><td>pH sensor V2</td><td class="bad">Before first use + every 2 weeks</td><td>pH 4.00 + pH 7.00 buffer solutions (₹150–300 each)</td><td>2-point calibration: pH 7 first (note ADC), then pH 4 (note ADC). Adjust slope and intercept constants in code.</td></tr>
+      <tr><td>A02YYUW (water level)</td><td class="warn-val">Once after installation</td><td>Measuring tape</td><td>Measure empty tank height. Set TANK_HEIGHT_CM constant in code. Fill to 50% — verify reading.</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+function show(id, btn){
+  document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
+  document.getElementById('p-'+id).classList.add('on');
+  if(btn) btn.classList.add('on');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function showLed(n){
+  for(let i=0;i<5;i++){
+    document.getElementById('ld'+i).style.display='none';
+    document.querySelectorAll('.led-stage')[i].classList.remove('on');
+  }
+  document.getElementById('ld'+n).style.display='block';
+  document.querySelectorAll('.led-stage')[n].classList.add('on');
+}
+</script>
+</body>
+</html>

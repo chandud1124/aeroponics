@@ -21,7 +21,7 @@ import {
   ManualControlPanel,
   NextCyclePanel,
   PumpStateDisplay,
-  SystemHealthCard,
+  RelayStatesCard,
 } from "@/components/tower/PumpOperational";
 import { HistoryAnalyticsTab } from "@/components/tower/HistoryAnalytics";
 import { Badge } from "@/components/ui/badge";
@@ -97,6 +97,8 @@ function Index() {
               <div className="space-y-4">
                 {!isOnline ? (
                   <>
+                    <ManualControlPanel />
+
                     <Card className="border-dashed p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -110,7 +112,7 @@ function Index() {
                     </Card>
 
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <SystemHealthCard status={null} online={false} />
+                      <RelayStatesCard status={null} online={false} />
                       <Card className="border-dashed p-6">
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-muted-foreground">Live telemetry hidden</div>
@@ -135,8 +137,10 @@ function Index() {
                   <>
                     <FaultAlertBanner status={liveStatus} />
 
+                    <ManualControlPanel />
+
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <SystemHealthCard status={liveStatus} online={true} />
+                      <RelayStatesCard status={liveStatus} online={true} />
                       <NextCyclePanel status={liveStatus} schedule={schedule} />
                     </div>
 
@@ -149,7 +153,6 @@ function Index() {
 
                       <div className="space-y-4">
                         <StatusCards status={liveStatus} />
-                        <ManualControlPanel />
                         <FaultHistoryPanel />
                       </div>
                     </div>

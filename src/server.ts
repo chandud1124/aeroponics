@@ -172,6 +172,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         lightLux?: number | null;
         towerTempC?: number;
         lightOn?: boolean;
+        batteryChargeOn?: boolean;
         fault?: string | null;
         resetReason?: string | null;
         lastBootFault?: string | null;
@@ -209,6 +210,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           reservoirTempC: null,
           towerTempC: null,
           lightOn: payload.lightOn ?? undefined,
+          batteryChargeOn: payload.batteryChargeOn ?? undefined,
           fault: payload.fault ?? undefined,
           resetReason: payload.resetReason ?? undefined,
           lastBootFault: payload.lastBootFault ?? undefined,

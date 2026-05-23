@@ -31,6 +31,8 @@ export type LiveStatus = {
   pumpState: PumpState;
   motorManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
   lightManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
+  batteryChargeOn?: boolean;
+  batteryManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
   reservoirTempC: number | null;
   humidityPct?: number | null;
   lightLux?: number | null;

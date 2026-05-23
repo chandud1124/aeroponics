@@ -35,6 +35,14 @@ const gpio = [
   ["GND rod", "Common probe in tank", "Connected to ESP32 GND (through 1 kΩ for safety)."],
 ];
 
+const indoorLedHours = [
+  ["Germination (day 0–5)", "0–4 h", "Keep seeds dark or very dim; only add light after cotyledons open."],
+  ["Seedling (day 5–10)", "16 h", "Use cool white 5000–6500K LED; keep 20–35 cm above canopy."],
+  ["Young plant (day 10–18)", "16–18 h", "Regular LED is fine if placed close and reflected well."],
+  ["Vegetative (day 18–28)", "18 h", "Best all-round lettuce growth window under normal LED."],
+  ["Pre-harvest (day 28–35)", "14–16 h", "Slightly shorter photoperiod is okay before harvest."],
+];
+
 const components = [
   ["ESP32 DevKit V1", "₹350–500", "Main controller, has WiFi + plenty of GPIO"],
   ["YF-S201 flow sensor", "₹180–250", '1/2" hall-effect, 1–30 L/min'],
@@ -109,6 +117,151 @@ export function Documentation() {
                   ))}
                 </tbody>
               </table>
+            </Card>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="indoor-led">
+          <AccordionTrigger>Regular LED hours for lettuce</AccordionTrigger>
+          <AccordionContent>
+            <Card className="space-y-3 p-4 text-sm">
+              <p>
+                Regular white LED tubes or bulbs can grow lettuce well if you use cool white light
+                (5000–6500K) and keep them close to the canopy. They are less intense than grow
+                lights, so the safe default is to run them longer instead of brighter.
+              </p>
+              <p>
+                Good starting target for an indoor tower: <strong>16–18 hours ON</strong> during
+                vegetative growth, with only a short dark period. Germination should stay mostly
+                dark until cotyledons open.
+              </p>
+              <div className="p-0 overflow-hidden rounded-md border border-border">
+                <table className="w-full text-sm">
+                  <thead className="bg-secondary text-secondary-foreground">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Stage</th>
+                      <th className="px-3 py-2 text-left">Light per day</th>
+                      <th className="px-3 py-2 text-left">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {indoorLedHours.map((row, i) => (
+                      <tr key={i} className="border-t border-border">
+                        <td className="px-3 py-2 font-medium">{row[0]}</td>
+                        <td className="px-3 py-2 font-mono">{row[1]}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row[2]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                <li>Use 6500K if you can only buy one LED color.</li>
+                <li>Keep LED fixtures about 25–40 cm above the canopy and adjust after one week.</li>
+                <li>If BH1750 reads below 3,000 lux, regular LED should turn on immediately.</li>
+              </ul>
+            </Card>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="indoor-sensors">
+          <AccordionTrigger>Indoor sensor stack and GPIO pinout</AccordionTrigger>
+          <AccordionContent>
+            <Card className="space-y-4 p-4 text-sm">
+              <p>
+                Only BH1750 for light and DHT22 for humidity and air temperature are included in
+                this indoor version.
+              </p>
+              <div className="overflow-hidden rounded-md border border-border">
+                <table className="w-full text-sm">
+                  <thead className="bg-secondary text-secondary-foreground">
+                    <tr>
+                      <th className="px-3 py-2 text-left">GPIO</th>
+                      <th className="px-3 py-2 text-left">Sensor / signal</th>
+                      <th className="px-3 py-2 text-left">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ["GPIO 21", "BH1750 SDA", "I2C data line for ambient light."],
+                      ["GPIO 22", "BH1750 SCL", "I2C clock line for ambient light."],
+                      ["GPIO 19", "DHT22 data", "Humidity and air temperature signal line."],
+                      ["3.3 V", "BH1750 + DHT22 power", "Keep both sensors at 3.3 V."],
+                      ["GND", "Common ground", "Shared ground for both sensors."],
+                    ].map((row, i) => (
+                      <tr key={i} className="border-t border-border">
+                        <td className="px-3 py-2 font-mono">{row[0]}</td>
+                        <td className="px-3 py-2">{row[1]}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row[2]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="calibration">
+          <AccordionTrigger>Calibration data</AccordionTrigger>
+          <AccordionContent>
+            <Card className="space-y-3 p-4 text-sm">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary text-secondary-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Sensor</th>
+                    <th className="px-3 py-2 text-left">Calibration note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-t border-border">
+                    <td className="px-3 py-2 font-medium">BH1750</td>
+                    <td className="px-3 py-2 text-muted-foreground">Factory calibrated. No user calibration needed.</td>
+                  </tr>
+                  <tr className="border-t border-border">
+                    <td className="px-3 py-2 font-medium">DHT22</td>
+                    <td className="px-3 py-2 text-muted-foreground">Factory calibrated. Keep it dry and away from spray.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </Card>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="indoor-code">
+          <AccordionTrigger>ESP32 code starter for indoor sensors</AccordionTrigger>
+          <AccordionContent>
+            <Card className="space-y-3 p-4 text-sm">
+              <p className="text-xs text-muted-foreground">
+                Starter sketch only for BH1750 and DHT22.
+              </p>
+              <pre className="overflow-x-auto whitespace-pre text-xs leading-relaxed">
+{`#include <Wire.h>
+#include <BH1750.h>
+#include <DHT.h>
+
+const int PIN_DHT22 = 19;
+const int PIN_I2C_SDA = 21;
+const int PIN_I2C_SCL = 22;
+
+BH1750 lightMeter;
+DHT dht(PIN_DHT22, DHT22);
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
+  dht.begin();
+}
+
+void loop() {
+  float lux = lightMeter.readLightLevel();
+  float humidity = dht.readHumidity();
+  float airTemp = dht.readTemperature();
+  Serial.printf("lux=%.0f humidity=%.1f air=%.1f\n", lux, humidity, airTemp);
+  delay(5000);
+}`}
+              </pre>
             </Card>
           </AccordionContent>
         </AccordionItem>

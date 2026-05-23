@@ -7,6 +7,7 @@ import {
   Clock,
   Play,
   Square,
+  ToggleRight,
   Droplets,
   AlertTriangle,
   AlertOctagon,
@@ -17,6 +18,7 @@ import {
   Sprout,
   Wifi,
   WifiOff,
+  BatteryCharging,
 } from "lucide-react";
 import type { LiveStatus, Schedule } from "@/lib/tower-storage";
 import {
@@ -331,7 +333,15 @@ export function ManualControlPanel() {
   return (
     <Card className="p-6">
       <div className="space-y-4">
-        <div className="text-sm font-medium text-muted-foreground">Manual Controls</div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-muted-foreground">Manual controls</div>
+            <div className="text-xs text-muted-foreground">Use these buttons to force pump or light relay state.</div>
+          </div>
+          <div className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground">
+            Top priority controls
+          </div>
+        </div>
         <div className="flex gap-2">
           <Button
             onClick={handleStart}
@@ -377,51 +387,98 @@ export function ManualControlPanel() {
   );
 }
 
-function scoreFromStatus(status: LiveStatus) {
-  let score = 100;
+type RelayStateCardProps = {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  manualMode?: string;
+  detail: string;
+};
 
-  if (status.fault && status.fault !== "OK") score -= 35;
-  if (status.pumpOn && !status.flowing) score -= 20;
-  if (status.reservoirTempC != null && status.reservoirTempC > 28) score -= 10;
-  if (status.towerTempC != null && status.towerTempC > 32) score -= 5;
-
-  return Math.max(0, score);
+function RelayStateCard({ label, icon, active, manualMode, detail }: RelayStateCardProps) {
+  return (
+    <Card className={`p-5 ${active ? "border-primary/40 bg-primary/5" : "border-border"}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className={`rounded-full p-2 ${active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+            {icon}
+          </div>
+          <div>
+            <div className="text-sm font-medium text-muted-foreground">{label}</div>
+            <div className="mt-1 text-2xl font-semibold tracking-tight">{active ? "ON" : "OFF"}</div>
+          </div>
+        </div>
+        <Badge variant={active ? "default" : "secondary"}>{active ? "Relay active" : "Relay idle"}</Badge>
+      </div>
+      <div className="mt-3 text-xs text-muted-foreground">
+        {detail}
+        {manualMode && manualMode !== "AUTO" ? ` • Manual mode: ${manualMode}` : ""}
+      </div>
+    </Card>
+  );
 }
 
-export function SystemHealthCard({ status, online = true }: { status: LiveStatus | null; online?: boolean }) {
-  const score = status ? scoreFromStatus(status) : null;
-  const label = score == null ? "Offline" : score >= 90 ? "Healthy" : score >= 70 ? "Attention" : "Critical";
-  const tone =
-    score == null
-      ? "bg-slate-100 text-slate-700"
-      : score >= 90
-        ? "bg-green-50 text-green-800"
-        : score >= 70
-          ? "bg-amber-50 text-amber-800"
-          : "bg-red-50 text-red-800";
+export function RelayStatesCard({ status, online = true }: { status: LiveStatus | null; online?: boolean }) {
+  if (!status) {
+    return (
+      <Card className="p-6">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-muted-foreground">Relay states</div>
+              <div className="text-xs text-muted-foreground">Waiting for ESP32 telemetry</div>
+            </div>
+            <Badge variant={online ? "secondary" : "destructive"} className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
+              {online ? <Wifi className="mr-1 h-3 w-3" /> : <WifiOff className="mr-1 h-3 w-3" />}
+              {online ? "Online" : "Offline"}
+            </Badge>
+          </div>
+          <div className="text-sm text-muted-foreground">No live relay data yet from the controller.</div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-6">
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="mb-1 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <span>System Health</span>
-              <Badge variant={online ? "secondary" : "destructive"} className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
-                {online ? <Wifi className="mr-1 h-3 w-3" /> : <WifiOff className="mr-1 h-3 w-3" />}
-                {online ? "Online" : "Offline"}
-              </Badge>
-            </div>
-            <div className={`inline-flex rounded-lg px-3 py-2 text-lg font-bold ${tone}`}>
-              {score == null ? "--" : `${score}%`}
-            </div>
+            <div className="text-sm font-medium text-muted-foreground">Relay states</div>
+            <div className="text-xs text-muted-foreground">Major controls and their current relay state</div>
           </div>
-          <Gauge className="h-6 w-6 text-primary" />
+          <Badge variant={online ? "secondary" : "destructive"} className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
+            {online ? <Wifi className="mr-1 h-3 w-3" /> : <WifiOff className="mr-1 h-3 w-3" />}
+            {online ? "Online" : "Offline"}
+          </Badge>
         </div>
-        <div className="text-sm text-muted-foreground">
-          {score == null
-            ? "No current telemetry from the ESP32. Historical records remain available below."
-            : `${label} based on flow, temperature, and faults.`}
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <RelayStateCard
+            label="Motor / pump"
+            icon={<ToggleRight className="h-4 w-4" />}
+            active={status.pumpOn}
+            manualMode={status.motorManualMode}
+            detail={status.flowing ? "Flow verified right now" : "Relay state is on/off only; flow may still be pending"}
+          />
+          <RelayStateCard
+            label="LED grow light"
+            icon={<ToggleRight className="h-4 w-4" />}
+            active={Boolean(status.lightOn)}
+            manualMode={status.lightManualMode}
+            detail={status.lightOn ? "Light relay is supplying the LED strip" : "Light relay is off"}
+          />
+          <RelayStateCard
+            label="Battery charging"
+            icon={<BatteryCharging className="h-4 w-4" />}
+            active={Boolean(status.batteryChargeOn)}
+            manualMode={status.batteryManualMode}
+            detail={status.batteryChargeOn ? "Battery charge relay is active" : "Battery charge relay is off"}
+          />
+        </div>
+
+        <div className="rounded-lg border border-dashed border-border bg-secondary/40 p-4 text-sm text-muted-foreground">
+          Above cards show whether each relay is switched on or off. Use the buttons below to force pump or light manually.
         </div>
       </div>
     </Card>
