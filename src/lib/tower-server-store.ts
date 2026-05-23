@@ -40,6 +40,8 @@ const SCHEDULE_FILE = process.env.TOWER_SCHEDULE_FILE ?? path.join(DATA_DIR, "sc
 const STATE_FILE = process.env.TOWER_STATE_FILE ?? path.join(DATA_DIR, "tower-state.json");
 const EVENTS_TABLE = "tower_events";
 
+const HAS_SUPABASE_EVENTS = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -71,6 +73,7 @@ function saveScheduleToDisk(nextSchedule: Schedule) {
 
 type PersistedTowerState = {
   status?: LiveStatus | null;
+  statuses?: Record<string, LiveStatus>;
   sensorHistory?: SensorSnapshot[];
   readings?: ManualReading[];
   pumpLogs?: PumpLog[];
@@ -99,8 +102,13 @@ function loadStateFromDisk() {
     const raw = fs.readFileSync(STATE_FILE, "utf8");
     const parsed = JSON.parse(raw) as PersistedTowerState;
 
-    if (parsed.status && typeof parsed.status === "object") {
-      status = parsed.status;
+    if (parsed.statuses && typeof parsed.statuses === "object") {
+      statuses = Object.fromEntries(
+        Object.entries(parsed.statuses).map(([deviceId, deviceStatus]) => [deviceId, { ...deviceStatus, deviceId }]),
+      );
+    } else if (parsed.status && typeof parsed.status === "object") {
+      const deviceId = parsed.status.deviceId ?? DEFAULT_DEVICE_ID;
+      statuses[deviceId] = { ...parsed.status, deviceId };
     }
 
     if (Array.isArray(parsed.sensorHistory)) {
@@ -127,7 +135,8 @@ function saveStateToDisk() {
   try {
     ensureDataDir();
     const nextState: PersistedTowerState = {
-      status,
+      status: getPrimaryStatus(),
+      statuses,
       sensorHistory,
       readings,
       pumpLogs,
@@ -151,15 +160,19 @@ function getSupabaseAdminClient() {
 }
 
 function applyEvent(eventType: TowerEventType, payload: any) {
+  const payloadDeviceId = typeof payload?.deviceId === "string" && payload.deviceId.trim() ? payload.deviceId.trim() : null;
   switch (eventType) {
     case "schedule_updated":
       schedule = { ...DEFAULT_SCHEDULE, ...payload };
       break;
     case "status_updated":
-      status = payload ?? null;
+      if (payload) {
+        const deviceId = payloadDeviceId ?? DEFAULT_DEVICE_ID;
+        statuses[deviceId] = { ...payload, deviceId };
+      }
       break;
     case "sensor_snapshot_added":
-      if (payload) sensorHistory = [payload, ...sensorHistory].slice(0, 1000);
+      if (payload) sensorHistory = [{ ...payload, deviceId: payloadDeviceId ?? null }, ...sensorHistory].slice(0, 1000);
       break;
     case "reading_added":
       if (payload) readings = [payload, ...readings];
@@ -168,23 +181,24 @@ function applyEvent(eventType: TowerEventType, payload: any) {
       if (payload?.id) readings = readings.filter((reading) => reading.id !== payload.id);
       break;
     case "pump_log_added":
-      if (payload) pumpLogs = [payload, ...pumpLogs];
+      if (payload) pumpLogs = [{ ...payload, deviceId: payloadDeviceId ?? null }, ...pumpLogs];
       break;
     case "pump_log_updated":
       if (payload?.id) {
         const index = pumpLogs.findIndex((log) => log.id === payload.id);
         if (index >= 0) {
-          pumpLogs[index] = payload;
+          pumpLogs[index] = { ...payload, deviceId: payloadDeviceId ?? pumpLogs[index].deviceId ?? null };
         }
       }
       break;
     case "fault_recorded":
-      if (payload) faultHistory = [payload, ...faultHistory];
+      if (payload) faultHistory = [{ ...payload, deviceId: payloadDeviceId ?? null }, ...faultHistory];
       break;
   }
 }
 
 async function appendEvent(eventType: TowerEventType, payload: unknown) {
+  if (!HAS_SUPABASE_EVENTS) return;
   try {
     const db = getSupabaseAdminClient();
     const { error } = await db.from(EVENTS_TABLE).insert({ event_type: eventType, payload });
@@ -197,6 +211,7 @@ async function appendEvent(eventType: TowerEventType, payload: unknown) {
 }
 
 async function loadStateFromDatabase() {
+  if (!HAS_SUPABASE_EVENTS) return false;
   try {
     const db = getSupabaseAdminClient();
     const { data, error } = await db.from(EVENTS_TABLE).select("event_type,payload").order("created_at", { ascending: true });
@@ -210,7 +225,7 @@ async function loadStateFromDatabase() {
     }
 
     schedule = { ...DEFAULT_SCHEDULE };
-    status = null;
+    statuses = {};
     sensorHistory = [];
     readings = [];
     pumpLogs = [];
@@ -243,7 +258,8 @@ export async function initializeTowerStore() {
 }
 
 let schedule: Schedule = loadScheduleFromDisk();
-let status: LiveStatus | null = null;
+const DEFAULT_DEVICE_ID = "default";
+let statuses: Record<string, LiveStatus> = {};
 let sensorHistory: SensorSnapshot[] = [];
 let readings: ManualReading[] = [];
 let pumpLogs: PumpLog[] = [];
@@ -276,11 +292,43 @@ function isRetryableFlowFault(fault: string | null | undefined): boolean {
   return upper.includes("FLOW") || upper.includes("DRY");
 }
 
+function normalizeDeviceId(deviceId?: string | null): string {
+  return deviceId?.trim() || DEFAULT_DEVICE_ID;
+}
+
+function getPrimaryStatusDeviceId() {
+  return Object.keys(statuses)[0] ?? null;
+}
+
+function getPrimaryStatus() {
+  const deviceId = getPrimaryStatusDeviceId();
+  return deviceId ? statuses[deviceId] ?? null : null;
+}
+
+function getDeviceStatus(deviceId?: string | null) {
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : getPrimaryStatusDeviceId();
+  if (!resolvedDeviceId) return null;
+  return statuses[resolvedDeviceId] ?? null;
+}
+
+function ensureDeviceStatus(deviceId?: string | null, now = new Date()) {
+  const resolvedDeviceId = normalizeDeviceId(deviceId);
+  if (!statuses[resolvedDeviceId]) {
+    statuses[resolvedDeviceId] = createBaseStatus(now, resolvedDeviceId);
+  }
+  return statuses[resolvedDeviceId];
+}
+
+function getLatestSensorSnapshot(deviceId?: string | null) {
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  return sensorHistory.find((snapshot) => !resolvedDeviceId || snapshot.deviceId === resolvedDeviceId) ?? null;
+}
+
 /**
  * Determines if grow light should be on based on schedule
  * Light is on during active hours (startHour to endHour) if enabled
  */
-function shouldLightBeOnBySchedule(now = new Date()): boolean {
+function shouldLightBeOnBySchedule(now = new Date(), deviceId?: string | null): boolean {
   if (!schedule.lightEnabled) return false;
   if (!schedule.enabled) return false;
   const hour = now.getHours();
@@ -291,7 +339,7 @@ function shouldLightBeOnBySchedule(now = new Date()): boolean {
 
   // If an ambient light sensor is present, prefer auto-on when ambient lux is low (indoor use)
   try {
-    const latest = sensorHistory[0];
+    const latest = getLatestSensorSnapshot(deviceId);
     // From the indoor lettuce guide: use a higher threshold for indoor rooms
     // Typical room ambient lux varies; use 2000 lux as a conservative threshold
     // to decide when supplemental LED grow lights should be enabled.
@@ -325,6 +373,7 @@ export function getCycleProfile(now = new Date()) {
 function pushSensorSnapshot(nextStatus: LiveStatus) {
   const nextSnapshot = {
     id: makeId(),
+    deviceId: nextStatus.deviceId ?? DEFAULT_DEVICE_ID,
     timestamp: Date.now(),
     reservoirTempC: nextStatus.reservoirTempC,
     humidityPct: nextStatus.humidityPct ?? null,
@@ -399,8 +448,9 @@ function calculateRetryCycle(nextStatus: LiveStatus, now = new Date()): { retryN
   return { retryNextCycleISO: new Date(now.getTime() + 1000).toISOString(), retryNextCycleIn: 1 };
 }
 
-function createBaseStatus(now = new Date()): LiveStatus {
+function createBaseStatus(now = new Date(), deviceId?: string): LiveStatus {
   return {
+    deviceId: deviceId ?? DEFAULT_DEVICE_ID,
     pumpOn: false,
     flowing: false,
     pumpState: PumpState.IDLE,
@@ -412,7 +462,7 @@ function createBaseStatus(now = new Date()): LiveStatus {
     lightLux: null,
     towerTempC: null,
     flowRateLpm: null,
-    lightOn: shouldLightBeOnBySchedule(now),
+    lightOn: shouldLightBeOnBySchedule(now, deviceId),
     lastRunISO: null,
     fault: null,
     resetReason: null,
@@ -426,19 +476,21 @@ function createBaseStatus(now = new Date()): LiveStatus {
   };
 }
 
-function syncScheduledState(now = new Date()) {
-  if (!status) {
-    status = createBaseStatus(now);
+function syncScheduledState(deviceId?: string | null, now = new Date()) {
+  const resolvedDeviceId = normalizeDeviceId(deviceId);
+  if (!statuses[resolvedDeviceId]) {
+    statuses[resolvedDeviceId] = createBaseStatus(now, resolvedDeviceId);
   }
 
-  if (status.isOnline) {
+  const currentStatus = statuses[resolvedDeviceId];
+  if (currentStatus.isOnline) {
     return;
   }
 
-  const nextStatus = { ...status };
+  const nextStatus = { ...currentStatus };
 
   if (nextStatus.lightManualMode === "AUTO") {
-    nextStatus.lightOn = shouldLightBeOnBySchedule(now);
+    nextStatus.lightOn = shouldLightBeOnBySchedule(now, resolvedDeviceId);
   }
 
   if (nextStatus.motorManualMode === "AUTO" && schedule.enabled) {
@@ -469,7 +521,7 @@ function syncScheduledState(now = new Date()) {
         autoPumpStartedAtMs = null;
       }
 
-      status = nextStatus;
+      statuses[resolvedDeviceId] = nextStatus;
       return;
     }
 
@@ -520,7 +572,7 @@ function syncScheduledState(now = new Date()) {
 
     if (lastRunMs == null) {
       turnPumpOn();
-      status = nextStatus;
+      statuses[resolvedDeviceId] = nextStatus;
       return;
     }
 
@@ -539,7 +591,7 @@ function syncScheduledState(now = new Date()) {
     }
   }
 
-  status = nextStatus;
+  statuses[resolvedDeviceId] = nextStatus;
 }
 
 function makeId() {
@@ -557,9 +609,9 @@ export function updateSchedule(next: Schedule) {
   return getSchedule();
 }
 
-export function getStatus() {
-  syncScheduledState();
-  const currentStatus = status;
+export function getStatus(deviceId?: string | null) {
+  syncScheduledState(deviceId);
+  const currentStatus = getDeviceStatus(deviceId);
   if (!currentStatus) return null;
   
   // Calculate next cycle and update status
@@ -575,7 +627,7 @@ export function getStatus() {
   try {
     if (currentStatus.pumpOn && currentStatus.lastRunISO) {
       // Prefer to use a matching pumpLog's onDurationSeconds when available
-      const matching = pumpLogs.find((p) => p.startedAt === currentStatus.lastRunISO);
+      const matching = pumpLogs.find((p) => p.startedAt === currentStatus.lastRunISO && (p.deviceId ?? DEFAULT_DEVICE_ID) === (currentStatus.deviceId ?? DEFAULT_DEVICE_ID));
       const onDur = matching ? matching.onDurationSeconds : getCycleProfile(new Date(currentStatus.lastRunISO)).onDurationSeconds;
       const lastMs = new Date(currentStatus.lastRunISO).getTime();
       pumpEndISO = new Date(lastMs + onDur * 1000).toISOString();
@@ -603,38 +655,42 @@ export function getStatus() {
 
 export function updateStatus(
   patch: Partial<LiveStatus>,
-  options: { source?: "esp32" | "server" } = {},
+  options: { source?: "esp32" | "server"; deviceId?: string | null } = {},
 ) {
-  if (!status) {
-    status = createBaseStatus();
-  }
+  const deviceId = normalizeDeviceId(options.deviceId);
+  const currentStatus = ensureDeviceStatus(deviceId);
 
   // Apply scheduled light logic if lightOn wasn't explicitly set in patch
   const shouldApplySchedule = patch.lightOn === undefined;
-  const scheduledLightOn = shouldApplySchedule ? shouldLightBeOnBySchedule() : patch.lightOn;
+  const scheduledLightOn = shouldApplySchedule ? shouldLightBeOnBySchedule(new Date(), deviceId) : patch.lightOn;
   const source = options.source ?? "server";
-  const telemetryUpdatedAt = source === "esp32" ? Date.now() : status?.telemetryUpdatedAt ?? null;
-  const heartbeatUpdatedAt = status?.heartbeatUpdatedAt ?? null;
-  const isOnline = isFresh(getLatestDeviceSignalAt(status));
-
-  status = {
-    ...createBaseStatus(),
-    ...status,
+  const telemetryUpdatedAt = source === "esp32" ? Date.now() : currentStatus.telemetryUpdatedAt ?? null;
+  const heartbeatUpdatedAt = source === "esp32" ? Date.now() : currentStatus.heartbeatUpdatedAt ?? null;
+  const mergedStatus = {
+    ...createBaseStatus(new Date(), deviceId),
+    ...currentStatus,
     ...patch,
+    deviceId,
     telemetryUpdatedAt,
     heartbeatUpdatedAt,
-    isOnline,
     lightOn: scheduledLightOn,
   };
+  const isOnline = isFresh(getLatestDeviceSignalAt(mergedStatus));
 
-  pushSensorSnapshot(status);
+  statuses[deviceId] = {
+    ...mergedStatus,
+    isOnline,
+  };
+
+  pushSensorSnapshot(statuses[deviceId]);
 
   // Track fault history
-  if (patch.fault && patch.fault !== "OK" && patch.fault !== status.fault) {
+  if (patch.fault && patch.fault !== "OK" && patch.fault !== currentStatus.fault) {
     faultHistory = [
       {
         timestamp: Date.now(),
         fault: patch.fault,
+        deviceId,
       },
       ...faultHistory,
     ];
@@ -642,45 +698,55 @@ export function updateStatus(
   }
 
   saveStateToDisk();
-  void appendEvent("status_updated", status);
+  void appendEvent("status_updated", statuses[deviceId]);
 
-  return getStatus();
+  return getStatus(deviceId);
 }
 
-export function touchStatus(options: { source?: "esp32" | "server" } = {}) {
+export function touchStatus(options: { source?: "esp32" | "server"; deviceId?: string | null } = {}) {
   const source = options.source ?? "server";
-  if (!status) {
-    status = createBaseStatus();
+  const deviceId = normalizeDeviceId(options.deviceId);
+  if (!statuses[deviceId]) {
+    statuses[deviceId] = createBaseStatus(new Date(), deviceId);
     if (source === "esp32") {
-      status.telemetryUpdatedAt = Date.now();
-      status.heartbeatUpdatedAt = Date.now();
-      status.isOnline = true;
+      statuses[deviceId].telemetryUpdatedAt = Date.now();
+      statuses[deviceId].heartbeatUpdatedAt = Date.now();
+      statuses[deviceId].isOnline = true;
     }
     saveStateToDisk();
-    void appendEvent("status_updated", status);
-    return getStatus();
+    void appendEvent("status_updated", statuses[deviceId]);
+    return getStatus(deviceId);
   }
 
-  const telemetryUpdatedAt = source === "esp32" ? Date.now() : status.telemetryUpdatedAt ?? null;
-  const heartbeatUpdatedAt = source === "esp32" ? Date.now() : status.heartbeatUpdatedAt ?? null;
-  const isOnline = isFresh(getLatestDeviceSignalAt({ ...status, telemetryUpdatedAt, heartbeatUpdatedAt }));
-
-  status = {
-    ...status,
+  const currentStatus = statuses[deviceId];
+  const telemetryUpdatedAt = source === "esp32" ? Date.now() : currentStatus.telemetryUpdatedAt ?? null;
+  const heartbeatUpdatedAt = source === "esp32" ? Date.now() : currentStatus.heartbeatUpdatedAt ?? null;
+  const mergedStatus = {
+    ...currentStatus,
     telemetryUpdatedAt,
     heartbeatUpdatedAt,
+    deviceId,
+  };
+  const isOnline = isFresh(getLatestDeviceSignalAt(mergedStatus));
+
+  statuses[deviceId] = {
+    ...mergedStatus,
     isOnline,
   };
 
   saveStateToDisk();
-  void appendEvent("status_updated", status);
+  void appendEvent("status_updated", statuses[deviceId]);
 
-  return getStatus();
+  return getStatus(deviceId);
 }
 
-export function getSensorHistory(days = 7) {
+export function getSensorHistory(days = 7, deviceId?: string | null) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  return sensorHistory.filter((snapshot) => snapshot.timestamp >= cutoff).map((snapshot) => ({ ...snapshot }));
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  return sensorHistory
+    .filter((snapshot) => snapshot.timestamp >= cutoff)
+    .filter((snapshot) => !resolvedDeviceId || snapshot.deviceId === resolvedDeviceId)
+    .map((snapshot) => ({ ...snapshot }));
 }
 
 export function getReadings() {
@@ -709,17 +775,20 @@ export function deleteReading(id: string) {
   return readings.length !== before;
 }
 
-export function getPumpLogs() {
-  return pumpLogs.map((log) => ({ ...log }));
+export function getPumpLogs(deviceId?: string | null) {
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  return pumpLogs.filter((log) => !resolvedDeviceId || log.deviceId === resolvedDeviceId).map((log) => ({ ...log }));
 }
 
-export function addPumpLog(log: PumpLogInput) {
+export function addPumpLog(log: PumpLogInput & { deviceId?: string | null }) {
+  const deviceId = normalizeDeviceId(log.deviceId ?? null);
   const now = new Date(log.startedAtMs ?? Date.now());
   const endedAt = new Date(log.endedAtMs ?? (now.getTime() + Math.max(0, log.durationSeconds) * 1000));
   const cycleProfile = getCycleProfile(now);
   const next = {
     ...log,
     id: makeId(),
+    deviceId,
     startedAt: now.toISOString(),
     endedAt: endedAt.toISOString(),
     mode: log.mode ?? cycleProfile.mode,
@@ -730,11 +799,11 @@ export function addPumpLog(log: PumpLogInput) {
   };
   pumpLogs = [next, ...pumpLogs];
 
-  if (status) {
-    status = {
-      ...status,
+  if (statuses[deviceId]) {
+    statuses[deviceId] = {
+      ...statuses[deviceId],
       lastRunISO: next.startedAt,
-      fault: next.fault ?? status.fault,
+      fault: next.fault ?? statuses[deviceId].fault,
     };
   }
 
@@ -744,7 +813,7 @@ export function addPumpLog(log: PumpLogInput) {
   return { ...next };
 }
 
-export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?: number; offIntervalMinutes?: number; startedAtMs?: number }) {
+export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?: number; offIntervalMinutes?: number; startedAtMs?: number; deviceId?: string | null }) {
   const next = addPumpLog({
     mode: input.mode ?? getCycleProfile().mode,
     onDurationSeconds: input.onDurationSeconds ?? 0,
@@ -754,6 +823,7 @@ export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?
     fault: null,
     startedAtMs: input.startedAtMs ?? Date.now(),
     endedAtMs: input.startedAtMs ?? Date.now(),
+    deviceId: input.deviceId ?? null,
   });
   return next;
 }
@@ -781,11 +851,11 @@ export function updatePumpLog(id: string, patch: Partial<PumpLogInput & { endedA
 
   pumpLogs[idx] = updated;
 
-  if (status) {
-    status = {
-      ...status,
+  if (updated.deviceId && statuses[updated.deviceId]) {
+    statuses[updated.deviceId] = {
+      ...statuses[updated.deviceId],
       lastRunISO: updated.startedAt,
-      fault: updated.fault ?? status.fault,
+      fault: updated.fault ?? statuses[updated.deviceId].fault,
     };
   }
 
@@ -795,14 +865,23 @@ export function updatePumpLog(id: string, patch: Partial<PumpLogInput & { endedA
   return { ...updated };
 }
 
-export function getFaultHistory(limit: number = 20) {
-  return faultHistory.slice(0, limit).map((f) => ({ ...f }));
+export function getFaultHistory(limit: number = 20, deviceId?: string | null) {
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  return faultHistory
+    .filter((fault) => !resolvedDeviceId || (fault as any).deviceId === resolvedDeviceId)
+    .slice(0, limit)
+    .map((f) => ({ ...f }));
 }
 
-export function getAnalyticsSummary(days = 7) {
+export function getAnalyticsSummary(days = 7, deviceId?: string | null) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-  const recentSensors = sensorHistory.filter((snapshot) => snapshot.timestamp >= cutoff);
-  const recentLogs = pumpLogs.filter((log) => new Date(log.startedAt).getTime() >= cutoff);
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  const recentSensors = sensorHistory
+    .filter((snapshot) => snapshot.timestamp >= cutoff)
+    .filter((snapshot) => !resolvedDeviceId || snapshot.deviceId === resolvedDeviceId);
+  const recentLogs = pumpLogs
+    .filter((log) => new Date(log.startedAt).getTime() >= cutoff)
+    .filter((log) => !resolvedDeviceId || log.deviceId === resolvedDeviceId);
   const recentReadings = readings.filter((reading) => reading.timestamp >= cutoff);
 
   const dayBuckets = new Map<string, {

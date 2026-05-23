@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertCircle, CalendarRange, Download, Droplets, Thermometer, Zap } from "lucide-react";
+import { AlertCircle, CalendarRange, Download, Droplets, Zap } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,10 +47,9 @@ type FaultRow = {
   fault: string;
 };
 
-type TempPoint = {
+type SensorPoint = {
   label: string;
-  reservoirTempC: number | null;
-  towerTempC: number | null;
+  value: number | null;
 };
 
 type PumpPoint = {
@@ -88,30 +87,24 @@ function bucketLabel(timestamp: number, days: RangeDays) {
   return format(timestamp, "MMM d");
 }
 
-function groupSensorHistory(snapshots: SensorSnapshot[], days: RangeDays): TempPoint[] {
+function groupLightHistory(snapshots: SensorSnapshot[], days: RangeDays): SensorPoint[] {
   const bucketMs = bucketMsForRange(days);
-  const buckets = new Map<number, { reservoir: number[]; tower: number[] }>();
+  const buckets = new Map<number, number[]>();
 
   for (const snapshot of snapshots) {
     const bucketKey = Math.floor(snapshot.timestamp / bucketMs) * bucketMs;
     if (!buckets.has(bucketKey)) {
-      buckets.set(bucketKey, { reservoir: [], tower: [] });
+      buckets.set(bucketKey, []);
     }
     const bucket = buckets.get(bucketKey)!;
-    if (snapshot.reservoirTempC != null) bucket.reservoir.push(snapshot.reservoirTempC);
-    if (snapshot.towerTempC != null) bucket.tower.push(snapshot.towerTempC);
+    if (snapshot.lightLux != null) bucket.push(snapshot.lightLux);
   }
 
   return Array.from(buckets.entries())
     .sort(([a], [b]) => a - b)
-    .map(([timestamp, bucket]) => ({
+    .map(([timestamp, values]) => ({
       label: bucketLabel(timestamp, days),
-      reservoirTempC:
-        bucket.reservoir.length > 0
-          ? bucket.reservoir.reduce((sum, value) => sum + value, 0) / bucket.reservoir.length
-          : null,
-      towerTempC:
-        bucket.tower.length > 0 ? bucket.tower.reduce((sum, value) => sum + value, 0) / bucket.tower.length : null,
+      value: values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
     }));
 }
 
@@ -191,7 +184,7 @@ function SummaryCard({
   );
 }
 
-export function HistoryAnalyticsTab() {
+export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) {
   const [days, setDays] = useState<RangeDays>(7);
   const [summary, setSummary] = useState<AnalyticsSummary>(EMPTY_SUMMARY);
   const [sensorHistory, setSensorHistory] = useState<SensorSnapshot[]>([]);
@@ -204,11 +197,11 @@ export function HistoryAnalyticsTab() {
     setLoading(true);
     try {
       const [nextSummary, nextSensors, nextLogs, nextReadings, nextFaults] = await Promise.all([
-        fetchAnalyticsSummary(days),
-        fetchSensorHistory(days),
-        fetchPumpLogs(days, 250),
+        fetchAnalyticsSummary(days, deviceId),
+        fetchSensorHistory(days, deviceId),
+        fetchPumpLogs(days, 250, deviceId),
         fetchManualReadings(),
-        fetchFaultHistory(),
+        fetchFaultHistory(deviceId),
       ]);
 
       setSummary(nextSummary ?? EMPTY_SUMMARY);
@@ -228,7 +221,7 @@ export function HistoryAnalyticsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days]);
 
-  const tempData = groupSensorHistory(sensorHistory, days);
+  const lightData = groupLightHistory(sensorHistory, days);
   const humidityData = groupHumidityHistory(sensorHistory, days);
   const pumpData = groupPumpLogs(pumpLogs, days);
   const avgLightLux = (() => {
@@ -240,7 +233,7 @@ export function HistoryAnalyticsTab() {
   const manualRows = [...manualReadings].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
 
   const exportRows: string[] = [
-    "type,timestamp,reservoirTempC,towerTempC,pumpState,fault,mode,durationSeconds,flowed,ph,tds,ec,notes",
+    "type,timestamp,humidityPct,lightLux,pumpState,fault,mode,durationSeconds,flowed,ph,tds,ec,notes",
   ];
 
   for (const snapshot of sensorHistory) {
@@ -248,8 +241,8 @@ export function HistoryAnalyticsTab() {
       [
         "sensor",
         new Date(snapshot.timestamp).toISOString(),
-        snapshot.reservoirTempC ?? "",
-        snapshot.towerTempC ?? "",
+        snapshot.humidityPct ?? "",
+        snapshot.lightLux ?? "",
         snapshot.pumpState,
         snapshot.fault ?? "",
         "",
@@ -304,12 +297,11 @@ export function HistoryAnalyticsTab() {
     );
   }
 
-  const latestTemp = sensorHistory[0];
+  const latestSensor = sensorHistory[0];
   const latestReading = manualRows[0];
 
-  const tempChartConfig = {
-    reservoir: { label: "Reservoir", color: "hsl(var(--chart-1))" },
-    tower: { label: "Tower", color: "hsl(var(--chart-2))" },
+  const lightChartConfig = {
+    value: { label: "Light", color: "hsl(var(--chart-1))" },
   };
 
   const pumpChartConfig = {
@@ -327,7 +319,7 @@ export function HistoryAnalyticsTab() {
           </div>
           <h2 className="mt-1 text-2xl font-semibold tracking-tight">Data logging and trend analysis</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Track temperature, cycles, manual readings, and faults over time. Charts update from the local ESP32 API.
+            Track humidity, light, cycles, manual readings, and faults over time. Charts update from the local ESP32 API.
           </p>
         </div>
 
@@ -351,16 +343,16 @@ export function HistoryAnalyticsTab() {
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
         <SummaryCard
-          icon={<Thermometer className="h-5 w-5" />}
-          label="Reservoir temp"
-          value={summary.avgReservoirTempC != null ? `${summary.avgReservoirTempC.toFixed(1)} °C` : "Waiting"}
-          hint={`Peak ${summary.maxReservoirTempC != null ? summary.maxReservoirTempC.toFixed(1) : "—"} °C`}
+          icon={<Droplets className="h-5 w-5" />}
+          label="Humidity"
+          value={latestSensor?.humidityPct != null ? `${latestSensor.humidityPct.toFixed(1)} %` : "Waiting"}
+          hint="From the active humidity sensor"
         />
         <SummaryCard
-          icon={<Thermometer className="h-5 w-5" />}
-          label="Tower temp"
-          value={summary.avgTowerTempC != null ? `${summary.avgTowerTempC.toFixed(1)} °C` : "Waiting"}
-          hint={`Peak ${summary.maxTowerTempC != null ? summary.maxTowerTempC.toFixed(1) : "—"} °C`}
+          icon={<Zap className="h-5 w-5" />}
+          label="Ambient light"
+          value={latestSensor?.lightLux != null ? `${Math.round(latestSensor.lightLux)} lux` : "Waiting"}
+          hint="From the active light sensor"
         />
         <SummaryCard
           icon={<Zap className="h-5 w-5" />}
@@ -386,20 +378,19 @@ export function HistoryAnalyticsTab() {
         <Card className="p-5">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-muted-foreground">Temperature trends</div>
-              <div className="text-xs text-muted-foreground">Reservoir and tower average per bucket</div>
+              <div className="text-sm font-medium text-muted-foreground">Ambient light trends</div>
+              <div className="text-xs text-muted-foreground">Average lux per bucket</div>
             </div>
-            <Badge variant="outline">Heat threshold 30°C</Badge>
+            <Badge variant="outline">Light threshold 2000 lux</Badge>
           </div>
-          <ChartContainer config={tempChartConfig} className="h-80 w-full">
-            <LineChart data={tempData} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+          <ChartContainer config={lightChartConfig} className="h-80 w-full">
+            <LineChart data={lightData} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={20} />
               <YAxis tickLine={false} axisLine={false} domain={["auto", "auto"]} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <ReferenceLine y={30} stroke="#ef4444" strokeDasharray="6 6" />
-              <Line type="monotone" dataKey="reservoirTempC" stroke="var(--color-reservoir)" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="towerTempC" stroke="var(--color-tower)" strokeWidth={2} dot={false} />
+              <ReferenceLine y={2000} stroke="#34d399" strokeDasharray="6 6" />
+              <Line type="monotone" dataKey="value" stroke="var(--color-value)" strokeWidth={2} dot={false} />
             </LineChart>
           </ChartContainer>
         </Card>
@@ -471,7 +462,7 @@ export function HistoryAnalyticsTab() {
                   <th className="px-3 py-2 text-left">Mode</th>
                   <th className="px-3 py-2 text-left">ON</th>
                   <th className="px-3 py-2 text-left">OFF</th>
-                  <th className="px-3 py-2 text-left">Flow</th>
+                  <th className="px-3 py-2 text-left">Cycle</th>
                   <th className="px-3 py-2 text-left">Fault</th>
                 </tr>
               </thead>
@@ -488,8 +479,8 @@ export function HistoryAnalyticsTab() {
                       <td className="px-3 py-2 font-mono">{cycle.onDurationSeconds}s</td>
                       <td className="px-3 py-2 font-mono">{cycle.offIntervalMinutes}m</td>
                       <td className="px-3 py-2">
-                        <Badge variant={cycle.flowed && !cycle.fault ? "default" : "destructive"}>
-                          {cycle.flowed && !cycle.fault ? "Success" : "Check"}
+                        <Badge variant={cycle.fault ? "destructive" : "default"}>
+                          {cycle.fault ? "Fault" : "Complete"}
                         </Badge>
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">{info?.label ?? "—"}</td>

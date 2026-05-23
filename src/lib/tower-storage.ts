@@ -16,12 +16,23 @@ export type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+export function withDeviceHeaders(init: RequestInit = {}, deviceId?: string | null): RequestInit {
+  const headers = new Headers(init.headers ?? {});
+  const trimmedDeviceId = deviceId?.trim();
+  if (trimmedDeviceId) {
+    headers.set("x-device-id", trimmedDeviceId);
+  }
+
+  return { ...init, headers };
+}
+
+async function requestJson<T>(path: string, init?: RequestInit, deviceId?: string | null): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
+    ...withDeviceHeaders(init, deviceId),
     headers: {
       "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
+      ...Object.fromEntries(new Headers(init?.headers ?? {}).entries()),
+      ...(deviceId?.trim() ? { "x-device-id": deviceId.trim() } : {}),
     },
   });
 
@@ -73,19 +84,20 @@ export async function deleteReadingRemote(id: string) {
   });
 }
 
-export async function fetchStatus(): Promise<LiveStatus | null> {
+export async function fetchStatus(deviceId?: string | null): Promise<LiveStatus | null> {
   try {
-    return await requestJson<LiveStatus>("/api/status", { method: "GET" });
+    return await requestJson<LiveStatus>("/api/status", { method: "GET" }, deviceId);
   } catch {
     return null;
   }
 }
 
-export async function fetchFaultHistory() {
+export async function fetchFaultHistory(deviceId?: string | null) {
   try {
     const payload = await requestJson<{ faults: Array<{ timestamp: number; fault: string; resolved?: number }> }>(
       "/api/fault-history",
-      { method: "GET" }
+      { method: "GET" },
+      deviceId,
     );
     return payload.faults ?? [];
   } catch {
@@ -93,22 +105,23 @@ export async function fetchFaultHistory() {
   }
 }
 
-export async function fetchSensorHistory(days = 7): Promise<SensorSnapshot[]> {
+export async function fetchSensorHistory(days = 7, deviceId?: string | null): Promise<SensorSnapshot[]> {
   try {
     const payload = await requestJson<{ snapshots: SensorSnapshot[] }>(`/api/sensor-history?days=${days}`, {
       method: "GET",
-    });
+    }, deviceId);
     return payload.snapshots ?? [];
   } catch {
     return [];
   }
 }
 
-export async function fetchPumpLogs(days = 7, limit = 100): Promise<PumpLogEntry[]> {
+export async function fetchPumpLogs(days = 7, limit = 100, deviceId?: string | null): Promise<PumpLogEntry[]> {
   try {
     const payload = await requestJson<{ cycles: PumpLogEntry[] }>(
       `/api/pump-logs?days=${days}&limit=${limit}`,
       { method: "GET" },
+      deviceId,
     );
     return payload.cycles ?? [];
   } catch {
@@ -116,9 +129,9 @@ export async function fetchPumpLogs(days = 7, limit = 100): Promise<PumpLogEntry
   }
 }
 
-export async function fetchAnalyticsSummary(days = 7): Promise<AnalyticsSummary | null> {
+export async function fetchAnalyticsSummary(days = 7, deviceId?: string | null): Promise<AnalyticsSummary | null> {
   try {
-    return await requestJson<AnalyticsSummary>(`/api/analytics/summary?days=${days}`, { method: "GET" });
+    return await requestJson<AnalyticsSummary>(`/api/analytics/summary?days=${days}`, { method: "GET" }, deviceId);
   } catch {
     return null;
   }

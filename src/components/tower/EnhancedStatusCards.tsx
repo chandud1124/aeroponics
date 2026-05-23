@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, AlertCircle, Droplet, Thermometer, Zap, AlertOctagon } from "lucide-react";
+import { AlertTriangle, AlertCircle, Droplet, Zap, AlertOctagon } from "lucide-react";
 import { parseFault, FAULT_INFO, type FaultCode } from "@/lib/tower-faults";
 import type { LiveStatus } from "@/lib/tower-storage";
 
@@ -59,60 +59,33 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
             <Droplet className="h-5 w-5 text-blue-500" />
           </div>
           <div className="mt-2">
-            <Badge variant={status.flowing && status.pumpOn ? "default" : "secondary"}>
-              {status.flowing && status.pumpOn ? "Flowing" : "No flow"}
-            </Badge>
+            <Badge variant="secondary">Next feature</Badge>
           </div>
+          <p className="text-xs text-muted-foreground">Flow sensor removed from the current build</p>
         </Card>
 
         {/* Reservoir Temperature */}
         <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Res. Temp</span>
-            <Thermometer className="h-5 w-5 text-orange-500" />
+            <Zap className="h-5 w-5 text-orange-500" />
           </div>
-          <div className="mt-2 text-xl font-semibold">
-            {status.reservoirTempC != null ? (
-              <>
-                {status.reservoirTempC.toFixed(1)}
-                <span className="text-sm text-muted-foreground">°C</span>
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">N/A</span>
-            )}
+          <div className="mt-2">
+            <Badge variant="secondary">Next feature</Badge>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {status.reservoirTempC != null && status.reservoirTempC >= 25
-              ? "⚠ High - consider shading"
-              : status.reservoirTempC != null && status.reservoirTempC < 15
-                ? "⚠ Cold - slows growth"
-                : "✓ Optimal"}
-          </p>
+          <p className="text-xs text-muted-foreground">Reservoir temperature probe removed from the current build</p>
         </Card>
 
         {/* Tower Temperature */}
         <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Tower Temp</span>
-            <Thermometer className="h-5 w-5 text-green-500" />
+            <Zap className="h-5 w-5 text-green-500" />
           </div>
-          <div className="mt-2 text-xl font-semibold">
-            {status.towerTempC != null ? (
-              <>
-                {status.towerTempC.toFixed(1)}
-                <span className="text-sm text-muted-foreground">°C</span>
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">N/A</span>
-            )}
+          <div className="mt-2">
+            <Badge variant="secondary">Next feature</Badge>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {status.towerTempC != null && status.towerTempC >= 30
-              ? "⚠ Very hot"
-              : status.towerTempC != null && status.towerTempC < 12
-                ? "⚠ Cold"
-                : "✓ Good"}
-          </p>
+          <p className="text-xs text-muted-foreground">Tower temperature probe removed from the current build</p>
         </Card>
       </div>
 

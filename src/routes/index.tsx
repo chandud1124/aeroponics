@@ -4,6 +4,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toaster } from "@/components/ui/sonner";
 import { Sprout } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { EnhancedStatusCards } from "@/components/tower/EnhancedStatusCards";
 import { ScheduleEditor } from "@/components/tower/ScheduleEditor";
@@ -17,7 +20,6 @@ import { defaultSchedule, fetchSchedule, fetchStatus, type LiveStatus, type Sche
 import {
   FaultAlertBanner,
   FaultHistoryPanel,
-  FlowPipeline,
   LiveCycleHistoryPanel,
   ManualControlPanel,
   NextCyclePanel,
@@ -45,25 +47,47 @@ export const Route = createFileRoute("/")({
 function Index() {
   const [status, setStatus] = useState<LiveStatus | null>(null);
   const [schedule, setSchedule] = useState<Schedule>(defaultSchedule);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [mounted, setMounted] = useState(false);
   const liveStatus = mounted ? status : null;
   const backendReachable = mounted ? status !== null : false;
   const telemetryFresh = mounted ? Boolean(status?.isOnline) : false;
+  const activeDeviceId = selectedDeviceId.trim() || (status?.deviceId ?? null);
 
   useEffect(() => {
     setMounted(true);
+
+    const storedDeviceId = window.localStorage.getItem("tower.selectedDeviceId");
+    if (storedDeviceId) {
+      setSelectedDeviceId(storedDeviceId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    const trimmed = selectedDeviceId.trim();
+    if (trimmed) {
+      window.localStorage.setItem("tower.selectedDeviceId", trimmed);
+    } else {
+      window.localStorage.removeItem("tower.selectedDeviceId");
+    }
+  }, [mounted, selectedDeviceId]);
+
+  useEffect(() => {
+    if (!mounted) return;
     
     // Initial fetch
-    fetchStatus().then((s) => setStatus(s));
+    fetchStatus(selectedDeviceId.trim() || null).then((s) => setStatus(s));
     fetchSchedule().then((s) => s && setSchedule(s));
 
     const interval = setInterval(() => {
-      fetchStatus().then((s) => setStatus(s));
+      fetchStatus(selectedDeviceId.trim() || null).then((s) => setStatus(s));
       fetchSchedule().then((s) => s && setSchedule(s));
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [mounted, selectedDeviceId]);
 
   return (
     <ErrorBoundary>
@@ -83,6 +107,39 @@ function Index() {
         </header>
 
         <main className="mx-auto max-w-5xl px-4 py-6">
+          <Card className="mb-6 border-border/60 bg-card/80 p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <Label htmlFor="device-id-selector" className="text-sm font-medium">
+                  Device ID selector
+                </Label>
+                <div className="text-xs text-muted-foreground">
+                  Leave this blank to use the currently reported device. Enter a device ID to scope live data and controls.
+                </div>
+              </div>
+              <div className="flex w-full flex-col gap-2 sm:max-w-md sm:flex-row">
+                <Input
+                  id="device-id-selector"
+                  value={selectedDeviceId}
+                  onChange={(event) => setSelectedDeviceId(event.target.value)}
+                  placeholder={status?.deviceId ?? "default"}
+                  autoComplete="off"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSelectedDeviceId("")}
+                  disabled={!selectedDeviceId.trim()}
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-muted-foreground">
+              Active device: <span className="font-medium text-foreground">{activeDeviceId ?? "default"}</span>
+            </div>
+          </Card>
+
           <Tabs defaultValue="status" className="w-full">
             <TabsList className="grid w-full grid-cols-4 sm:grid-cols-9">
               <TabsTrigger value="status">Live</TabsTrigger>
@@ -100,7 +157,7 @@ function Index() {
               <div className="space-y-4">
                 {!backendReachable ? (
                   <>
-                    <ManualControlPanel status={null} />
+                    <ManualControlPanel status={null} deviceId={activeDeviceId} online={false} />
 
                     <Card className="border-dashed p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -115,12 +172,12 @@ function Index() {
                     </Card>
 
                     <div className="grid gap-4 xl:grid-cols-2">
-                      <RelayStatesCard status={null} online={false} />
+                      <RelayStatesCard status={null} online={false} deviceId={activeDeviceId} />
                       <Card className="border-dashed p-6">
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-muted-foreground">Live telemetry hidden</div>
                           <div className="text-sm text-muted-foreground">
-                            The controller will repopulate pump, light, temperature, and flow values once the backend returns.
+                            The controller will repopulate pump, light, and humidity values once the backend returns.
                           </div>
                         </div>
                       </Card>
@@ -128,11 +185,11 @@ function Index() {
 
                     <div className="grid gap-4 xl:grid-cols-2">
                       <div className="space-y-4">
-                        <LiveCycleHistoryPanel />
+                        <LiveCycleHistoryPanel deviceId={activeDeviceId} />
                       </div>
 
                       <div className="space-y-4">
-                        <FaultHistoryPanel />
+                        <FaultHistoryPanel deviceId={activeDeviceId} />
                       </div>
                     </div>
                   </>
@@ -146,35 +203,34 @@ function Index() {
                       <Card className="border-dashed p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="text-sm font-medium">ESP32 telemetry stale</div>
+                            <div className="text-sm font-medium">ESP32 offline</div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              Relay controls still work, but sensor updates have stopped. The last known relay state remains visible.
+                              The controller is not reporting live telemetry right now. Manual controls stay available and the last known relay state remains visible.
                             </div>
                           </div>
-                          <Badge variant="secondary">CONNECTED</Badge>
+                          <Badge variant="destructive">OFFLINE</Badge>
                         </div>
                       </Card>
                     ) : (
                       <FaultAlertBanner status={currentStatus} />
                     )}
 
-                    <ManualControlPanel status={currentStatus} />
+                    <ManualControlPanel status={currentStatus} deviceId={activeDeviceId} online={telemetryFresh} />
 
                     <div className="grid gap-4 xl:grid-cols-2">
-                      <RelayStatesCard status={currentStatus} online={telemetryFresh} />
-                      <NextCyclePanel status={currentStatus} schedule={schedule} />
+                      <RelayStatesCard status={currentStatus} online={telemetryFresh} deviceId={activeDeviceId} />
+                      <NextCyclePanel status={currentStatus} schedule={schedule} online={telemetryFresh} />
                     </div>
 
                     <div className="grid gap-4 2xl:grid-cols-2">
                       <div className="space-y-4">
-                        <PumpStateDisplay status={currentStatus} />
-                        <FlowPipeline status={currentStatus} />
-                        <LiveCycleHistoryPanel />
+                        <PumpStateDisplay status={currentStatus} online={telemetryFresh} />
+                        <LiveCycleHistoryPanel deviceId={activeDeviceId} />
                       </div>
 
                       <div className="space-y-4">
                         <EnhancedStatusCards status={currentStatus} />
-                        <FaultHistoryPanel />
+                        <FaultHistoryPanel deviceId={activeDeviceId} />
                       </div>
                     </div>
                         </>
@@ -198,11 +254,11 @@ function Index() {
             </TabsContent>
 
             <TabsContent value="stats" className="mt-6">
-              <PumpStats />
+              <PumpStats deviceId={activeDeviceId} />
             </TabsContent>
 
             <TabsContent value="ai" className="mt-6">
-              <AIInsightsCard />
+              <AIInsightsCard deviceId={activeDeviceId} />
             </TabsContent>
 
             <TabsContent value="admin" className="mt-6">
@@ -210,7 +266,7 @@ function Index() {
             </TabsContent>
 
             <TabsContent value="history" className="mt-6">
-              <HistoryAnalyticsTab />
+              <HistoryAnalyticsTab deviceId={activeDeviceId} />
             </TabsContent>
 
             <TabsContent value="readings" className="mt-6">

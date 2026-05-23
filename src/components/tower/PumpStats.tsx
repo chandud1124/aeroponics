@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Activity, Timer, Droplets, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { parseFault, FAULT_INFO, type FaultCode } from "@/lib/tower-faults";
+import { withDeviceHeaders } from "@/lib/tower-storage";
 
 type LogRow = {
   id: string;
@@ -33,8 +34,8 @@ const EMPTY: Summary = {
   recent: [],
 };
 
-async function loadSummary(): Promise<Summary> {
-  const response = await fetch("/api/pump-log");
+async function loadSummary(deviceId?: string | null): Promise<Summary> {
+  const response = await fetch("/api/pump-log", withDeviceHeaders({ method: "GET" }, deviceId));
   if (!response.ok) return EMPTY;
   const payload = (await response.json()) as {
     cycles: Array<{
@@ -106,13 +107,13 @@ function StatCard({
   );
 }
 
-export function PumpStats() {
+export function PumpStats({ deviceId }: { deviceId?: string | null }) {
   const [summary, setSummary] = useState<Summary>(EMPTY);
   const [loading, setLoading] = useState(true);
 
   const refresh = () => {
     setLoading(true);
-    loadSummary()
+    loadSummary(deviceId)
       .then(setSummary)
       .finally(() => setLoading(false));
   };
@@ -123,7 +124,7 @@ export function PumpStats() {
       refresh();
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [deviceId]);
 
   const breakdownEntries = Object.entries(summary.faultBreakdown) as [FaultCode, number][];
 

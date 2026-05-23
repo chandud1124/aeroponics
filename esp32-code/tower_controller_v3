@@ -1,68 +1,8 @@
-/*
- * ╔══════════════════════════════════════════════════════════════════════╗
- * ║   SMART TOWER GARDEN — ESP32 CONTROLLER  v3.0                       ║
- * ║   Hardware: DHT22 humidity sensor · LDR light sensor · 4 relays     ║
- * ║   Features: Schedule-driven pump · Auto light · Battery charge       ║
- * ║             Manual override (button + backend) · Offline NVS cache   ║
- * ║             Backend sync for schedule & manual modes                 ║
- * ╠══════════════════════════════════════════════════════════════════════╣
- * ║                                                                      ║
- * ║  FIXES FROM v2.1:                                                    ║
- * ║  [FIX-1]  Forward declarations added — postLogEntryToAPI() and       ║
- * ║           extractJsonInt() were called before declaration.           ║
- * ║           Caused compile errors in strict mode.                      ║
- * ║  [FIX-2]  stateManual() ↔ runStateMachine() logic conflict fixed.   ║
- * ║           runStateMachine() overrode stateManual()'s return to IDLE  ║
- * ║           immediately on same tick. Fixed with early-return guard.   ║
- * ║  [FIX-3]  checkSafety() was empty — added real humidity + light      ║
- * ║           threshold checks with alerts sent to backend.              ║
- * ║  [FIX-4]  stateCheckWater() had no real checks. Now validates DHT    ║
- * ║           sensor health before allowing pump to start.               ║
- * ║  [FIX-5]  deferredFault never cleared in stateRecovery() — now      ║
- * ║           explicitly cleared on every recovery path.                 ║
- * ║  [FIX-6]  Watchdog (TWDT) was declared via IV_WDT_FEED constant but ║
- * ║           no esp_task_wdt_* calls existed. Added full WDT init,      ║
- * ║           add-task and reset in loop.                                ║
- * ║  [FIX-7]  postStatus() sent field "lightLux" for raw ADC value.     ║
- * ║           Renamed to "lightRaw" and added "lightDark" bool field     ║
- * ║           so the frontend can display meaningful state.              ║
- * ║  [FIX-8]  isTimeToWater() used localtime() — replaced with thread-  ║
- * ║           safe localtime_r().                                        ║
- * ║  [FIX-9]  readSensors() read humidity but ignored temperature.       ║
- * ║           Added temperature reading; postStatus() now sends both.    ║
- * ║  [FIX-10] syncRemoteManualModes() polled every 3 s (IV_REMOTE_SYNC) ║
- * ║           — this is too aggressive (24 req/min to backend). Changed  ║
- * ║           to use the same IV_SCHEDULE interval (60 s). Manual mode   ║
- * ║           changes are picked up within one minute — acceptable.      ║
- * ║  [FIX-11] Battery charge window was compile-time constant only.      ║
- * ║           Now also pulled from backend schedule API field             ║
- * ║           "chargeStartHour" / "chargeEndHour" when present.         ║
- * ║  [FIX-12] NVS_TIME_VALID flag loaded into ntpSynced in              ║
- * ║           loadScheduleFromNVS() — correct, but the variable was also ║
- * ║           default-initialised to false at declaration. Added comment ║
- * ║           to clarify intended load order.                            ║
- * ║                                                                      ║
- * ║  HARDWARE WIRING SUMMARY:                                            ║
- * ║  GPIO16 → DHT22 data wire  (10kΩ pull-up to 3.3V)                   ║
- * ║  GPIO36 → LDR analogue     (LDR + 10kΩ voltage divider to GND)      ║
- * ║  GPIO19 → Pump button      (INPUT_PULLUP, active LOW)                ║
- * ║  GPIO23 → Light button     (INPUT_PULLUP, active LOW)                ║
- * ║  GPIO27 → Relay 1 (pump)   active LOW relay module                   ║
- * ║  GPIO33 → Relay 2 (LED)    active LOW relay module                   ║
- * ║  GPIO26 → Relay 3 (battery charge) active LOW relay module           ║
- * ║  GPIO25 → Relay 4 (spare)  active LOW relay module                   ║
- * ╚══════════════════════════════════════════════════════════════════════╝
- */
-
-// ─────────────────────────────────────────────────────────────────────
-//  INCLUDES
-// ─────────────────────────────────────────────────────────────────────
+ 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <DHT.h>
 #include <Preferences.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
 #include <time.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>   // [FIX-6] Watchdog
@@ -107,14 +47,11 @@ const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend
 const char* API_BASE_URL  = "http://192.168.0.147:8080";
-const char* DEVICE_ID     = "device-gwusft";
-const char* DEVICE_SECRET = "bd111a764bf9d9108c386645ab0fb4a95896601cd17bb5c5";
+const char* DEVICE_ID     = "device-489ccw";
+const char* DEVICE_SECRET = "731d389857cf81009bbe67f6111a0e5bb60973c5a1f453e0";
 
 // GPIO
 const int PIN_DHT_DATA           = 16;
-const int PIN_FLOW_SENSOR        = 32; // pulse-output flow sensor (optional)
-const int PIN_RESERVOIR_TEMP     = 14; // DS18B20 data pin for reservoir (optional)
-const int PIN_TOWER_TEMP         = 13; // DS18B20 data pin for tower (optional)
 const int PIN_LDR_SENSOR         = 36;
 const int PIN_MOTOR_BUTTON       = 19;
 const int PIN_LIGHT_BUTTON       = 23;
@@ -139,12 +76,8 @@ const unsigned long BUTTON_DEBOUNCE_MS = 50UL;
 const float TEMP_AIR_MAX_C    = 42.0f;   // Alert if room > 42°C
 const float HUMIDITY_MAX_PCT  = 85.0f;   // Alert if humidity > 85%
 
-// Flow sensor calibration: pulses per liter (default, calibrate for your sensor)
-const float PULSES_PER_LITER = 450.0f;
-
 // Pump timing
 const unsigned long PUMP_MAX_RUN_MS  = 120000UL; // 2 min hard cap
-const unsigned long PUMP_FLOW_VERIFY_MS = 3000UL; // flow must appear quickly after pump starts
 const unsigned long FAULT_RETRY_MS   = 30000UL;  // 30 s before recovery
 
 // Battery charge window defaults (overridden by backend if provided)
@@ -196,7 +129,6 @@ struct Schedule {
 
 struct SensorData {
   float humidityPct   = 0.0f;
-  float airTempC      = 0.0f;   // [FIX-9] Added temperature
   int   lightRaw      = 0;
   bool  isDark        = false;  // true when LDR reads below threshold
   bool  valid         = false;
@@ -209,12 +141,8 @@ struct SystemStatus {
   bool   batteryChargeOn  = false;
   bool   dhtOk            = false;
   float  humidityPct      = 0.0f;
-  float  airTempC         = 0.0f;  // [FIX-9]
   int    lightRaw         = 0;
   bool   lightDark        = false; // [FIX-7] Renamed from lightLux
-  float  reservoirTempC   = NAN;
-  float  towerTempC       = NAN;
-  float  flowRateLpm      = 0.0f;
   bool   sensorDataOk     = false;
   String fault            = "OK";
   time_t lastRunEpoch     = 0;
@@ -250,26 +178,8 @@ struct ButtonState {
 DHT         dht(PIN_DHT_DATA, DHT22);
 Preferences prefs;
 
-// Flow sensor + DS18B20
-volatile unsigned long flowPulseCount = 0;
-volatile unsigned long lastFlowPulseMs = 0;
-unsigned long tsLastFlowSampleMs = 0;
-unsigned long lastFlowSampleCount = 0;
-float flowRateLpm = 0.0f;
-
-OneWire oneWireReservoir(PIN_RESERVOIR_TEMP);
-DallasTemperature resTempSensor(&oneWireReservoir);
-OneWire oneWireTower(PIN_TOWER_TEMP);
-DallasTemperature towerTempSensor(&oneWireTower);
-float reservoirTempC = NAN;
-float towerTempC = NAN;
-// DS18B20 non-blocking conversion state
-unsigned long tsTempRequestMs = 0;
-bool pendingTempRequest = false;
-unsigned long ds18b20RetryAfterMs = 0;
-uint8_t ds18b20FailureStreak = 0;
-bool reservoirDsMissingLogged = false;
-bool towerDsMissingLogged = false;
+// DHT22 + LDR
+float humidityPct = 0.0f;
 
 PumpState curState  = STATE_IDLE;
 PumpState prevState = STATE_IDLE;
@@ -570,11 +480,6 @@ void initWiFi() {
   Serial.printf("[WiFi] Connecting to '%s'...\n", WIFI_SSID);
 }
 
-void IRAM_ATTR flowPulseISR() {
-  flowPulseCount++;
-  lastFlowPulseMs = millis();
-}
-
 void maintainWiFi(unsigned long now) {
   if (now - tsLastWifiCheck < IV_WIFI_CHECK) return;
   tsLastWifiCheck = now;
@@ -656,16 +561,12 @@ time_t getCurrentEpoch() {
 void readSensors() {
   // ── DHT22 ──────────────────────────────────────────────────────────
   float hum  = dht.readHumidity();
-  float temp = dht.readTemperature();   // [FIX-9] Read temperature too
-
-  bool dhtOk = (!isnan(hum) && !isnan(temp) &&
-                hum  >= 0.0f  && hum  <= 100.0f &&
-                temp > -40.0f && temp < 85.0f);
+  bool dhtOk = (!isnan(hum) && hum >= 0.0f && hum <= 100.0f);
 
   if (dhtOk) {
     sensors.humidityPct = hum;
-    sensors.airTempC    = temp;
-    Serial.printf("[DHT22] Hum: %.1f%%  Temp: %.1f°C\n", hum, temp);
+    humidityPct = hum;
+    Serial.printf("[DHT22] Hum: %.1f%%\n", hum);
   } else {
     Serial.println("[DHT22] Read error (isnan or out of range)");
   }
@@ -690,104 +591,10 @@ void readSensors() {
   // Mirror into status
   status.dhtOk      = dhtOk;
   status.humidityPct = sensors.humidityPct;
-  status.airTempC    = sensors.airTempC;    // [FIX-9]
   status.lightRaw    = sensors.lightRaw;
   status.lightDark   = sensors.isDark;      // [FIX-7]
-
-  // ── DS18B20 non-blocking conversion ─────────────────────────────
-  unsigned long nowMs = millis();
-  if (!pendingTempRequest && nowMs >= ds18b20RetryAfterMs) {
-    // Request conversion on both sensors (non-blocking)
-    resTempSensor.requestTemperatures();
-    towerTempSensor.requestTemperatures();
-    pendingTempRequest = true;
-    tsTempRequestMs = nowMs;
-  } else if (pendingTempRequest) {
-    if (nowMs - tsTempRequestMs > 2500UL) {
-      pendingTempRequest = false;
-      ds18b20FailureStreak++;
-      if (!reservoirDsMissingLogged || !towerDsMissingLogged || ds18b20FailureStreak == 1) {
-        Serial.println("[SENSOR] DS18B20 conversion timed out; retrying later");
-      }
-      if (ds18b20FailureStreak >= 3) {
-        ds18b20RetryAfterMs = nowMs + 300000UL;
-        ds18b20FailureStreak = 0;
-        Serial.println("[SENSOR] DS18B20 unavailable; pausing retries for 5 minutes");
-      }
-    } else if (nowMs - tsTempRequestMs >= 700UL) {
-      float r = resTempSensor.getTempCByIndex(0);
-      float t = towerTempSensor.getTempCByIndex(0);
-
-      if (r != DEVICE_DISCONNECTED_C) {
-        reservoirTempC = r;
-        if (reservoirDsMissingLogged) {
-          Serial.println("[SENSOR] Reservoir DS18B20 recovered");
-          reservoirDsMissingLogged = false;
-        }
-      } else {
-        if (!reservoirDsMissingLogged) {
-          Serial.println("[SENSOR] Reservoir DS18B20 missing or unreadable; continuing");
-          reservoirDsMissingLogged = true;
-        }
-        reservoirTempC = NAN;
-      }
-
-      if (t != DEVICE_DISCONNECTED_C) {
-        towerTempC = t;
-        if (towerDsMissingLogged) {
-          Serial.println("[SENSOR] Tower DS18B20 recovered");
-          towerDsMissingLogged = false;
-        }
-      } else {
-        if (!towerDsMissingLogged) {
-          Serial.println("[SENSOR] Tower DS18B20 missing or unreadable; continuing");
-          towerDsMissingLogged = true;
-        }
-        towerTempC = NAN;
-      }
-
-      if (r == DEVICE_DISCONNECTED_C && t == DEVICE_DISCONNECTED_C) {
-        ds18b20FailureStreak++;
-        if (ds18b20FailureStreak >= 3) {
-          ds18b20RetryAfterMs = nowMs + 300000UL;
-          ds18b20FailureStreak = 0;
-          Serial.println("[SENSOR] DS18B20 unavailable; pausing retries for 5 minutes");
-        }
-      } else {
-        ds18b20FailureStreak = 0;
-      }
-
-      pendingTempRequest = false;
-    }
-  }
-
-  // ── Flow sensor sampling (compute LPM)
-  unsigned long sampleNow = millis();
-  if (tsLastFlowSampleMs == 0) {
-    tsLastFlowSampleMs = sampleNow;
-    lastFlowSampleCount = flowPulseCount;
-  } else if (sampleNow - tsLastFlowSampleMs >= 5000) {
-    unsigned long deltaCount = flowPulseCount - lastFlowSampleCount;
-    unsigned long deltaMs = sampleNow - tsLastFlowSampleMs;
-    if (deltaMs > 0) {
-      flowRateLpm = ((float)deltaCount * 60000.0f) / (PULSES_PER_LITER * (float)deltaMs);
-    } else {
-      flowRateLpm = 0.0f;
-    }
-    lastFlowSampleCount = flowPulseCount;
-    tsLastFlowSampleMs = sampleNow;
-  }
-
-  bool flowRecent = (lastFlowPulseMs > 0) && (sampleNow - lastFlowPulseMs <= 3000UL);
-  status.flowing = status.pumpOn && (flowRecent || flowPulseCount > 0);
-
-  status.reservoirTempC = reservoirTempC;
-  status.towerTempC = towerTempC;
-  status.flowRateLpm = flowRateLpm;
-  status.sensorDataOk = dhtOk || (!isnan(reservoirTempC) && !isnan(towerTempC));
-  if (!status.sensorDataOk) {
-    status.fault = "OK";
-  }
+  status.flowing = status.pumpOn;
+  status.sensorDataOk = dhtOk;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -884,24 +691,6 @@ void handleManualButtons(unsigned long now) {
 void checkSafety(unsigned long now) {
   if (!sensors.valid) return;
 
-  // Keep the flow truth tied to the active pump cycle.
-  bool flowDetected = (status.pumpOn && lastFlowPulseMs > 0 && (now - lastFlowPulseMs <= PUMP_FLOW_VERIFY_MS));
-  status.flowing = flowDetected;
-
-  // High temperature alert
-  if (sensors.airTempC > TEMP_AIR_MAX_C) {
-    Serial.printf("[SAFETY] Air temp %.1f°C exceeds %.1f°C limit\n",
-                  sensors.airTempC, TEMP_AIR_MAX_C);
-    // Don't stop pump — temperature is room air, not water
-    // Just log the alert to backend via status post
-    if (status.fault == "OK") {
-      status.fault = "TEMP_HIGH";
-    }
-  } else if (status.fault == "TEMP_HIGH") {
-    // Fault auto-clears when condition resolves
-    status.fault = "OK";
-  }
-
   // Very high humidity alert (risk of fungal disease on plants)
   if (sensors.humidityPct > HUMIDITY_MAX_PCT) {
     Serial.printf("[SAFETY] Humidity %.1f%% exceeds %.1f%% limit\n",
@@ -911,24 +700,6 @@ void checkSafety(unsigned long now) {
     }
   } else if (status.fault == "HUMIDITY_HIGH") {
     status.fault = "OK";
-  }
-
-  // Pump hard timeout: if pump running longer than PUMP_MAX_RUN_MS, stop it
-  if (status.pumpOn && (now - pumpStartMs >= PUMP_MAX_RUN_MS)) {
-    Serial.println("[SAFETY] Pump max runtime exceeded — emergency stop");
-    setRelayState(PIN_PUMP_RELAY, false);
-    status.pumpOn = false;
-    enterFault(now, "PUMP_TIMEOUT");
-    return;
-  }
-
-  // No-flow protection: if the relay is on but no pulse arrives quickly,
-  // stop the pump rather than letting the backend show a false running state.
-  if (status.pumpOn && (now - pumpStartMs >= PUMP_FLOW_VERIFY_MS) && !flowDetected) {
-    Serial.println("[SAFETY] Pump started but no flow detected — emergency stop");
-    setRelayState(PIN_PUMP_RELAY, false);
-    status.pumpOn = false;
-    enterFault(now, "NO_FLOW");
   }
 }
 
@@ -999,11 +770,7 @@ void statePumpOn(unsigned long now) {
   Serial.printf("[PUMP] Starting — duration %ds\n", schedule.durationSeconds);
   setRelayState(PIN_PUMP_RELAY, true);
   status.pumpOn          = true;
-  status.flowing         = false;
-  flowPulseCount         = 0;
-  lastFlowPulseMs        = 0;
-  lastFlowSampleCount    = 0;
-  tsLastFlowSampleMs     = now;
+  status.flowing         = true;
   pumpScheduledEndMs     = pumpStartMs + (unsigned long)(schedule.durationSeconds * 1000UL);
   curState               = STATE_RUNNING;
 }
@@ -1019,6 +786,8 @@ void stateRunning(unsigned long now) {
 void stateStopping(unsigned long now) {
   setRelayState(PIN_PUMP_RELAY, false);
   status.pumpOn = false;
+  status.flowing = false;
+  status.flowing = false;
 
   unsigned long durMs = now - pumpStartMs;
   Serial.printf("[PUMP] Stopped — runtime %.1fs\n", durMs / 1000.0f);
@@ -1030,8 +799,8 @@ void stateStopping(unsigned long now) {
     saveLastRunToNVS(epochNow);
   }
 
-  // Log cycle using the actual flow sensor state and pulse-derived volume.
-  bool flowed = flowPulseCount > 0 || status.flowing;
+  // Log cycle as successful when it completed without a fault.
+  bool flowed = status.fault == "OK" || status.fault.length() == 0;
   logPumpCycle(durMs / 1000.0f, flowed, status.fault);
 
   // Clear transient fault if pump stopped cleanly
@@ -1129,8 +898,7 @@ bool isTimeToWater() {
   time_t epochNow = getCurrentEpoch();
 
   if (epochNow == 0) {
-    // No time available — first-run fallback
-    if (status.lastRunEpoch == 0) return true;
+    // No valid clock yet — fail safe instead of guessing a watering time.
     return false;
   }
 
@@ -1314,9 +1082,7 @@ void fetchScheduleAndSync() {
 void postStatus() {
   if (!wifiConnected) return;
 
-  String reportedState = (status.pumpOn && !status.flowing)
-    ? String("VERIFYING_FLOW")
-    : String(STATE_NAMES[curState]);
+  String reportedState = String(STATE_NAMES[curState]);
 
   String body = "{";
   body += "\"pumpOn\":"           + String(status.pumpOn        ? "true" : "false") + ",";
@@ -1324,7 +1090,6 @@ void postStatus() {
   body += "\"lightOn\":"          + String(status.lightOn       ? "true" : "false") + ",";
   body += "\"batteryChargeOn\":"  + String(status.batteryChargeOn ? "true" : "false") + ",";
   body += "\"humidityPct\":"      + String(status.humidityPct, 1) + ",";
-  body += "\"airTempC\":"         + String(status.airTempC, 1) + ",";  // [FIX-9]
   body += "\"lightRaw\":"         + String(status.lightRaw) + ",";     // [FIX-7] correct name
   body += "\"lightDark\":"        + String(status.lightDark ? "true" : "false") + ","; // [FIX-7]
   body += "\"dhtOk\":"            + String(status.dhtOk ? "true" : "false") + ",";
@@ -1344,9 +1109,6 @@ void postStatus() {
   if (scheduleAppliedAt > 0) {
     body += ",\"scheduleAppliedAt\":" + String((uint32_t)scheduleAppliedAt);
   }
-  body += ",\"reservoirTempC\":" + String(status.reservoirTempC, 1);
-  body += ",\"towerTempC\":" + String(status.towerTempC, 1);
-  body += ",\"flowRateLpm\":" + String(status.flowRateLpm, 2);
   body += ",\"sensorDataOk\":" + String(status.sensorDataOk ? "true" : "false");
   body += "}";
 
@@ -1420,13 +1182,6 @@ void setup() {
 
   // ── Sensors ───────────────────────────────────────────────────────
   dht.begin();
-  // DS18B20 sensors
-  resTempSensor.begin();
-  towerTempSensor.begin();
-
-  // Flow sensor wiring
-  pinMode(PIN_FLOW_SENSOR, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_FLOW_SENSOR), flowPulseISR, RISING);
 
   // ── [FIX-6] Watchdog init ─────────────────────────────────────────
   esp_task_wdt_config_t wdtCfg = {

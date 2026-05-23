@@ -26,11 +26,12 @@ import {
   PUMP_STATE_LABELS,
   PUMP_STATE_COLORS,
   fetchFaultHistory,
+  withDeviceHeaders,
 } from "@/lib/tower-storage";
 
 // ==================== PUMP STATE DISPLAY ====================
 
-export function PumpStateDisplay({ status }: { status: LiveStatus }) {
+export function PumpStateDisplay({ status, online = true }: { status: LiveStatus; online?: boolean }) {
   const state = status.pumpState || PumpState.IDLE;
   const label = PUMP_STATE_LABELS[state];
   const colorClass = PUMP_STATE_COLORS[state];
@@ -54,31 +55,28 @@ export function PumpStateDisplay({ status }: { status: LiveStatus }) {
           </div>
         </div>
 
+        {!online && (
+          <div className="rounded-lg border border-dashed border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+            Offline: showing the last known pump state until the ESP32 reports again.
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 text-xs">
           <Badge variant="secondary">Current cycle: {cycleLabel}</Badge>
-          <Badge variant={status.flowing && status.pumpOn ? "default" : "outline"}>
-            {status.flowing && status.pumpOn ? "Flow verified" : state === PumpState.VERIFYING_FLOW ? "Verifying flow" : "Oxygen break"}
+          <Badge variant={status.pumpOn ? "default" : "outline"}>
+            {status.pumpOn ? "Pump active" : "Pump idle"}
           </Badge>
         </div>
 
         <div className="text-sm text-muted-foreground">{label}</div>
 
-        {/* Flow verification indicator */}
-        {state === PumpState.VERIFYING_FLOW && (
-          <div className="rounded-lg bg-orange-50 p-3">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 animate-pulse rounded-full bg-orange-500" />
-              <span className="text-sm font-medium text-orange-900">Waiting for flow sensor...</span>
-            </div>
-          </div>
-        )}
-
-        {/* Flowing indicator */}
-        {state === PumpState.RUNNING && (
+        {status.pumpOn && (
           <div className="rounded-lg bg-green-50 p-3">
             <div className="flex items-center gap-2">
-              <Droplets className="h-4 w-4 text-green-600" />
-              <span className="text-sm font-medium text-green-900">Water flowing ✓</span>
+              <Zap className="h-4 w-4 text-green-600" />
+              <span className="text-sm font-medium text-green-900">
+                Pump relay active{state === PumpState.RUNNING ? " — watering in progress" : ""}
+              </span>
             </div>
           </div>
         )}
@@ -101,14 +99,24 @@ export function PumpStateDisplay({ status }: { status: LiveStatus }) {
 
 // ==================== NEXT CYCLE PANEL ====================
 
-export function NextCyclePanel({ status, schedule }: { status: LiveStatus; schedule: Schedule }) {
+export function NextCyclePanel({
+  status,
+  schedule,
+  online = true,
+}: {
+  status: LiveStatus;
+  schedule: Schedule;
+  online?: boolean;
+}) {
   const [countdown, setCountdown] = useState<string>("--:--");
   const [retryCountdown, setRetryCountdown] = useState<string | null>(null);
   const manualOverrideActive = status.motorManualMode != null && status.motorManualMode !== "AUTO";
   const controlModeLabel = manualOverrideActive ? "MANUAL OVERRIDE" : "AUTOMATIC";
   const controlModeHint = manualOverrideActive
     ? `Motor: ${status.motorManualMode ?? "AUTO"}`
-    : "ESP32 and backend are following the automatic schedule";
+    : online
+      ? "ESP32 and backend are following the automatic schedule"
+      : "Controller offline: showing the last known schedule state";
 
   useEffect(() => {
     const updateCountdown = () => {
@@ -311,18 +319,18 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
                 <div className="font-semibold">{expectedOff} min</div>
               </div>
               <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Flow</div>
-                <div className="font-semibold">{status.flowRateLpm != null ? `${status.flowRateLpm.toFixed(1)} L/min` : "—"}</div>
+                <div className="text-muted-foreground">Humidity</div>
+                <div className="font-semibold">{status.humidityPct != null ? `${status.humidityPct.toFixed(1)}%` : "—"}</div>
               </div>
             </div>
             <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
               <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Reservoir temp</div>
-                <div className="font-semibold">{status.reservoirTempC != null ? `${status.reservoirTempC.toFixed(1)}°C` : "—"}</div>
+                <div className="text-muted-foreground">Ambient light</div>
+                <div className="font-semibold">{status.lightLux != null ? `${status.lightLux} lux` : "—"}</div>
               </div>
               <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Tower temp</div>
-                <div className="font-semibold">{status.towerTempC != null ? `${status.towerTempC.toFixed(1)}°C` : "—"}</div>
+                <div className="text-muted-foreground">Light relay</div>
+                <div className="font-semibold">{status.lightOn ? "On" : "Off"}</div>
               </div>
             </div>
             <div className="mt-3 rounded-lg border border-border bg-secondary/60 px-3 py-2 text-xs">
@@ -369,7 +377,7 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
   );
 }
 
-export function LiveCycleHistoryPanel() {
+export function LiveCycleHistoryPanel({ deviceId }: { deviceId?: string | null }) {
   type Row = {
     id: string;
     startedAt: string;
@@ -387,7 +395,10 @@ export function LiveCycleHistoryPanel() {
 
     const load = async () => {
       try {
-        const [respLogs, respStatus] = await Promise.all([fetch("/api/pump-log"), fetch("/api/status")]);
+        const [respLogs, respStatus] = await Promise.all([
+          fetch("/api/pump-log", withDeviceHeaders({ method: "GET" }, deviceId)),
+          fetch("/api/status", withDeviceHeaders({ method: "GET" }, deviceId)),
+        ]);
         if (!respLogs.ok) return;
         const logsPayload = (await respLogs.json()) as { cycles: Row[] };
         const statusPayload = respStatus.ok ? (await respStatus.json()) as any : null;
@@ -421,7 +432,7 @@ export function LiveCycleHistoryPanel() {
       active = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [deviceId]);
 
   return (
     <Card className="p-6">
@@ -471,20 +482,29 @@ export function LiveCycleHistoryPanel() {
 
 // ==================== MANUAL CONTROL PANEL ====================
 
-export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
+export function ManualControlPanel({
+  status,
+  deviceId,
+  online = true,
+}: {
+  status: LiveStatus | null;
+  deviceId?: string | null;
+  online?: boolean;
+}) {
   const [pumpLoading, setPumpLoading] = useState(false);
   const [pumpModeLoading, setPumpModeLoading] = useState(false);
   const [lightLoading, setLightLoading] = useState(false);
   const [optimisticLightOn, setOptimisticLightOn] = useState<boolean | null>(null);
   const pumpModeIsManual = status?.motorManualMode !== "AUTO";
+  const controlsEnabled = online && Boolean(status);
 
   const handleStart = async () => {
-    if (!pumpModeIsManual) return;
+    if (!controlsEnabled || !pumpModeIsManual) return;
     setPumpLoading(true);
     try {
       const response = await fetch("/api/manual-pump", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        ...withDeviceHeaders({ headers: { "Content-Type": "application/json" } }, deviceId),
         body: JSON.stringify({ action: "start" }),
       });
 
@@ -500,12 +520,12 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
   };
 
   const handleStop = async () => {
-    if (!pumpModeIsManual) return;
+    if (!controlsEnabled || !pumpModeIsManual) return;
     setPumpLoading(true);
     try {
       const response = await fetch("/api/manual-pump", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        ...withDeviceHeaders({ headers: { "Content-Type": "application/json" } }, deviceId),
         body: JSON.stringify({ action: "stop" }),
       });
 
@@ -521,10 +541,14 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
 
   const handlePumpModeToggle = async () => {
     setPumpModeLoading(true);
+    if (!controlsEnabled) {
+      setPumpModeLoading(false);
+      return;
+    }
     try {
       await fetch("/api/manual-pump", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        ...withDeviceHeaders({ headers: { "Content-Type": "application/json" } }, deviceId),
         body: JSON.stringify({ action: pumpModeIsManual ? "auto" : "manual", desiredOn: false }),
       });
     } catch (error) {
@@ -536,13 +560,17 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
 
   const handleLightToggle = async (action: "on" | "off") => {
     setLightLoading(true);
+    if (!controlsEnabled) {
+      setLightLoading(false);
+      return;
+    }
     // Optimistic update: show state immediately
     setOptimisticLightOn(action === "on");
     
     try {
       await fetch("/api/manual-light", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        ...withDeviceHeaders({ headers: { "Content-Type": "application/json" } }, deviceId),
         body: JSON.stringify({ action }),
       });
       // Clear optimistic state on success (live data will update from polling)
@@ -572,12 +600,16 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
           <div>
             <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Pump mode</div>
             <div className="mt-1 text-sm text-muted-foreground">
-              {pumpModeIsManual ? "Manual mode is active" : "Auto mode is active and schedule control is restored"}
+              {!controlsEnabled
+                ? "Offline mode: control actions are disabled until telemetry returns"
+                : pumpModeIsManual
+                  ? "Manual mode is active"
+                  : "Auto mode is active and schedule control is restored"}
             </div>
           </div>
           <Button
             onClick={handlePumpModeToggle}
-            disabled={pumpModeLoading}
+            disabled={!controlsEnabled || pumpModeLoading}
             variant={pumpModeIsManual ? "secondary" : "default"}
             className="w-full sm:w-auto"
           >
@@ -588,7 +620,7 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={handleStart}
-            disabled={!pumpModeIsManual || pumpLoading}
+            disabled={!controlsEnabled || !pumpModeIsManual || pumpLoading}
             className="flex-1 bg-green-600 hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
             variant="default"
           >
@@ -597,7 +629,7 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
           </Button>
           <Button
             onClick={handleStop}
-            disabled={!pumpModeIsManual || pumpLoading}
+            disabled={!controlsEnabled || !pumpModeIsManual || pumpLoading}
             className="flex-1 bg-red-600 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
             variant="default"
           >
@@ -608,7 +640,7 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={() => handleLightToggle("on")}
-            disabled={lightLoading}
+            disabled={!controlsEnabled || lightLoading}
             className={`flex-1 ${optimisticLightOn ? "bg-yellow-500 hover:bg-yellow-600" : "bg-indigo-600 hover:bg-indigo-700"} transition-colors`}
             variant="default"
           >
@@ -617,7 +649,7 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
           </Button>
           <Button
             onClick={() => handleLightToggle("off")}
-            disabled={lightLoading}
+            disabled={!controlsEnabled || lightLoading}
             className={`flex-1 ${optimisticLightOn === false ? "bg-slate-400 hover:bg-slate-500" : "bg-slate-600 hover:bg-slate-700"} transition-colors`}
             variant="default"
           >
@@ -628,7 +660,9 @@ export function ManualControlPanel({ status }: { status: LiveStatus | null }) {
         <div className="flex items-start gap-2 rounded-md bg-yellow-50 p-2">
           <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-600" />
           <div className="text-xs text-yellow-900">
-            Manual controls override automatic scheduling. Remember to disable when done.
+            {controlsEnabled
+              ? "Manual controls override automatic scheduling. Remember to disable when done."
+              : "Reconnect the controller to change relays or pump mode."}
           </div>
         </div>
         </div>
@@ -684,7 +718,15 @@ function RelayStateCard({ label, icon, active, manualMode, modeLabel, detail, to
   );
 }
 
-export function RelayStatesCard({ status, online = true }: { status: LiveStatus | null; online?: boolean }) {
+export function RelayStatesCard({
+  status,
+  online = true,
+  deviceId,
+}: {
+  status: LiveStatus | null;
+  online?: boolean;
+  deviceId?: string | null;
+}) {
   const [modeLoading, setModeLoading] = useState<{ pump: boolean; light: boolean; battery: boolean }>({
     pump: false,
     light: false,
@@ -692,13 +734,14 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
   });
 
   const toggleRelayMode = async (kind: "pump" | "light" | "battery", active: boolean, manualMode?: string) => {
+    if (!online || !status) return;
     const endpoint = kind === "pump" ? "/api/manual-pump" : kind === "light" ? "/api/manual-light" : "/api/manual-battery";
     const action = manualMode && manualMode !== "AUTO" ? "auto" : "manual";
     setModeLoading((current) => ({ ...current, [kind]: true }));
     try {
       await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        ...withDeviceHeaders({ headers: { "Content-Type": "application/json" } }, deviceId),
         body: JSON.stringify({ action, desiredOn: active }),
       });
     } finally {
@@ -715,7 +758,7 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
               <div className="text-sm font-medium text-muted-foreground">Relay states</div>
               <div className="text-xs text-muted-foreground">Waiting for ESP32 telemetry</div>
             </div>
-            <Badge variant={online ? "secondary" : "destructive"} className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
+            <Badge variant="destructive" className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
               {online ? <Wifi className="mr-1 h-3 w-3" /> : <WifiOff className="mr-1 h-3 w-3" />}
               {online ? "Online" : "Offline"}
             </Badge>
@@ -729,15 +772,22 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
   return (
     <Card className="p-6">
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-sm font-medium text-muted-foreground">Relay states</div>
-            <div className="text-xs text-muted-foreground">Major controls and their current relay state</div>
+              <div className="text-xs text-muted-foreground">
+                {online ? "Major controls and their current relay state" : "Offline mode: showing the last known relay state"}
+              </div>
           </div>
-          <Badge variant={online ? "secondary" : "destructive"} className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
-            {online ? <Wifi className="mr-1 h-3 w-3" /> : <WifiOff className="mr-1 h-3 w-3" />}
-            {online ? "Online" : "Offline"}
-          </Badge>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Badge variant={online ? "secondary" : "outline"} className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
+              {online ? <Wifi className="mr-1 h-3 w-3" /> : <WifiOff className="mr-1 h-3 w-3" />}
+                {online ? "Online" : "Offline"}
+            </Badge>
+            <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
+              Controls ready
+            </Badge>
+          </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -747,7 +797,7 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             active={status.pumpOn}
             manualMode={status.motorManualMode}
             modeLabel="Pump mode"
-            detail={status.flowing ? "Flow verified right now" : "Relay state is on/off only; flow may still be pending"}
+            detail={online ? (status.pumpOn ? "Relay state is on right now" : "Relay state is off") : "Last known relay state"}
           />
           <RelayStateCard
             label="LED grow light"
@@ -755,10 +805,10 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             active={Boolean(status.lightOn)}
             manualMode={status.lightManualMode}
             modeLabel="Light mode"
-            detail={status.lightOn ? "Light relay is supplying the LED strip" : "Light relay is off"}
+            detail={online ? (status.lightOn ? "Light relay is supplying the LED strip" : "Light relay is off") : "Last known relay state"}
             toggleLabel={status.lightManualMode && status.lightManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
             onToggleMode={() => toggleRelayMode("light", Boolean(status.lightOn), status.lightManualMode)}
-            toggling={modeLoading.light}
+            toggling={modeLoading.light || !online}
           />
           <RelayStateCard
             label="Battery charging"
@@ -766,10 +816,10 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             active={Boolean(status.batteryChargeOn)}
             manualMode={status.batteryManualMode}
             modeLabel="Battery mode"
-            detail={status.batteryChargeOn ? "Battery charge relay is active" : "Battery charge relay is off"}
+            detail={online ? (status.batteryChargeOn ? "Battery charge relay is active" : "Battery charge relay is off") : "Last known relay state"}
             toggleLabel={status.batteryManualMode && status.batteryManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
             onToggleMode={() => toggleRelayMode("battery", Boolean(status.batteryChargeOn), status.batteryManualMode)}
-            toggling={modeLoading.battery}
+            toggling={modeLoading.battery || !online}
           />
         </div>
 
@@ -784,11 +834,11 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
 export function FlowPipeline({ status }: { status: LiveStatus }) {
   const stages = [
     {
-      label: "Flow sensor",
-      done: status.flowRateLpm != null,
+      label: "Humidity sensor",
+      done: status.humidityPct != null,
       icon: Droplets,
-      doneText: status.flowRateLpm != null ? "Telemetry present" : "Waiting for flow telemetry",
-      pendingText: "Flow sensor is the only water-related sensor in this build",
+      doneText: status.humidityPct != null ? "Telemetry present" : "Waiting for humidity telemetry",
+      pendingText: "Humidity sensor is part of the active build",
     },
     {
       label: "Pump relay",
@@ -798,24 +848,24 @@ export function FlowPipeline({ status }: { status: LiveStatus }) {
       pendingText: status.motorManualMode && status.motorManualMode !== "AUTO" ? `Manual mode: ${status.motorManualMode}` : "Relay idle",
     },
     {
-      label: "Flow check",
-      done: status.flowing,
+      label: "Light control",
+      done: Boolean(status.lightOn),
       icon: Network,
-      doneText: "Flow verified",
-      pendingText: status.pumpOn ? "Waiting for flow pulses" : "Pump is off",
+      doneText: "LED lighting active",
+      pendingText: status.lightOn ? "Light relay is on" : "Light relay is off",
     },
     {
-      label: "Tower misting",
-      done: status.flowing,
+      label: "Live humidity",
+      done: status.humidityPct != null,
       icon: Sprout,
-      doneText: "Water delivery active",
-      pendingText: status.pumpOn ? "Pending flow verification" : "Idle",
+      doneText: "Humidity telemetry active",
+      pendingText: "Waiting for humidity data",
     },
   ];
 
   return (
     <Card className="p-6">
-      <div className="mb-4 text-sm font-medium text-muted-foreground">Live cycle pipeline</div>
+      <div className="mb-4 text-sm font-medium text-muted-foreground">Live sensor pipeline</div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         {stages.map((stage, index) => {
           const Icon = stage.icon;
@@ -838,19 +888,19 @@ export function FlowPipeline({ status }: { status: LiveStatus }) {
   );
 }
 
-export function FaultHistoryPanel() {
+export function FaultHistoryPanel({ deviceId }: { deviceId?: string | null }) {
   const [faults, setFaults] = useState<Array<{ timestamp: number; fault: string }>>([]);
 
   useEffect(() => {
     let active = true;
 
-    fetchFaultHistory().then((rows) => {
+    fetchFaultHistory(deviceId).then((rows) => {
       if (!active) return;
       setFaults(rows);
     });
 
     const interval = setInterval(() => {
-      fetchFaultHistory().then((rows) => {
+      fetchFaultHistory(deviceId).then((rows) => {
         if (!active) return;
         setFaults(rows);
       });
@@ -860,7 +910,7 @@ export function FaultHistoryPanel() {
       active = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [deviceId]);
 
   return (
     <Card className="p-6">
@@ -899,7 +949,7 @@ export function FaultAlertBanner({ status }: { status: LiveStatus }) {
     DRY_RUN: {
       icon: AlertOctagon,
       severity: "critical",
-      message: "Pump running but no water flow detected. Check for blocked pipe or failed sensor.",
+      message: "Pump running but no water confirmation was received. Check plumbing or pump prime.",
     },
     LOW_WATER: {
       icon: AlertTriangle,
@@ -909,7 +959,7 @@ export function FaultAlertBanner({ status }: { status: LiveStatus }) {
     FLOW_STOPPED: {
       icon: AlertTriangle,
       severity: "warning",
-      message: "Water flow stopped mid-cycle. Pump has been stopped.",
+      message: "Pump stopped mid-cycle. Check plumbing or power.",
     },
     PUMP_TIMEOUT: {
       icon: AlertTriangle,
@@ -919,12 +969,12 @@ export function FaultAlertBanner({ status }: { status: LiveStatus }) {
     TEMP_HIGH: {
       icon: AlertTriangle,
       severity: "warning",
-      message: "Reservoir temperature too high. Watering paused until cooled.",
+      message: "Safety threshold reached. Watering paused.",
     },
     SENSOR_FAIL: {
       icon: AlertOctagon,
       severity: "critical",
-      message: "Temperature sensor malfunction. System in safe mode.",
+      message: "A sensor input malfunction was detected. System in safe mode.",
     },
   };
 

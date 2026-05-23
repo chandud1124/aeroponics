@@ -33,7 +33,7 @@ function computeDataHash(status: LiveStatus, history: SensorSnapshot[]): string 
   const tds = tdsAvg.length ? (tdsAvg.reduce((s, v) => s + v, 0) / tdsAvg.length).toFixed(1) : "N/A";
   const ec = ecAvg.length ? (ecAvg.reduce((s, v) => s + v, 0) / ecAvg.length).toFixed(2) : "N/A";
 
-  const key = `${status.reservoirTempC}|${status.towerTempC}|${status.humidityPct}|${status.lightLux ?? "N/A"}|${history.length}|${ph}|${tds}|${ec}`;
+  const key = `${status.humidityPct}|${status.lightLux ?? "N/A"}|${history.length}|${ph}|${tds}|${ec}`;
   // Simple hash: sum of char codes (good enough for cache invalidation)
   return String(Array.from(key).reduce((sum, c) => sum + c.charCodeAt(0), 0));
 }
@@ -68,14 +68,10 @@ export async function analyzeSensorDataWithGemini(
 
   try {
     // Prepare sensor data summary
-    const temps = sensorHistory.map((s) => s.reservoirTempC).filter((t) => t != null) as number[];
     const humidities = sensorHistory.map((s) => s.humidityPct).filter((h) => h != null) as number[];
     const lightLuxValues = sensorHistory.map((s) => s.lightLux).filter((l) => l != null) as number[];
 
-    const avgReservoirTemp = temps.length > 0 ? (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1) : "N/A";
     const avgHumidity = humidities.length > 0 ? (humidities.reduce((a, b) => a + b, 0) / humidities.length).toFixed(1) : "N/A";
-    const minTemp = temps.length > 0 ? Math.min(...temps).toFixed(1) : "N/A";
-    const maxTemp = temps.length > 0 ? Math.max(...temps).toFixed(1) : "N/A";
     const avgLightLux = lightLuxValues.length > 0 ? Math.round(lightLuxValues.reduce((a, b) => a + b, 0) / lightLuxValues.length) : null;
 
     // Manual readings (pH, TDS/PPM, EC)
@@ -88,18 +84,15 @@ export async function analyzeSensorDataWithGemini(
     const tdsAvg = tdsVals.length ? (tdsVals.reduce((s, v) => s + v, 0) / tdsVals.length).toFixed(1) : "N/A";
     const ecAvg = ecVals.length ? (ecVals.reduce((s, v) => s + v, 0) / ecVals.length).toFixed(2) : "N/A";
 
-    const prompt = `You are an expert hydroponics and vertical farming analyst. Analyze the following smart tower garden sensor data and provide concise insights, recommendations, and risk assessment. Use the attached indoor lettuce guide as reference — include humidity, pH, TDS/PPM, EC, ambient light, temperatures, pump performance, and recent manual readings.
+    const prompt = `You are an expert hydroponics and vertical farming analyst. Analyze the following smart tower garden sensor data and provide concise insights, recommendations, and risk assessment. Use the attached indoor lettuce guide as reference — include humidity, pH, TDS/PPM, EC, ambient light, pump performance, and recent manual readings.
 
   Current Status:
   - Pump: ${currentStatus.pumpOn ? "ON" : "OFF"}
-  - Water Flow: ${currentStatus.flowing ? "OK" : "NO FLOW"}
   - Fault: ${currentStatus.fault || "None"}
   - Grow Light: ${currentStatus.lightOn ? "ON" : "OFF"}
   - Ambient light (current): ${currentStatus.lightLux != null ? currentStatus.lightLux + " lux" : "N/A"}
 
   Sensor Summary (last ${days} days):
-  - Reservoir Temperature: Avg ${avgReservoirTemp}°C (Min: ${minTemp}°C, Max: ${maxTemp}°C)
-  - Tower Temperature (latest): ${currentStatus.towerTempC?.toFixed(1) || "N/A"}°C
   - Humidity: Avg ${avgHumidity}% (Current: ${currentStatus.humidityPct?.toFixed(1) || "N/A"}%)
   - Ambient light: Avg ${avgLightLux != null ? avgLightLux + " lux" : "N/A"} (recent samples: ${lightLuxValues.length})
   - Manual readings: pH avg ${phAvg}, TDS/PPM avg ${tdsAvg}, EC avg ${ecAvg} (count: ${manual.length})
@@ -110,7 +103,7 @@ export async function analyzeSensorDataWithGemini(
   - Target pH: 5.5–6.2 (aim for 5.8–6.0 in vegetative growth)
   - Target EC: 0.8–1.2 mS/cm (approx. 560–840 PPM using 700 factor). Seedling lower, vegetative higher.
   - Recommended LED photoperiod (indoor): 14–16 hours/day (example schedule: 5:00–21:00)
-  - Indoor misting suggestion: typical fixed cycle ~2 min ON / 8 min OFF (adjust by temperature)
+  - Indoor misting suggestion: typical fixed cycle ~2 min ON / 8 min OFF
   - Use ambient light lux thresholds for auto-on: consider ~2000 lux as conservative indoor threshold for supplemental LEDs
 
   Please provide:

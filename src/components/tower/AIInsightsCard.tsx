@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Lightbulb, Zap, AlertTriangle, CheckCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { withDeviceHeaders } from "@/lib/tower-storage";
 
 interface AIInsight {
   insights: string;
@@ -21,7 +22,7 @@ interface AIInsightsResponse extends Partial<AIInsight> {
 const ERR_GEMINI_NOT_CONFIGURED = "AI analysis unavailable - Gemini API not configured";
 const ERR_NO_LIVE_STATUS = "No live data yet from ESP32";
 
-export function AIInsightsCard() {
+export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
   const [insights, setInsights] = useState<AIInsight | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export function AIInsightsCard() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/ai-insights?days=7");
+      const response = await fetch("/api/ai-insights?days=7", withDeviceHeaders({ method: "GET" }, deviceId));
       const data = (await response.json().catch(() => null)) as AIInsightsResponse | null;
 
       if (data?.error) {
@@ -59,7 +60,7 @@ export function AIInsightsCard() {
     fetchInsights();
     const interval = setInterval(fetchInsights, 5 * 60 * 1000); // Refresh every 5 minutes
     return () => clearInterval(interval);
-  }, []);
+  }, [deviceId]);
 
   const getHealthColor = (score: number) => {
     if (score >= 80) return "text-green-600";

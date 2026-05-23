@@ -64,7 +64,25 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function requireRegisteredDeviceForControl() {
+  if (listDevices().length > 0) {
+    return null;
+  }
+
+  return jsonResponse(
+    {
+      error: "No registered device",
+      message: "Add the ESP32 from Admin Devices before using manual controls.",
+    },
+    409,
+  );
+}
+
 async function handleLocalApi(request: Request): Promise<Response | null> {
+
+function getTargetDeviceId(request: Request): string | null {
+  return request.headers.get("x-device-id") ?? listDevices()[0]?.deviceId ?? null;
+}
   await initializeTowerStore();
   const url = new URL(request.url);
 
@@ -161,7 +179,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
   if (url.pathname === "/api/status") {
     if (request.method === "GET") {
-      const status = getStatus();
+      const targetDevice = getTargetDeviceId(request);
+      const status = getStatus(targetDevice);
       // Include the current schedule so devices can pull it with a single call
       const schedule = getSchedule();
       if (!status) return jsonResponse({ status: null, schedule });
@@ -182,9 +201,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pumpState?: string;
         state?: string;
         humidityPct?: number | null;
-        reservoirTempC?: number;
         lightLux?: number | null;
-        towerTempC?: number;
         lightOn?: boolean;
         batteryChargeOn?: boolean;
         fault?: string | null;
@@ -194,20 +211,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         lastRunAt?: string;
           sensorDataOk?: boolean;
           dhtOk?: boolean;
-          reservoirDsOk?: boolean;
-          towerDsOk?: boolean;
-          // Optional flow field may be omitted by device without triggering restart
-          flowRateLpm?: number | null;
       };
-
-      // Validate temperature ranges (reasonable bounds for hydroponics: -10°C to 60°C)
-      if (payload.reservoirTempC !== undefined && (payload.reservoirTempC < -10 || payload.reservoirTempC > 60)) {
-        return jsonResponse({ error: "Reservoir temperature out of valid range (-10°C to 60°C)" }, 400);
-      }
-
-      if (payload.towerTempC !== undefined && (payload.towerTempC < -10 || payload.towerTempC > 60)) {
-        return jsonResponse({ error: "Tower temperature out of valid range (-10°C to 60°C)" }, 400);
-      }
 
       // Validate humidity (0-100%)
       if (payload.humidityPct !== undefined && payload.humidityPct !== null) {
@@ -228,9 +232,6 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         })(),
         humidityPct: payload.humidityPct ?? undefined,
         lightLux: payload.lightLux ?? undefined,
-        reservoirTempC: payload.reservoirTempC ?? undefined,
-        towerTempC: payload.towerTempC ?? undefined,
-        flowRateLpm: (payload as any).flowRateLpm ?? undefined,
         lightOn: payload.lightOn ?? undefined,
         batteryChargeOn: payload.batteryChargeOn ?? undefined,
         fault: payload.fault ?? undefined,
@@ -240,12 +241,10 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         lastRunISO: payload.lastRunAt ?? undefined,
         sensorDataOk: payload.sensorDataOk ?? undefined,
         dhtOk: payload.dhtOk ?? undefined,
-        reservoirDsOk: payload.reservoirDsOk ?? undefined,
-        towerDsOk: payload.towerDsOk ?? undefined,
         // accept optional device-sent fields
         scheduleAppliedAt: (payload as any).scheduleAppliedAt ?? undefined,
         appliedPlanName: (payload as any).planName ?? undefined,
-      }, { source: "esp32" });
+      }, { source: "esp32", deviceId: deviceIdHeader });
 
       // If device reported a lastRunAt and indicates pump is ON, create a start pump-log entry
       let createdPumpLog: any = null;
@@ -314,7 +313,9 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
   if (url.pathname === "/api/test/no-sensor") {
     if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
     // Create a minimal status update (pump off) with no sensor fields
-    const updated = updateStatus({ pumpOn: false, flowing: false }, { source: "server" });
+    const deviceIdHeader = request.headers.get("x-device-id") ?? null;
+    const targetDevice = deviceIdHeader ?? (listDevices()[0]?.deviceId ?? null);
+    const updated = updateStatus({ pumpOn: false, flowing: false }, { source: "server", deviceId: targetDevice });
     return jsonResponse({ success: true, status: updated }, 200);
   }
 
@@ -329,7 +330,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Unauthorized (device)" }, 401);
     }
 
-    const status = touchStatus({ source: "esp32" });
+    const status = touchStatus({ source: "esp32", deviceId: deviceIdHeader });
     return jsonResponse(
       {
         success: true,
@@ -371,14 +372,14 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
   if (url.pathname === "/api/pump-log") {
     if (request.method === "GET") {
-      const cycles = getPumpLogs().map((log) => ({
+      const deviceId = request.headers.get("x-device-id") ?? null;
+      const cycles = getPumpLogs(deviceId).map((log) => ({
         id: log.id,
         startedAt: log.startedAt,
         durationSeconds: log.durationSeconds,
         flowed: log.flowed,
         fault: log.fault,
         volumeLiters: (log as any).volumeLiters ?? null,
-        flowRateLpm: (log as any).flowRateLpm ?? null,
       }));
 
       const successfulCycles = cycles.filter((cycle) => cycle.flowed && !cycle.fault).length;
@@ -421,7 +422,6 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         onDurationSeconds?: number;
         offIntervalMinutes?: number;
         volumeLiters?: number;
-        flowRateLpm?: number;
       };
 
       if (typeof payload.durationSeconds !== "number" || typeof payload.flowed !== "boolean") {
@@ -436,7 +436,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         onDurationSeconds: payload.onDurationSeconds ?? payload.durationSeconds,
         offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
         volumeLiters: payload.volumeLiters ?? null,
-        flowRateLpm: payload.flowRateLpm ?? null,
+        deviceId: deviceIdHeader,
       });
 
       return jsonResponse(created, 201);
@@ -458,7 +458,6 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         fault?: string | null;
         endedAtMs?: number;
         volumeLiters?: number | null;
-        flowRateLpm?: number | null;
       };
 
       const updated = updatePumpLog(id, {
@@ -467,7 +466,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         fault: payload.fault ?? null,
         endedAtMs: payload.endedAtMs,
         volumeLiters: payload.volumeLiters ?? null,
-        flowRateLpm: payload.flowRateLpm ?? null,
+        // keep device scoping consistent — ensure pump log remains attributed to device
+        deviceId: deviceIdHeader,
       });
 
       if (!updated) return jsonResponse({ error: "Pump log not found" }, 404);
@@ -516,7 +516,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
   if (url.pathname === "/api/fault-history") {
     if (request.method === "GET") {
-      const history = getFaultHistory(20);
+      const deviceId = request.headers.get("x-device-id") ?? null;
+      const history = getFaultHistory(20, deviceId);
       return jsonResponse({ faults: history });
     }
 
@@ -529,7 +530,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     const days = Number(url.searchParams.get("days") ?? "7");
-    return jsonResponse({ snapshots: getSensorHistory(Number.isFinite(days) ? days : 7) });
+    const deviceId = request.headers.get("x-device-id") ?? null;
+    return jsonResponse({ snapshots: getSensorHistory(Number.isFinite(days) ? days : 7, deviceId) });
   }
 
   if (url.pathname === "/api/pump-logs") {
@@ -539,8 +541,9 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     const days = Number(url.searchParams.get("days") ?? "7");
     const limit = Number(url.searchParams.get("limit") ?? "100");
+    const deviceId = request.headers.get("x-device-id") ?? null;
     const cutoff = Date.now() - (Number.isFinite(days) ? days : 7) * 24 * 60 * 60 * 1000;
-    const cycles = getPumpLogs()
+    const cycles = getPumpLogs(deviceId)
       .filter((log) => new Date(log.startedAt).getTime() >= cutoff)
       .slice(0, Number.isFinite(limit) ? limit : 100);
     return jsonResponse({ cycles });
@@ -552,7 +555,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     const days = Number(url.searchParams.get("days") ?? "7");
-    return jsonResponse(getAnalyticsSummary(Number.isFinite(days) ? days : 7));
+    const deviceId = request.headers.get("x-device-id") ?? null;
+    return jsonResponse(getAnalyticsSummary(Number.isFinite(days) ? days : 7, deviceId));
   }
 
   if (url.pathname === "/api/manual-pump") {
@@ -560,10 +564,16 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
+    const deviceGate = requireRegisteredDeviceForControl();
+    if (deviceGate) return deviceGate;
+
     const payload = (await request.json()) as { action?: "start" | "stop" | "auto" | "manual"; desiredOn?: boolean };
     if (!payload.action) {
       return jsonResponse({ error: "Missing action" }, 400);
     }
+
+    const deviceIdHeader = request.headers.get("x-device-id") ?? null;
+    const targetDevice = deviceIdHeader ?? (listDevices()[0]?.deviceId ?? null);
 
     if (payload.action === "auto") {
       manualPumpStartedAtMs = null;
@@ -574,7 +584,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pumpState: PumpState.IDLE,
         motorManualMode: "AUTO",
         lastRunISO: null,
-      });
+      }, { deviceId: targetDevice });
       return jsonResponse({ success: true, state: "AUTO" }, 201);
     }
 
@@ -587,10 +597,10 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pumpState: PumpState.MANUAL_MODE,
         motorManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF",
         fault: null,
-      });
+      }, { deviceId: targetDevice });
       if (desiredOn) {
         try {
-          const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs ?? Date.now() });
+          const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs ?? Date.now(), deviceId: targetDevice });
           if (created && created.id) {
             manualPumpLogId = created.id;
           }
@@ -609,10 +619,10 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pumpState: PumpState.MANUAL_MODE,
         motorManualMode: "FORCED_ON",
         fault: null,
-      });
+      }, { deviceId: targetDevice });
       // create a start pump-log entry so frontend and server track it
       try {
-        const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs });
+        const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs, deviceId: targetDevice });
         if (created && created.id) {
           manualPumpLogId = created.id;
         }
@@ -631,10 +641,10 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       flowing: false,
       pumpState: PumpState.MANUAL_MODE,
       motorManualMode: "FORCED_OFF",
-    });
+    }, { deviceId: targetDevice });
     if (manualPumpStartedAtMs != null) {
       if (manualPumpLogId) {
-        updatePumpLog(manualPumpLogId, { durationSeconds: Math.max(1, durationSeconds), flowed: durationSeconds > 0, endedAtMs });
+        updatePumpLog(manualPumpLogId, { durationSeconds: Math.max(1, durationSeconds), flowed: durationSeconds > 0, endedAtMs, deviceId: targetDevice });
       } else {
         addPumpLog({
           durationSeconds: Math.max(1, durationSeconds),
@@ -645,6 +655,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           offIntervalMinutes: getCycleProfile().offIntervalMinutes,
           startedAtMs,
           endedAtMs,
+          deviceId: targetDevice,
         });
       }
     }
@@ -658,28 +669,33 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
+    const deviceGate = requireRegisteredDeviceForControl();
+    if (deviceGate) return deviceGate;
+
     const payload = (await request.json()) as { action?: "on" | "off" | "auto" | "manual"; desiredOn?: boolean };
     if (!payload.action) {
       return jsonResponse({ error: "Missing action" }, 400);
     }
 
+    const deviceIdHeader = request.headers.get("x-device-id") ?? null;
+    const targetDevice = deviceIdHeader ?? (listDevices()[0]?.deviceId ?? null);
+
     if (payload.action === "auto") {
-      updateStatus({ lightManualMode: "AUTO" });
-      return jsonResponse({ success: true, lightOn: getStatus()?.lightOn ?? false, mode: "AUTO" }, 201);
+      updateStatus({ lightManualMode: "AUTO" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, lightOn: getStatus(targetDevice)?.lightOn ?? false, mode: "AUTO" }, 201);
     }
 
     if (payload.action === "manual") {
       const desiredOn = Boolean(payload.desiredOn);
-      updateStatus({ lightOn: desiredOn, lightManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" });
+      updateStatus({ lightOn: desiredOn, lightManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" }, { deviceId: targetDevice });
       return jsonResponse({ success: true, lightOn: desiredOn, mode: "MANUAL" }, 201);
     }
 
     if (payload.action === "on") {
-      updateStatus({ lightOn: true, lightManualMode: "FORCED_ON" });
+      updateStatus({ lightOn: true, lightManualMode: "FORCED_ON" }, { deviceId: targetDevice });
       return jsonResponse({ success: true, lightOn: true }, 201);
     }
-
-    updateStatus({ lightOn: false, lightManualMode: "FORCED_OFF" });
+    updateStatus({ lightOn: false, lightManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
     return jsonResponse({ success: true, lightOn: false }, 201);
   }
 
@@ -688,28 +704,37 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
+    const deviceGate = requireRegisteredDeviceForControl();
+    if (deviceGate) return deviceGate;
+
     const payload = (await request.json()) as { action?: "on" | "off" | "auto" | "manual"; desiredOn?: boolean };
     if (!payload.action) {
       return jsonResponse({ error: "Missing action" }, 400);
     }
 
     if (payload.action === "auto") {
-      updateStatus({ batteryChargeOn: false, batteryManualMode: "AUTO" });
-      return jsonResponse({ success: true, batteryChargeOn: false, mode: "AUTO" }, 201);
+      const targetDevice = getTargetDeviceId(request);
+      updateStatus({ batteryChargeOn: false, batteryManualMode: "AUTO" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, batteryChargeOn: getStatus(targetDevice)?.batteryChargeOn ?? false, mode: "AUTO" }, 201);
     }
 
     if (payload.action === "manual") {
       const desiredOn = Boolean(payload.desiredOn);
-      updateStatus({ batteryChargeOn: desiredOn, batteryManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" });
+      const targetDevice = getTargetDeviceId(request);
+      updateStatus({ batteryChargeOn: desiredOn, batteryManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" }, { deviceId: targetDevice });
       return jsonResponse({ success: true, batteryChargeOn: desiredOn, mode: "MANUAL" }, 201);
     }
 
     if (payload.action === "on") {
-      updateStatus({ batteryChargeOn: true, batteryManualMode: "FORCED_ON" });
+      const targetDevice = getTargetDeviceId(request);
+      updateStatus({ batteryChargeOn: true, batteryManualMode: "FORCED_ON" }, { deviceId: targetDevice });
       return jsonResponse({ success: true, batteryChargeOn: true }, 201);
     }
 
-    updateStatus({ batteryChargeOn: false, batteryManualMode: "FORCED_OFF" });
+    {
+      const targetDevice = getTargetDeviceId(request);
+      updateStatus({ batteryChargeOn: false, batteryManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
+    }
     return jsonResponse({ success: true, batteryChargeOn: false }, 201);
   }
 
@@ -719,8 +744,9 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     const days = Number(url.searchParams.get("days") ?? "7");
-    const status = getStatus();
-    const sensorHistory = getSensorHistory(Number.isFinite(days) ? days : 7);
+    const targetDevice = getTargetDeviceId(request);
+    const status = getStatus(targetDevice);
+    const sensorHistory = getSensorHistory(Number.isFinite(days) ? days : 7, targetDevice);
 
     if (!status) {
       return jsonResponse(

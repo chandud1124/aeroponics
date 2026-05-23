@@ -55,6 +55,7 @@ export type Schedule = {
 };
 
 export type LiveStatus = {
+  deviceId?: string;
   pumpOn: boolean;
   flowing: boolean;
   pumpState: PumpState;
@@ -96,6 +97,7 @@ export type LiveStatus = {
 
 export type SensorSnapshot = {
   id: string;
+  deviceId?: string;
   timestamp: number;
   reservoirTempC: number | null;
   humidityPct?: number | null;
@@ -116,6 +118,7 @@ export type ManualReading = {
 
 export type PumpLogEntry = {
   id: string;
+  deviceId?: string;
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
