@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { createAdminDevice, deleteAdminDevice, fetchAdminDevices, rotateAdminDeviceSecret, type DeviceCreateDuplicate, type DeviceListEntry } from "@/lib/tower-storage";
 
 export function AdminDevices() {
-  const [passkey, setPasskey] = useState<string>("0990");
+  const [passkey, setPasskey] = useState<string>("");
+  const [unlocked, setUnlocked] = useState(false);
   const [devices, setDevices] = useState<DeviceListEntry[]>([]);
   const [name, setName] = useState("");
   const [mac, setMac] = useState("");
@@ -24,8 +25,25 @@ export function AdminDevices() {
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    if (unlocked) {
+      load();
+    }
+  }, [unlocked]);
+
+  async function handleUnlock() {
+    if (!passkey.trim()) {
+      alert("Enter the admin passkey first");
+      return;
+    }
+
+    try {
+      await load();
+      setUnlocked(true);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to unlock admin panel — check the admin passkey");
+    }
+  }
 
   async function handleCreate() {
     try {
@@ -69,11 +87,34 @@ export function AdminDevices() {
 
   return (
     <div className="space-y-4">
+      {!unlocked ? (
+        <Card className="p-4">
+          <div className="space-y-3">
+            <div>
+              <div className="text-sm font-medium">Admin panel locked</div>
+              <div className="text-xs text-muted-foreground">
+                Enter the admin passkey to view devices, add ESP32 entries, or rotate secrets.
+              </div>
+            </div>
+            <div className="flex max-w-md gap-2">
+              <Input
+                type="password"
+                placeholder="Enter admin passkey"
+                value={passkey}
+                onChange={(e) => setPasskey((e.target as HTMLInputElement).value)}
+              />
+              <Button onClick={handleUnlock}>Unlock</Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      {unlocked ? (
       <Card className="p-4">
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
           <div>
             <label className="text-xs text-muted-foreground">Admin passkey</label>
-            <Input value={passkey} onChange={(e) => setPasskey((e.target as HTMLInputElement).value)} />
+            <Input type="password" value={passkey} onChange={(e) => setPasskey((e.target as HTMLInputElement).value)} />
           </div>
           <div>
             <label className="text-xs text-muted-foreground">MAC address (optional)</label>
@@ -94,7 +135,10 @@ export function AdminDevices() {
         </div>
         {secretShown ? (
           <div className="mt-4 rounded border border-dashed p-3">
-            <div className="text-sm">Device secret (copy and store now — shown only once):</div>
+            <div className="text-sm font-medium">Device secret shown once</div>
+            <div className="text-xs text-muted-foreground">
+              Copy this now. It cannot be retrieved again later; rotate it only if you need a new key.
+            </div>
             <div className="mt-2 flex items-center justify-between gap-2">
               <pre className="break-all text-xs">{secretShown}</pre>
               <Button
@@ -117,7 +161,9 @@ export function AdminDevices() {
           </div>
         ) : null}
       </Card>
+      ) : null}
 
+      {unlocked ? (
       <Card className="p-4">
         <h3 className="mb-2 text-sm font-medium">Registered devices</h3>
         <div className="space-y-2">
@@ -140,6 +186,7 @@ export function AdminDevices() {
           )}
         </div>
       </Card>
+      ) : null}
     </div>
   );
 }
