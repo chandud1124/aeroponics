@@ -1,126 +1,30 @@
-// ==================== PUMP STATE ENUM ====================
-export enum PumpState {
-  IDLE = "IDLE",
-  WAITING = "WAITING",
-  STARTING = "STARTING",
-  VERIFYING_FLOW = "VERIFYING_FLOW",
-  RUNNING = "RUNNING",
-  FAULT_NO_FLOW = "FAULT_NO_FLOW",
-  LOW_WATER_LOCK = "LOW_WATER_LOCK",
-  TEMP_PAUSE = "TEMP_PAUSE",
-  MANUAL_MODE = "MANUAL_MODE",
-}
+import fs from "fs";
+import os from "os";
+import path from "path";
 
-export const PUMP_STATE_LABELS: Record<PumpState, string> = {
-  [PumpState.IDLE]: "Idle (waiting for next cycle)",
-  [PumpState.WAITING]: "Waiting for scheduled time",
-  [PumpState.STARTING]: "Relay activated",
-  [PumpState.VERIFYING_FLOW]: "Verifying flow sensor (3 sec)",
-  [PumpState.RUNNING]: "Pump running - water flowing",
-  [PumpState.FAULT_NO_FLOW]: "ERROR: No flow detected",
-  [PumpState.LOW_WATER_LOCK]: "Locked: Water level too low",
-  [PumpState.TEMP_PAUSE]: "Paused: Reservoir too hot",
-  [PumpState.MANUAL_MODE]: "Manual override active",
-};
+import {
+  PumpState,
+  PUMP_STATE_LABELS,
+  PUMP_STATE_COLORS,
+  defaultSchedule,
+  type AnalyticsSummary,
+  type LiveStatus,
+  type ManualReading,
+  type PumpLogEntry,
+  type Schedule,
+  type SensorSnapshot,
+} from "./tower-shared";
+import { supabaseAdmin } from "../integrations/supabase/client.server";
 
-export const PUMP_STATE_COLORS: Record<PumpState, string> = {
-  [PumpState.IDLE]: "bg-slate-200 text-slate-900",
-  [PumpState.WAITING]: "bg-blue-200 text-blue-900",
-  [PumpState.STARTING]: "bg-amber-200 text-amber-900",
-  [PumpState.VERIFYING_FLOW]: "bg-orange-300 text-orange-900",
-  [PumpState.RUNNING]: "bg-green-200 text-green-900",
-  [PumpState.FAULT_NO_FLOW]: "bg-red-200 text-red-900",
-  [PumpState.LOW_WATER_LOCK]: "bg-yellow-200 text-yellow-900",
-  [PumpState.TEMP_PAUSE]: "bg-orange-200 text-orange-900",
-  [PumpState.MANUAL_MODE]: "bg-purple-200 text-purple-900",
-};
+export { PumpState, PUMP_STATE_LABELS, PUMP_STATE_COLORS };
 
-type Schedule = {
-  planName?: string;
-  intervalMinutes: number;
-  durationSeconds: number;
-  startHour: number;
-  endHour: number;
-  enabled: boolean;
-  lightEnabled?: boolean;
-  lightStartHour?: number;
-  lightEndHour?: number;
-  dayIntervalMinutes?: number;
-  dayDurationSeconds?: number;
-  nightIntervalMinutes?: number;
-  nightDurationSeconds?: number;
-  temperatureProtection?: boolean;
-  rainPause?: boolean;
-  heatBoost?: boolean;
-  lowWaterAutoLock?: boolean;
-};
+type PumpLog = PumpLogEntry;
 
-export type LiveStatus = {
-  pumpOn: boolean;
-  flowing: boolean;
-  pumpState: PumpState;
-  motorManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  lightManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  batteryChargeOn?: boolean;
-  batteryManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  reservoirTempC: number | null;
-  humidityPct?: number | null;
-  lightLux?: number | null;
-  towerTempC: number | null;
-  flowRateLpm?: number | null;
-  lightOn?: boolean;
-  lastRunISO: string | null;
-  // If device reports scheduleAppliedAt (epoch seconds)
-  scheduleAppliedAt?: number | null;
-  appliedPlanName?: string | null;
-  // If device reports an explicit on-duration at start, server can expose pumpEndISO
-  pumpEndISO?: string | null;
-  fault: string | null;
-  resetReason?: string | null;
-  lastBootFault?: string | null;
-  uptimeSec?: number | null;
-  nextCycleISO: string | null;
-  nextCycleIn: number; // seconds until next cycle
-  telemetryUpdatedAt: number | null;
-  isOnline: boolean;
-};
-
-export type SensorSnapshot = {
-  id: string;
-  timestamp: number;
-  reservoirTempC: number | null;
-  humidityPct?: number | null;
-  lightLux?: number | null;
-  towerTempC: number | null;
-  pumpState: PumpState;
-  fault: string | null;
-};
-
-type ManualReading = {
-  id: string;
-  timestamp: number;
-  ph: number | null;
-  tds: number | null;
-  ec: number | null;
-  notes: string;
-};
-
-type PumpLog = {
-  id: string;
-  startedAt: string;
-  endedAt: string;
-  durationSeconds: number;
-  flowed: boolean;
-  fault: string | null;
-  mode: "DAY" | "NIGHT" | "MANUAL";
-  onDurationSeconds: number;
-  offIntervalMinutes: number;
-  volumeLiters?: number | null;
-  flowRateLpm?: number | null;
-};
-
-type PumpLogInput = Omit<PumpLog, "id" | "startedAt" | "endedAt"> & {
+type PumpLogInput = Omit<PumpLog, "id" | "startedAt" | "endedAt" | "onDurationSeconds" | "offIntervalMinutes"> & {
   mode?: PumpLog["mode"];
+  durationSeconds?: number;
+  flowed?: boolean;
+  fault?: string | null;
   onDurationSeconds?: number;
   offIntervalMinutes?: number;
   startedAtMs?: number;
@@ -129,27 +33,216 @@ type PumpLogInput = Omit<PumpLog, "id" | "startedAt" | "endedAt"> & {
   flowRateLpm?: number | null;
 };
 
-const DEFAULT_SCHEDULE: Schedule = {
-  intervalMinutes: 30,
-  durationSeconds: 60,
-  // Adjusted to indoor guide: lights on 5:00, off 21:00 (16h)
-  startHour: 5,
-  endHour: 21,
-  enabled: true,
-  lightEnabled: true,
-  lightStartHour: 5,
-  lightEndHour: 21,
-  dayIntervalMinutes: 7,
-  dayDurationSeconds: 45,
-  nightIntervalMinutes: 20,
-  nightDurationSeconds: 30,
-  temperatureProtection: true,
-  rainPause: false,
-  heatBoost: true,
-  lowWaterAutoLock: true,
+const DEFAULT_SCHEDULE: Schedule = defaultSchedule;
+
+const DATA_DIR = process.env.TOWER_DATA_DIR ?? path.join(os.homedir(), ".smart-tower-garden");
+const SCHEDULE_FILE = process.env.TOWER_SCHEDULE_FILE ?? path.join(DATA_DIR, "schedule.json");
+const STATE_FILE = process.env.TOWER_STATE_FILE ?? path.join(DATA_DIR, "tower-state.json");
+const EVENTS_TABLE = "tower_events";
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+function loadScheduleFromDisk(): Schedule {
+  try {
+    if (fs.existsSync(SCHEDULE_FILE)) {
+      const raw = fs.readFileSync(SCHEDULE_FILE, "utf8");
+      const parsed = JSON.parse(raw) as Partial<Schedule>;
+      return { ...DEFAULT_SCHEDULE, ...parsed };
+    }
+  } catch (error) {
+    console.error("Failed to load schedule from disk:", error);
+  }
+
+  return { ...DEFAULT_SCHEDULE };
+}
+
+function saveScheduleToDisk(nextSchedule: Schedule) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(nextSchedule, null, 2), "utf8");
+  } catch (error) {
+    console.error("Failed to save schedule to disk:", error);
+  }
+}
+
+type PersistedTowerState = {
+  status?: LiveStatus | null;
+  sensorHistory?: SensorSnapshot[];
+  readings?: ManualReading[];
+  pumpLogs?: PumpLog[];
+  faultHistory?: Array<{ timestamp: number; fault: string; resolved?: number }>;
 };
 
-let schedule: Schedule = { ...DEFAULT_SCHEDULE };
+type TowerEventType =
+  | "schedule_updated"
+  | "status_updated"
+  | "sensor_snapshot_added"
+  | "reading_added"
+  | "reading_deleted"
+  | "pump_log_added"
+  | "pump_log_updated"
+  | "fault_recorded";
+
+type TowerEventRow = {
+  event_type: TowerEventType;
+  payload: unknown;
+};
+
+function loadStateFromDisk() {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return;
+
+    const raw = fs.readFileSync(STATE_FILE, "utf8");
+    const parsed = JSON.parse(raw) as PersistedTowerState;
+
+    if (parsed.status && typeof parsed.status === "object") {
+      status = parsed.status;
+    }
+
+    if (Array.isArray(parsed.sensorHistory)) {
+      sensorHistory = parsed.sensorHistory;
+    }
+
+    if (Array.isArray(parsed.readings)) {
+      readings = parsed.readings;
+    }
+
+    if (Array.isArray(parsed.pumpLogs)) {
+      pumpLogs = parsed.pumpLogs;
+    }
+
+    if (Array.isArray(parsed.faultHistory)) {
+      faultHistory = parsed.faultHistory;
+    }
+  } catch (error) {
+    console.error("Failed to load tower state from disk:", error);
+  }
+}
+
+function saveStateToDisk() {
+  try {
+    ensureDataDir();
+    const nextState: PersistedTowerState = {
+      status,
+      sensorHistory,
+      readings,
+      pumpLogs,
+      faultHistory,
+    };
+    fs.writeFileSync(STATE_FILE, JSON.stringify(nextState, null, 2), "utf8");
+  } catch (error) {
+    console.error("Failed to save tower state to disk:", error);
+  }
+}
+
+function getSupabaseAdminClient() {
+  return supabaseAdmin as unknown as {
+    from: (table: string) => {
+      select: (columns?: string) => { order: (column: string, options?: { ascending?: boolean }) => Promise<{ data: TowerEventRow[] | null; error: unknown }> };
+      insert: (value: unknown) => Promise<{ error: unknown }>;
+      upsert: (value: unknown, options?: unknown) => Promise<{ error: unknown }>;
+      delete: () => { eq: (column: string, value: unknown) => Promise<{ error: unknown }> };
+    };
+  };
+}
+
+function applyEvent(eventType: TowerEventType, payload: any) {
+  switch (eventType) {
+    case "schedule_updated":
+      schedule = { ...DEFAULT_SCHEDULE, ...payload };
+      break;
+    case "status_updated":
+      status = payload ?? null;
+      break;
+    case "sensor_snapshot_added":
+      if (payload) sensorHistory = [payload, ...sensorHistory].slice(0, 1000);
+      break;
+    case "reading_added":
+      if (payload) readings = [payload, ...readings];
+      break;
+    case "reading_deleted":
+      if (payload?.id) readings = readings.filter((reading) => reading.id !== payload.id);
+      break;
+    case "pump_log_added":
+      if (payload) pumpLogs = [payload, ...pumpLogs];
+      break;
+    case "pump_log_updated":
+      if (payload?.id) {
+        const index = pumpLogs.findIndex((log) => log.id === payload.id);
+        if (index >= 0) {
+          pumpLogs[index] = payload;
+        }
+      }
+      break;
+    case "fault_recorded":
+      if (payload) faultHistory = [payload, ...faultHistory];
+      break;
+  }
+}
+
+async function appendEvent(eventType: TowerEventType, payload: unknown) {
+  try {
+    const db = getSupabaseAdminClient();
+    const { error } = await db.from(EVENTS_TABLE).insert({ event_type: eventType, payload });
+    if (error) {
+      console.error(`Failed to persist tower event ${eventType}:`, error);
+    }
+  } catch (error) {
+    console.error(`Failed to persist tower event ${eventType}:`, error);
+  }
+}
+
+async function loadStateFromDatabase() {
+  try {
+    const db = getSupabaseAdminClient();
+    const { data, error } = await db.from(EVENTS_TABLE).select("event_type,payload").order("created_at", { ascending: true });
+    if (error) {
+      console.error("Failed to load tower events from Supabase:", error);
+      return false;
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      return false;
+    }
+
+    schedule = { ...DEFAULT_SCHEDULE };
+    status = null;
+    sensorHistory = [];
+    readings = [];
+    pumpLogs = [];
+    faultHistory = [];
+
+    for (const row of data) {
+      applyEvent(row.event_type, row.payload);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Failed to hydrate tower store from Supabase:", error);
+    return false;
+  }
+}
+
+let storeBootstrapPromise: Promise<void> | null = null;
+
+export async function initializeTowerStore() {
+  if (storeBootstrapPromise) return storeBootstrapPromise;
+
+  storeBootstrapPromise = (async () => {
+    const loadedFromDb = await loadStateFromDatabase();
+    if (!loadedFromDb) {
+      loadStateFromDisk();
+    }
+  })();
+
+  return storeBootstrapPromise;
+}
+
+let schedule: Schedule = loadScheduleFromDisk();
 let status: LiveStatus | null = null;
 let sensorHistory: SensorSnapshot[] = [];
 let readings: ManualReading[] = [];
@@ -158,11 +251,23 @@ let faultHistory: Array<{ timestamp: number; fault: string; resolved?: number }>
 let autoPumpStartedAtMs: number | null = null;
 let autoPumpLogId: string | null = null;
 
+loadStateFromDisk();
+
 const TELEMETRY_STALE_MS = 15000;
+
+function isFresh(timestamp: number | null | undefined, staleMs = TELEMETRY_STALE_MS): boolean {
+  return timestamp != null && Date.now() - timestamp <= staleMs;
+}
 
 function getModeForNow(now = new Date()): "DAY" | "NIGHT" {
   const hour = now.getHours();
   return hour >= schedule.startHour && hour < schedule.endHour ? "DAY" : "NIGHT";
+}
+
+function isRetryableFlowFault(fault: string | null | undefined): boolean {
+  if (!fault) return false;
+  const upper = fault.toUpperCase();
+  return upper.includes("FLOW") || upper.includes("DRY");
 }
 
 /**
@@ -211,31 +316,37 @@ export function getCycleProfile(now = new Date()) {
 }
 
 function pushSensorSnapshot(nextStatus: LiveStatus) {
+  const nextSnapshot = {
+    id: makeId(),
+    timestamp: Date.now(),
+    reservoirTempC: nextStatus.reservoirTempC,
+    humidityPct: nextStatus.humidityPct ?? null,
+    lightLux: nextStatus.lightLux ?? null,
+    towerTempC: nextStatus.towerTempC,
+    pumpState: nextStatus.pumpState,
+    fault: nextStatus.fault,
+    lightOn: nextStatus.lightOn ?? false,
+  };
+
   sensorHistory = [
-    {
-      id: makeId(),
-      timestamp: Date.now(),
-      reservoirTempC: nextStatus.reservoirTempC,
-      humidityPct: nextStatus.humidityPct ?? null,
-      lightLux: nextStatus.lightLux ?? null,
-      towerTempC: nextStatus.towerTempC,
-      pumpState: nextStatus.pumpState,
-      fault: nextStatus.fault,
-      lightOn: nextStatus.lightOn ?? false,
-    },
+    nextSnapshot,
     ...sensorHistory,
   ].slice(0, 1000);
+
+  void appendEvent("sensor_snapshot_added", nextSnapshot);
 }
 
 // ==================== HELPER: CALCULATE NEXT CYCLE ====================
-function calculateNextCycle(): { nextCycleISO: string | null; nextCycleIn: number } {
+function calculatePlannedNextCycle(now = new Date()): { nextCycleISO: string | null; nextCycleIn: number } {
   if (!schedule.enabled) {
     return { nextCycleISO: null, nextCycleIn: -1 };
   }
 
-  const now = new Date();
   const currentHour = now.getHours();
   const { offIntervalMinutes } = getCycleProfile(now);
+  const intervalMs = offIntervalMinutes * 60 * 1000;
+  const windowStart = new Date(now);
+  windowStart.setHours(schedule.startHour, 0, 0, 0);
 
   // Outside active hours?
   if (currentHour < schedule.startHour || currentHour >= schedule.endHour) {
@@ -247,27 +358,11 @@ function calculateNextCycle(): { nextCycleISO: string | null; nextCycleIn: numbe
     return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
   }
 
-  // Within active hours - calculate based on last run
-  const lastRunTime = status?.lastRunISO ? new Date(status.lastRunISO).getTime() : null;
-  const intervalMs = offIntervalMinutes * 60 * 1000;
+  const elapsedMs = now.getTime() - windowStart.getTime();
+  const slotsElapsed = Math.max(0, Math.ceil(elapsedMs / intervalMs));
+  const nextCycleTime = new Date(windowStart.getTime() + slotsElapsed * intervalMs);
 
-  if (!lastRunTime) {
-    // Never run yet - point to the current active window, or the next window start.
-    if (currentHour < schedule.startHour || currentHour >= schedule.endHour) {
-      const nextDay = new Date(now);
-      nextDay.setDate(nextDay.getDate() + 1);
-      nextDay.setHours(schedule.startHour, 0, 0, 0);
-      const secondsUntil = Math.floor((nextDay.getTime() - now.getTime()) / 1000);
-      return { nextCycleISO: nextDay.toISOString(), nextCycleIn: secondsUntil };
-    }
-
-    return { nextCycleISO: now.toISOString(), nextCycleIn: 0 };
-  }
-
-  const nextCycleTime = new Date(lastRunTime + intervalMs);
-
-  // If next cycle is after end hour, push to next day's start
-  if (nextCycleTime.getHours() >= schedule.endHour) {
+  if (nextCycleTime.getHours() >= schedule.endHour || nextCycleTime.getTime() < now.getTime()) {
     const nextDay = new Date(now);
     nextDay.setDate(nextDay.getDate() + 1);
     nextDay.setHours(schedule.startHour, 0, 0, 0);
@@ -277,6 +372,24 @@ function calculateNextCycle(): { nextCycleISO: string | null; nextCycleIn: numbe
 
   const secondsUntil = Math.floor((nextCycleTime.getTime() - now.getTime()) / 1000);
   return { nextCycleISO: nextCycleTime.toISOString(), nextCycleIn: Math.max(0, secondsUntil) };
+}
+
+function calculateRetryCycle(nextStatus: LiveStatus, now = new Date()): { retryNextCycleISO: string | null; retryNextCycleIn: number | null } {
+  if (!schedule.enabled) {
+    return { retryNextCycleISO: null, retryNextCycleIn: null };
+  }
+
+  const withinActiveWindow = now.getHours() >= schedule.startHour && now.getHours() < schedule.endHour;
+  if (!withinActiveWindow) {
+    return { retryNextCycleISO: null, retryNextCycleIn: null };
+  }
+
+  const retryableFault = isRetryableFlowFault(nextStatus.fault);
+  if (!retryableFault) {
+    return { retryNextCycleISO: null, retryNextCycleIn: null };
+  }
+
+  return { retryNextCycleISO: new Date(now.getTime() + 1000).toISOString(), retryNextCycleIn: 1 };
 }
 
 function createBaseStatus(now = new Date()): LiveStatus {
@@ -301,6 +414,7 @@ function createBaseStatus(now = new Date()): LiveStatus {
     nextCycleISO: null,
     nextCycleIn: 0,
     telemetryUpdatedAt: null,
+    heartbeatUpdatedAt: null,
     isOnline: false,
   };
 }
@@ -432,26 +546,30 @@ export function getSchedule() {
 
 export function updateSchedule(next: Schedule) {
   schedule = { ...next };
+  saveScheduleToDisk(schedule);
+  void appendEvent("schedule_updated", schedule);
   return getSchedule();
 }
 
 export function getStatus() {
   syncScheduledState();
-  if (!status) return null;
+  const currentStatus = status;
+  if (!currentStatus) return null;
   
   // Calculate next cycle and update status
-  const nextCycle = calculateNextCycle();
-  const telemetryUpdatedAt = status.telemetryUpdatedAt;
-  const isOnline = telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS;
+  const plannedNextCycle = calculatePlannedNextCycle();
+  const retryCycle = calculateRetryCycle(currentStatus);
+  const heartbeatUpdatedAt = currentStatus.heartbeatUpdatedAt ?? null;
+  const isOnline = isFresh(heartbeatUpdatedAt);
   
   // Compute pumpEndISO when pump is running
   let pumpEndISO: string | null = null;
   try {
-    if (status.pumpOn && status.lastRunISO) {
+    if (currentStatus.pumpOn && currentStatus.lastRunISO) {
       // Prefer to use a matching pumpLog's onDurationSeconds when available
-      const matching = pumpLogs.find((p) => p.startedAt === status.lastRunISO);
-      const onDur = matching ? matching.onDurationSeconds : getCycleProfile(new Date(status.lastRunISO)).onDurationSeconds;
-      const lastMs = new Date(status.lastRunISO).getTime();
+      const matching = pumpLogs.find((p) => p.startedAt === currentStatus.lastRunISO);
+      const onDur = matching ? matching.onDurationSeconds : getCycleProfile(new Date(currentStatus.lastRunISO)).onDurationSeconds;
+      const lastMs = new Date(currentStatus.lastRunISO).getTime();
       pumpEndISO = new Date(lastMs + onDur * 1000).toISOString();
     }
   } catch {
@@ -459,11 +577,16 @@ export function getStatus() {
   }
 
   return {
-    ...status,
-    nextCycleISO: nextCycle.nextCycleISO,
-    nextCycleIn: nextCycle.nextCycleIn,
+    ...currentStatus,
+    nextCycleISO: plannedNextCycle.nextCycleISO,
+    nextCycleIn: plannedNextCycle.nextCycleIn,
+    plannedNextCycleISO: plannedNextCycle.nextCycleISO,
+    plannedNextCycleIn: plannedNextCycle.nextCycleIn,
+    retryNextCycleISO: retryCycle.retryNextCycleISO,
+    retryNextCycleIn: retryCycle.retryNextCycleIn,
     isOnline,
     pumpEndISO,
+    heartbeatUpdatedAt,
   };
 }
 
@@ -480,26 +603,15 @@ export function updateStatus(
   const scheduledLightOn = shouldApplySchedule ? shouldLightBeOnBySchedule() : patch.lightOn;
   const source = options.source ?? "server";
   const telemetryUpdatedAt = source === "esp32" ? Date.now() : status?.telemetryUpdatedAt ?? null;
-  const isOnline = telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS;
+  const heartbeatUpdatedAt = status?.heartbeatUpdatedAt ?? null;
+  const isOnline = isFresh(heartbeatUpdatedAt);
 
   status = {
-    pumpOn: false,
-    flowing: false,
-    pumpState: PumpState.IDLE,
-    motorManualMode: "AUTO",
-    lightManualMode: "AUTO",
-    batteryManualMode: "AUTO",
-    reservoirTempC: null,
-    humidityPct: null,
-    lightLux: null,
-    towerTempC: null,
-    lastRunISO: null,
-    fault: null,
-    nextCycleISO: null,
-    nextCycleIn: 0,
+    ...createBaseStatus(),
     ...status,
     ...patch,
     telemetryUpdatedAt,
+    heartbeatUpdatedAt,
     isOnline,
     lightOn: scheduledLightOn,
   };
@@ -515,7 +627,11 @@ export function updateStatus(
       },
       ...faultHistory,
     ];
+    void appendEvent("fault_recorded", faultHistory[0]);
   }
+
+  saveStateToDisk();
+  void appendEvent("status_updated", status);
 
   return getStatus();
 }
@@ -524,19 +640,29 @@ export function touchStatus(options: { source?: "esp32" | "server" } = {}) {
   const source = options.source ?? "server";
   if (!status) {
     status = createBaseStatus();
-    status.telemetryUpdatedAt = source === "esp32" ? Date.now() : null;
-    status.isOnline = source === "esp32";
+    if (source === "esp32") {
+      status.telemetryUpdatedAt = Date.now();
+      status.heartbeatUpdatedAt = Date.now();
+      status.isOnline = true;
+    }
+    saveStateToDisk();
+    void appendEvent("status_updated", status);
     return getStatus();
   }
 
   const telemetryUpdatedAt = source === "esp32" ? Date.now() : status.telemetryUpdatedAt ?? null;
-  const isOnline = telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS;
+  const heartbeatUpdatedAt = source === "esp32" ? Date.now() : status.heartbeatUpdatedAt ?? null;
+  const isOnline = isFresh(heartbeatUpdatedAt);
 
   status = {
     ...status,
     telemetryUpdatedAt,
+    heartbeatUpdatedAt,
     isOnline,
   };
+
+  saveStateToDisk();
+  void appendEvent("status_updated", status);
 
   return getStatus();
 }
@@ -557,12 +683,18 @@ export function addReading(reading: Omit<ManualReading, "id" | "timestamp">) {
     timestamp: Date.now(),
   };
   readings = [next, ...readings];
+  saveStateToDisk();
+  void appendEvent("reading_added", next);
   return { ...next };
 }
 
 export function deleteReading(id: string) {
   const before = readings.length;
   readings = readings.filter((reading) => reading.id !== id);
+  if (readings.length !== before) {
+    saveStateToDisk();
+    void appendEvent("reading_deleted", { id });
+  }
   return readings.length !== before;
 }
 
@@ -595,12 +727,15 @@ export function addPumpLog(log: PumpLogInput) {
     };
   }
 
+  saveStateToDisk();
+  void appendEvent("pump_log_added", next);
+
   return { ...next };
 }
 
 export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?: number; offIntervalMinutes?: number; startedAtMs?: number }) {
   const next = addPumpLog({
-    mode: input.mode,
+    mode: input.mode ?? getCycleProfile().mode,
     onDurationSeconds: input.onDurationSeconds ?? 0,
     offIntervalMinutes: input.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
     durationSeconds: 0,
@@ -642,6 +777,9 @@ export function updatePumpLog(id: string, patch: Partial<PumpLogInput & { endedA
       fault: updated.fault ?? status.fault,
     };
   }
+
+  saveStateToDisk();
+  void appendEvent("pump_log_updated", updated);
 
   return { ...updated };
 }

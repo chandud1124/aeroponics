@@ -16,6 +16,7 @@ import {
   getSensorHistory,
   getAnalyticsSummary,
   getCycleProfile,
+  initializeTowerStore,
   touchStatus,
   updateSchedule,
   updateStatus,
@@ -64,6 +65,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 async function handleLocalApi(request: Request): Promise<Response | null> {
+  await initializeTowerStore();
   const url = new URL(request.url);
 
   if (!url.pathname.startsWith("/api/")) {
@@ -272,6 +274,34 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
+  if (url.pathname === "/api/pump-log/start") {
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    const deviceIdHeader = request.headers.get("x-device-id");
+    const deviceKeyHeader = request.headers.get("x-api-key");
+    if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
+      return jsonResponse({ error: "Unauthorized (device)" }, 401);
+    }
+
+    const payload = (await request.json()) as {
+      mode?: "DAY" | "NIGHT" | "MANUAL";
+      onDurationSeconds?: number;
+      offIntervalMinutes?: number;
+      startedAtMs?: number;
+    };
+
+    const created = startPumpLog({
+      mode: payload.mode ?? "MANUAL",
+      onDurationSeconds: payload.onDurationSeconds ?? 0,
+      offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
+      startedAtMs: payload.startedAtMs,
+    });
+
+    return jsonResponse(created, 201);
+  }
+
   // Test endpoint: simulate a device status update without any sensor fields
   if (url.pathname === "/api/test/no-sensor") {
     if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
@@ -386,36 +416,11 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         durationSeconds: payload.durationSeconds,
         flowed: payload.flowed,
         fault: payload.fault || null,
-        mode: payload.mode,
-        onDurationSeconds: payload.onDurationSeconds,
-        offIntervalMinutes: payload.offIntervalMinutes,
+        mode: payload.mode ?? "MANUAL",
+        onDurationSeconds: payload.onDurationSeconds ?? payload.durationSeconds,
+        offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
         volumeLiters: payload.volumeLiters ?? null,
         flowRateLpm: payload.flowRateLpm ?? null,
-      });
-
-      return jsonResponse(created, 201);
-    }
-
-    // Create a pump-log entry at start (device can call this and receive an id)
-    if (request.method === "POST" && url.pathname === "/api/pump-log/start") {
-      const deviceIdHeader = request.headers.get("x-device-id");
-      const deviceKeyHeader = request.headers.get("x-api-key");
-      if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
-        return jsonResponse({ error: "Unauthorized (device)" }, 401);
-      }
-
-      const payload = (await request.json()) as {
-        mode?: "DAY" | "NIGHT" | "MANUAL";
-        onDurationSeconds?: number;
-        offIntervalMinutes?: number;
-        startedAtMs?: number;
-      };
-
-      const created = startPumpLog({
-        mode: payload.mode,
-        onDurationSeconds: payload.onDurationSeconds,
-        offIntervalMinutes: payload.offIntervalMinutes,
-        startedAtMs: payload.startedAtMs,
       });
 
       return jsonResponse(created, 201);
@@ -620,6 +625,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           flowed: durationSeconds > 0,
           fault: null,
           mode: "MANUAL",
+          onDurationSeconds: Math.max(1, durationSeconds),
+          offIntervalMinutes: getCycleProfile().offIntervalMinutes,
           startedAtMs,
           endedAtMs,
         });

@@ -103,11 +103,11 @@ export function PumpStateDisplay({ status }: { status: LiveStatus }) {
 
 export function NextCyclePanel({ status, schedule }: { status: LiveStatus; schedule: Schedule }) {
   const [countdown, setCountdown] = useState<string>("--:--");
-  const manualModes = [status.motorManualMode, status.lightManualMode, status.batteryManualMode].filter(Boolean);
-  const manualOverrideActive = manualModes.some((mode) => mode !== "AUTO");
+  const [retryCountdown, setRetryCountdown] = useState<string | null>(null);
+  const manualOverrideActive = status.motorManualMode != null && status.motorManualMode !== "AUTO";
   const controlModeLabel = manualOverrideActive ? "MANUAL OVERRIDE" : "AUTOMATIC";
   const controlModeHint = manualOverrideActive
-    ? `Motor: ${status.motorManualMode ?? "AUTO"} • Light: ${status.lightManualMode ?? "AUTO"} • Battery: ${status.batteryManualMode ?? "AUTO"}`
+    ? `Motor: ${status.motorManualMode ?? "AUTO"}`
     : "ESP32 and backend are following the automatic schedule";
 
   useEffect(() => {
@@ -146,10 +146,35 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
       setCountdown(formatted);
     };
 
+    const updateRetryCountdown = () => {
+      if (!status.retryNextCycleISO) {
+        setRetryCountdown(null);
+        return;
+      }
+
+      const targetMs = new Date(status.retryNextCycleISO).getTime();
+      if (Number.isNaN(targetMs)) {
+        setRetryCountdown(null);
+        return;
+      }
+
+      const seconds = Math.max(0, Math.ceil((targetMs - Date.now()) / 1000));
+      setRetryCountdown(
+        seconds <= 1
+          ? "00:01"
+          : `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`,
+      );
+    };
+
     updateCountdown();
+    updateRetryCountdown();
     const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
-  }, [status.nextCycleISO, status.pumpOn]);
+    const retryInterval = setInterval(updateRetryCountdown, 1000);
+    return () => {
+      clearInterval(interval);
+      clearInterval(retryInterval);
+    };
+  }, [status.nextCycleISO, status.retryNextCycleISO, status.pumpOn]);
 
   if (!status.nextCycleISO) {
       const waitingText = schedule.enabled
@@ -206,6 +231,28 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
     : null;
   const appliedAtStr = appliedAtMs ? new Date(appliedAtMs).toLocaleString() : null;
   const appliedPlanName = (status as any).appliedPlanName as string | undefined;
+  const plannedNextCycle = (status.plannedNextCycleISO ?? status.nextCycleISO) ? new Date(status.plannedNextCycleISO ?? status.nextCycleISO!) : null;
+
+  const timetable: Array<{ label: string; time: string }> = [];
+  if (plannedNextCycle && !Number.isNaN(plannedNextCycle.getTime())) {
+    const intervalMinutes = isDayMode
+      ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes
+      : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15);
+    const slotCount = 4;
+    for (let index = 0; index < slotCount; index += 1) {
+      const slot = new Date(plannedNextCycle.getTime() + index * intervalMinutes * 60 * 1000);
+      if (slot.getHours() >= schedule.endHour) break;
+      timetable.push({
+        label: index === 0 ? "Next" : `+${index}`,
+        time: slot.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        }),
+      });
+    }
+  }
 
   // If pump is running, compute remaining on-time from lastRunISO + expectedDuration
   let runningRemainingSec: number | null = null;
@@ -240,6 +287,9 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
               <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">next mist</span>
             </div>
             <div className="text-xs text-muted-foreground">Next run: {timeStr}</div>
+            {status.retryNextCycleISO && retryCountdown && (
+              <div className="mt-1 text-xs font-medium text-red-700">Retrying in {retryCountdown}</div>
+            )}
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
               <Badge variant={manualOverrideActive ? "destructive" : "default"}>{controlModeLabel}</Badge>
               <Badge variant={status.pumpState === PumpState.MANUAL_MODE ? "secondary" : "outline"}>
@@ -294,6 +344,24 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
                     <div className="font-semibold">{Math.floor(lightRemainingSec / 60)}m {lightRemainingSec % 60}s</div>
                   </div>
                 )}
+              </div>
+            </div>
+            <div className="mt-3 rounded-lg border border-border bg-background/70 p-3 text-xs">
+              <div className="mb-2 font-semibold uppercase tracking-[0.2em] text-muted-foreground">Blueprint timetable</div>
+              {timetable.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {timetable.map((slot) => (
+                    <div key={`${slot.label}-${slot.time}`} className="rounded-md bg-secondary px-3 py-2">
+                      <div className="text-muted-foreground">{slot.label}</div>
+                      <div className="font-semibold tabular-nums">{slot.time}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-muted-foreground">No timetable available for the current schedule.</div>
+              )}
+              <div className="mt-2 text-muted-foreground">
+                Failed flow checks retry every 1 second without shifting the blueprint.
               </div>
             </div>
           </div>
@@ -576,13 +644,14 @@ type RelayStateCardProps = {
   icon: React.ReactNode;
   active: boolean;
   manualMode?: string;
+  modeLabel?: string;
   detail: string;
   toggleLabel?: string;
   onToggleMode?: () => void;
   toggling?: boolean;
 };
 
-function RelayStateCard({ label, icon, active, manualMode, detail, toggleLabel, onToggleMode, toggling = false }: RelayStateCardProps) {
+function RelayStateCard({ label, icon, active, manualMode, modeLabel, detail, toggleLabel, onToggleMode, toggling = false }: RelayStateCardProps) {
   return (
     <Card className={`p-5 ${active ? "border-primary/40 bg-primary/5" : "border-border"}`}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -612,7 +681,7 @@ function RelayStateCard({ label, icon, active, manualMode, detail, toggleLabel, 
       </div>
       <div className="mt-3 text-xs leading-relaxed text-muted-foreground">
         {detail}
-        {manualMode && manualMode !== "AUTO" ? ` • Manual mode: ${manualMode}` : ""}
+        {manualMode && manualMode !== "AUTO" ? ` • ${modeLabel ?? "Control mode"}: ${manualMode}` : ""}
       </div>
     </Card>
   );
@@ -680,6 +749,7 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             icon={<ToggleRight className="h-4 w-4" />}
             active={status.pumpOn}
             manualMode={status.motorManualMode}
+            modeLabel="Pump mode"
             detail={status.flowing ? "Flow verified right now" : "Relay state is on/off only; flow may still be pending"}
           />
           <RelayStateCard
@@ -687,6 +757,7 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             icon={<ToggleRight className="h-4 w-4" />}
             active={Boolean(status.lightOn)}
             manualMode={status.lightManualMode}
+            modeLabel="Light mode"
             detail={status.lightOn ? "Light relay is supplying the LED strip" : "Light relay is off"}
             toggleLabel={status.lightManualMode && status.lightManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
             onToggleMode={() => toggleRelayMode("light", Boolean(status.lightOn), status.lightManualMode)}
@@ -697,6 +768,7 @@ export function RelayStatesCard({ status, online = true }: { status: LiveStatus 
             icon={<BatteryCharging className="h-4 w-4" />}
             active={Boolean(status.batteryChargeOn)}
             manualMode={status.batteryManualMode}
+            modeLabel="Battery mode"
             detail={status.batteryChargeOn ? "Battery charge relay is active" : "Battery charge relay is off"}
             toggleLabel={status.batteryManualMode && status.batteryManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
             onToggleMode={() => toggleRelayMode("battery", Boolean(status.batteryChargeOn), status.batteryManualMode)}

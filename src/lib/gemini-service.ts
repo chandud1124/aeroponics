@@ -1,6 +1,6 @@
 import type { LiveStatus, SensorSnapshot } from "./tower-storage";
 import { error as logError, warn as logWarn, info as logInfo } from "./logger";
-import { getReadings } from "./tower-server-store";
+import { getReadings, initializeTowerStore } from "./tower-server-store";
 import { luxToPar, DEFAULT_PAR_FACTOR } from "./light-utils";
 
 interface GeminiAnalysisResponse {
@@ -48,6 +48,8 @@ export async function analyzeSensorDataWithGemini(
   sensorHistory: SensorSnapshot[],
   days: number = 7
 ): Promise<GeminiAnalysisResponse | null> {
+  await initializeTowerStore();
+
   const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
 
   if (!apiKey) {

@@ -73,3 +73,19 @@ create policy "anon insert pump log" on public.tower_pump_log for insert with ch
 alter publication supabase_realtime add table public.tower_status;
 alter publication supabase_realtime add table public.tower_schedule;
 alter publication supabase_realtime add table public.tower_readings;
+
+-- Event log for full tower history (status, sensor snapshots, readings, pump logs, faults, plans)
+create table public.tower_events (
+  id uuid primary key default gen_random_uuid(),
+  event_type text not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index tower_events_created_at_idx on public.tower_events (created_at desc);
+create index tower_events_type_idx on public.tower_events (event_type, created_at desc);
+
+alter table public.tower_events enable row level security;
+create policy "anon read events" on public.tower_events for select using (true);
+create policy "anon insert events" on public.tower_events for insert with check (true);
+
+alter publication supabase_realtime add table public.tower_events;

@@ -109,6 +109,7 @@ const char* NVS_SCHED_NIGHT_INT = "schedNightInt";
 const char* NVS_SCHED_NIGHT_DUR = "schedNightDur";
 const char* NVS_LAST_RUN    = "lastRun";
 const char* NVS_LAST_FAULT  = "lastFault";
+const char* NVS_PLAN_NAME   = "planName";
 const char* NVS_LOG_COUNT   = "logCount";
 const char* NVS_TIME_CACHE  = "timeCache";
 const char* NVS_TIME_VALID  = "timeValid";  // [IMP-5] Track if NTP succeeded
@@ -238,8 +239,11 @@ bool ntpSynced      = false;  // [IMP-5] Better time validity tracking
 bool reservoirDsMissingLogged = false;
 bool towerDsMissingLogged     = false;
 bool dhtMissingLogged         = false;
+unsigned long ds18b20RetryAfterMs = 0;
+uint8_t ds18b20FailureStreak = 0;
 String bootResetReason = "UNKNOWN";
 String bootLastFault = "NONE";
+String appliedPlanName = "";
 
 enum ManualMode : uint8_t {
   MANUAL_AUTO = 0,
@@ -412,32 +416,26 @@ void applyManualOutputs() {
     setRelayState(PIN_PUMP_RELAY, true);
     status.pumpOn = true;
     status.flowing = false;
-    curState = STATE_MANUAL_MODE;
   } else if (motorManualMode == MANUAL_FORCE_OFF) {
     setRelayState(PIN_PUMP_RELAY, false);
     status.pumpOn = false;
     status.flowing = false;
-    curState = STATE_MANUAL_MODE;
   }
 
   if (lightManualMode == MANUAL_FORCE_ON) {
     setRelayState(PIN_LED_RELAY, true);
     status.lightOn = true;
-    curState = STATE_MANUAL_MODE;
   } else if (lightManualMode == MANUAL_FORCE_OFF) {
     setRelayState(PIN_LED_RELAY, false);
     status.lightOn = false;
-    curState = STATE_MANUAL_MODE;
   }
 
   if (batteryManualMode == MANUAL_FORCE_ON) {
     setRelayState(PIN_BATTERY_CHARGE_RELAY, true);
     status.batteryChargeOn = true;
-    curState = STATE_MANUAL_MODE;
   } else if (batteryManualMode == MANUAL_FORCE_OFF) {
     setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
     status.batteryChargeOn = false;
-    curState = STATE_MANUAL_MODE;
   }
 }
 
@@ -525,6 +523,7 @@ void loadScheduleFromNVS() {
   status.lastRunEpoch      = (time_t)prefs.getUInt(NVS_LAST_RUN, 0);
   ntpSynced                = prefs.getBool(NVS_TIME_VALID, false);  // [IMP-5]
   prefs.end();
+  loadPlanNameFromNVS();
 
   if (clampScheduleValues()) {
     Serial.printf("[NVS] Clamped schedule to %dmin/%ds %02d:00-%02d:00\n",
@@ -556,9 +555,21 @@ void saveLastFaultToNVS(const char* code) {
   prefs.end();
 }
 
+void savePlanNameToNVS(const String& name) {
+  prefs.begin(NVS_NS, false);
+  prefs.putString(NVS_PLAN_NAME, name);
+  prefs.end();
+}
+
 void loadLastFaultFromNVS() {
   prefs.begin(NVS_NS, true);
   lastFaultCode = prefs.getString(NVS_LAST_FAULT, "NONE");
+  prefs.end();
+}
+
+void loadPlanNameFromNVS() {
+  prefs.begin(NVS_NS, true);
+  appliedPlanName = prefs.getString(NVS_PLAN_NAME, "");
   prefs.end();
 }
 
@@ -768,6 +779,7 @@ void setup() {
   while (millis() - t0 < 300) yield();
 
   loadLastFaultFromNVS();
+  loadPlanNameFromNVS();
   esp_reset_reason_t resetReason = esp_reset_reason();
   bootResetReason = String(resetReasonToString(resetReason));
   bootLastFault = lastFaultCode;
@@ -848,6 +860,9 @@ void loop() {
 
   handleManualButtons(now);
 
+  // Apply any manual relay overrides independently of the pump schedule.
+  applyManualOutputs();
+
   checkSafety(now);
 
   if (backendReady && now - tsLastScheduleFetch >= IV_SCHEDULE) {
@@ -888,7 +903,7 @@ void loop() {
 // ─────────────────────────────────────────────────────────────────────
 
 void runStateMachine(unsigned long now) {
-  if (motorManualMode != MANUAL_AUTO || lightManualMode != MANUAL_AUTO || batteryManualMode != MANUAL_AUTO) {
+  if (motorManualMode != MANUAL_AUTO) {
     curState = STATE_MANUAL_MODE;
   }
 
@@ -1044,9 +1059,8 @@ void stateRecovery(unsigned long now) {
 
 void stateManual(unsigned long now) {
   (void)now;
-  applyManualOutputs();
 
-  if (motorManualMode == MANUAL_AUTO && lightManualMode == MANUAL_AUTO && batteryManualMode == MANUAL_AUTO) {
+  if (motorManualMode == MANUAL_AUTO) {
     curState = STATE_IDLE;
   }
 }
@@ -1153,18 +1167,24 @@ void readSensors() {
   // 1) If no pending request, start conversion on both buses and mark timestamp.
   // 2) On a subsequent call after a short delay (>=750ms), read temperatures.
   unsigned long nowMs = millis();
-  if (!pendingTempRequest) {
+  if (!pendingTempRequest && nowMs >= ds18b20RetryAfterMs) {
     // start conversions asynchronously
     resTempSensor.requestTemperatures();
     towerTempSensor.requestTemperatures();
     pendingTempRequest = true;
     tsTempRequestMs = nowMs;
-  } else {
+  } else if (pendingTempRequest) {
     // If a conversion gets stuck, abandon it rather than letting sensor reads stall.
     if (nowMs - tsTempRequestMs > 2500UL) {
       pendingTempRequest = false;
-      if (!reservoirDsMissingLogged || !towerDsMissingLogged) {
+      ds18b20FailureStreak++;
+      if (!reservoirDsMissingLogged || !towerDsMissingLogged || ds18b20FailureStreak == 1) {
         Serial.println("[SENSOR] DS18B20 conversion timed out; retrying later");
+      }
+      if (ds18b20FailureStreak >= 3) {
+        ds18b20RetryAfterMs = nowMs + 300000UL;
+        ds18b20FailureStreak = 0;
+        Serial.println("[SENSOR] DS18B20 unavailable; pausing retries for 5 minutes");
       }
     }
 
@@ -1199,6 +1219,17 @@ void readSensors() {
           towerDsMissingLogged = true;
         }
         towerTempC = NAN;
+      }
+
+      if (t0 == DEVICE_DISCONNECTED_C && t1 == DEVICE_DISCONNECTED_C) {
+        ds18b20FailureStreak++;
+        if (ds18b20FailureStreak >= 3) {
+          ds18b20RetryAfterMs = nowMs + 300000UL;
+          ds18b20FailureStreak = 0;
+          Serial.println("[SENSOR] DS18B20 unavailable; pausing retries for 5 minutes");
+        }
+      } else {
+        ds18b20FailureStreak = 0;
       }
 
       pendingTempRequest = false;
@@ -1400,8 +1431,8 @@ void fetchSchedule() {
             newDuration != schedule.durationSeconds ||
             newStartH   != schedule.startHour       ||
             newEndH     != schedule.endHour         ||
-            newEnabled  != schedule.enabled ||
-            (planName.length() > 0 && planName != ""));
+          newEnabled  != schedule.enabled ||
+          (planName.length() > 0 && planName != appliedPlanName));
 
     schedule.intervalMinutes = newInterval;
     schedule.durationSeconds = newDuration;
@@ -1414,6 +1445,10 @@ void fetchSchedule() {
     if (newNightDur > 0) schedule.nightDurationSeconds = newNightDur;
 
     if (changed) {
+      if (planName.length() > 0) {
+        appliedPlanName = planName;
+        savePlanNameToNVS(appliedPlanName);
+      }
       if (saveScheduleToNVS()) {
         Serial.printf("[API] Backend command applied: schedule %dmin/%ds\n",
           newInterval, newDuration);

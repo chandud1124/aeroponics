@@ -9,12 +9,15 @@ services:
     env_file:
       - .env.local
     environment:
+      TOWER_DATA_DIR: /data
       # Pass Supabase env vars explicitly
       VITE_SUPABASE_URL: "${VITE_SUPABASE_URL:-http://localhost:3000}"
       VITE_SUPABASE_PUBLISHABLE_KEY: "${VITE_SUPABASE_PUBLISHABLE_KEY:-}"
       SUPABASE_URL: "${SUPABASE_URL:-http://localhost:3000}"
       SUPABASE_PUBLISHABLE_KEY: "${SUPABASE_PUBLISHABLE_KEY:-}"
       PORT: 8080
+    volumes:
+      - tower-data:/data
     networks:
       - tower-network
     restart: unless-stopped
@@ -27,3 +30,6 @@ services:
 networks:
   tower-network:
     driver: bridge
+
+volumes:
+  tower-data:

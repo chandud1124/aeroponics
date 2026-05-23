@@ -1,135 +1,18 @@
-import { PumpState, PUMP_STATE_LABELS, PUMP_STATE_COLORS } from "./tower-server-store";
+export {
+  PumpState,
+  PUMP_STATE_LABELS,
+  PUMP_STATE_COLORS,
+  defaultSchedule,
+} from "./tower-shared";
 
-export type Schedule = {
-  planName?: string;
-  intervalMinutes: number;
-  durationSeconds: number;
-  startHour: number;
-  endHour: number;
-  enabled: boolean;
-  lightEnabled?: boolean;
-  lightStartHour?: number;
-  lightEndHour?: number;
-  dayIntervalMinutes?: number;
-  dayDurationSeconds?: number;
-  nightIntervalMinutes?: number;
-  nightDurationSeconds?: number;
-  temperatureProtection?: boolean;
-  rainPause?: boolean;
-  heatBoost?: boolean;
-  lowWaterAutoLock?: boolean;
-};
-
-export type ManualReading = {
-  id: string;
-  timestamp: number;
-  ph: number | null;
-  tds: number | null;
-  ec: number | null;
-  notes: string;
-};
-
-export type LiveStatus = {
-  pumpOn: boolean;
-  flowing: boolean;
-  pumpState: PumpState;
-  motorManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  lightManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  batteryChargeOn?: boolean;
-  batteryManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  reservoirTempC: number | null;
-  humidityPct?: number | null;
-  lightLux?: number | null;
-  towerTempC: number | null;
-  flowRateLpm?: number | null;
-  lightOn?: boolean;
-  lastRunISO: string | null;
-  scheduleAppliedAt?: number | null;
-  appliedPlanName?: string | null;
-  pumpEndISO?: string | null;
-  fault: string | null;
-  sensorDataOk?: boolean;
-  dhtOk?: boolean;
-  reservoirDsOk?: boolean;
-  towerDsOk?: boolean;
-  resetReason?: string | null;
-  lastBootFault?: string | null;
-  uptimeSec?: number | null;
-  nextCycleISO: string | null;
-  nextCycleIn: number;
-  telemetryUpdatedAt: number | null;
-  isOnline: boolean;
-};
-
-export type SensorSnapshot = {
-  id: string;
-  timestamp: number;
-  reservoirTempC: number | null;
-  humidityPct?: number | null;
-  lightLux?: number | null;
-  towerTempC: number | null;
-  pumpState: PumpState;
-  fault: string | null;
-};
-
-export type PumpLogEntry = {
-  id: string;
-  startedAt: string;
-  endedAt: string;
-  durationSeconds: number;
-  flowed: boolean;
-  fault: string | null;
-  mode: "DAY" | "NIGHT" | "MANUAL";
-  onDurationSeconds: number;
-  offIntervalMinutes: number;
-  volumeLiters?: number | null;
-  flowRateLpm?: number | null;
-};
-
-export type AnalyticsSummary = {
-  days: number;
-  sensorPoints: number;
-  pumpCycles: number;
-  manualReadings: number;
-  successRate: number;
-  faultCount: number;
-  avgReservoirTempC: number | null;
-  avgTowerTempC: number | null;
-  minReservoirTempC: number | null;
-  maxReservoirTempC: number | null;
-  minTowerTempC: number | null;
-  maxTowerTempC: number | null;
-  estimatedWaterLiters: number;
-  daily: Array<{
-    date: string;
-    cycles: number;
-    successRate: number;
-    avgReservoirTempC: number | null;
-    avgTowerTempC: number | null;
-  }>;
-};
-
-export { PumpState, PUMP_STATE_LABELS, PUMP_STATE_COLORS };
-
-export const defaultSchedule: Schedule = {
-  planName: "Easy start",
-  intervalMinutes: 30,
-  durationSeconds: 60,
-  startHour: 6,
-  endHour: 19,
-  enabled: true,
-  lightEnabled: true,
-  lightStartHour: 5,
-  lightEndHour: 21,
-  dayIntervalMinutes: 7,
-  dayDurationSeconds: 45,
-  nightIntervalMinutes: 20,
-  nightDurationSeconds: 30,
-  temperatureProtection: true,
-  rainPause: false,
-  heatBoost: true,
-  lowWaterAutoLock: true,
-};
+export type {
+  Schedule,
+  ManualReading,
+  LiveStatus,
+  SensorSnapshot,
+  PumpLogEntry,
+  AnalyticsSummary,
+} from "./tower-shared";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
