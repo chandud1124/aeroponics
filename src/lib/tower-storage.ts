@@ -38,8 +38,12 @@ export type LiveStatus = {
   humidityPct?: number | null;
   lightLux?: number | null;
   towerTempC: number | null;
+  flowRateLpm?: number | null;
   lightOn?: boolean;
   lastRunISO: string | null;
+  scheduleAppliedAt?: number | null;
+  appliedPlanName?: string | null;
+  pumpEndISO?: string | null;
   fault: string | null;
   sensorDataOk?: boolean;
   dhtOk?: boolean;
@@ -75,6 +79,8 @@ export type PumpLogEntry = {
   mode: "DAY" | "NIGHT" | "MANUAL";
   onDurationSeconds: number;
   offIntervalMinutes: number;
+  volumeLiters?: number | null;
+  flowRateLpm?: number | null;
 };
 
 export type AnalyticsSummary = {

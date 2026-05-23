@@ -64,8 +64,14 @@ export type LiveStatus = {
   humidityPct?: number | null;
   lightLux?: number | null;
   towerTempC: number | null;
+  flowRateLpm?: number | null;
   lightOn?: boolean;
   lastRunISO: string | null;
+  // If device reports scheduleAppliedAt (epoch seconds)
+  scheduleAppliedAt?: number | null;
+  appliedPlanName?: string | null;
+  // If device reports an explicit on-duration at start, server can expose pumpEndISO
+  pumpEndISO?: string | null;
   fault: string | null;
   resetReason?: string | null;
   lastBootFault?: string | null;
@@ -106,6 +112,8 @@ type PumpLog = {
   mode: "DAY" | "NIGHT" | "MANUAL";
   onDurationSeconds: number;
   offIntervalMinutes: number;
+  volumeLiters?: number | null;
+  flowRateLpm?: number | null;
 };
 
 type PumpLogInput = Omit<PumpLog, "id" | "startedAt" | "endedAt"> & {
@@ -114,6 +122,8 @@ type PumpLogInput = Omit<PumpLog, "id" | "startedAt" | "endedAt"> & {
   offIntervalMinutes?: number;
   startedAtMs?: number;
   endedAtMs?: number;
+  volumeLiters?: number | null;
+  flowRateLpm?: number | null;
 };
 
 const DEFAULT_SCHEDULE: Schedule = {
@@ -271,11 +281,26 @@ export function getStatus() {
   const telemetryUpdatedAt = status.telemetryUpdatedAt;
   const isOnline = telemetryUpdatedAt != null && Date.now() - telemetryUpdatedAt <= TELEMETRY_STALE_MS;
   
+  // Compute pumpEndISO when pump is running
+  let pumpEndISO: string | null = null;
+  try {
+    if (status.pumpOn && status.lastRunISO) {
+      // Prefer to use a matching pumpLog's onDurationSeconds when available
+      const matching = pumpLogs.find((p) => p.startedAt === status.lastRunISO);
+      const onDur = matching ? matching.onDurationSeconds : getCycleProfile(new Date(status.lastRunISO)).onDurationSeconds;
+      const lastMs = new Date(status.lastRunISO).getTime();
+      pumpEndISO = new Date(lastMs + onDur * 1000).toISOString();
+    }
+  } catch {
+    pumpEndISO = null;
+  }
+
   return {
     ...status,
     nextCycleISO: nextCycle.nextCycleISO,
     nextCycleIn: nextCycle.nextCycleIn,
     isOnline,
+    pumpEndISO,
   };
 }
 
@@ -405,6 +430,8 @@ export function addPumpLog(log: PumpLogInput) {
     mode: log.mode ?? cycleProfile.mode,
     onDurationSeconds: log.onDurationSeconds ?? log.durationSeconds,
     offIntervalMinutes: log.offIntervalMinutes ?? cycleProfile.offIntervalMinutes,
+    volumeLiters: log.volumeLiters ?? null,
+    flowRateLpm: log.flowRateLpm ?? null,
   };
   pumpLogs = [next, ...pumpLogs];
 
@@ -417,6 +444,54 @@ export function addPumpLog(log: PumpLogInput) {
   }
 
   return { ...next };
+}
+
+export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?: number; offIntervalMinutes?: number; startedAtMs?: number }) {
+  const next = addPumpLog({
+    mode: input.mode,
+    onDurationSeconds: input.onDurationSeconds ?? 0,
+    offIntervalMinutes: input.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
+    durationSeconds: 0,
+    flowed: false,
+    fault: null,
+    startedAtMs: input.startedAtMs ?? Date.now(),
+    endedAtMs: input.startedAtMs ?? Date.now(),
+  });
+  return next;
+}
+
+export function updatePumpLog(id: string, patch: Partial<PumpLogInput & { endedAtMs?: number; startedAtMs?: number }>) {
+  const idx = pumpLogs.findIndex((p) => p.id === id);
+  if (idx < 0) return null;
+  const existing = pumpLogs[idx];
+  const startedAtMs = patch.startedAtMs ? patch.startedAtMs : Date.parse(existing.startedAt);
+  const endedAtMs = patch.endedAtMs ? patch.endedAtMs : Date.parse(existing.endedAt);
+
+  const updated: PumpLog = {
+    ...existing,
+    mode: patch.mode ?? existing.mode,
+    onDurationSeconds: patch.onDurationSeconds ?? existing.onDurationSeconds,
+    offIntervalMinutes: patch.offIntervalMinutes ?? existing.offIntervalMinutes,
+    durationSeconds: patch.durationSeconds ?? Math.max(0, Math.round((endedAtMs - startedAtMs) / 1000)),
+    flowed: patch.flowed ?? existing.flowed,
+    fault: patch.fault ?? existing.fault,
+    startedAt: new Date(startedAtMs).toISOString(),
+    endedAt: new Date(endedAtMs).toISOString(),
+    volumeLiters: (patch as any).volumeLiters ?? existing.volumeLiters ?? null,
+    flowRateLpm: (patch as any).flowRateLpm ?? existing.flowRateLpm ?? null,
+  };
+
+  pumpLogs[idx] = updated;
+
+  if (status) {
+    status = {
+      ...status,
+      lastRunISO: updated.startedAt,
+      fault: updated.fault ?? status.fault,
+    };
+  }
+
+  return { ...updated };
 }
 
 export function getFaultHistory(limit: number = 20) {

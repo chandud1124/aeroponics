@@ -1,4 +1,5 @@
 import { randomBytes, createHash } from "crypto";
+import os from "os";
 import fs from "fs";
 import path from "path";
 
@@ -24,8 +25,22 @@ export class DuplicateDeviceError extends Error {
   }
 }
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const DEVICES_FILE = path.join(DATA_DIR, "devices.json");
+const LEGACY_DEVICES_FILE = path.join(process.cwd(), "data", "devices.json");
+const DATA_DIR = process.env.TOWER_DATA_DIR ?? path.join(os.homedir(), ".smart-tower-garden");
+const DEVICES_FILE = process.env.TOWER_DEVICES_FILE ?? path.join(DATA_DIR, "devices.json");
+
+function migrateLegacyDevicesFileIfNeeded() {
+  try {
+    if (fs.existsSync(DEVICES_FILE)) return;
+    if (!fs.existsSync(LEGACY_DEVICES_FILE)) return;
+
+    ensureDataDir();
+    fs.copyFileSync(LEGACY_DEVICES_FILE, DEVICES_FILE);
+    console.info(`[devices] Migrated legacy registry from ${LEGACY_DEVICES_FILE} to ${DEVICES_FILE}`);
+  } catch (e) {
+    console.error("Failed to migrate legacy devices file:", e);
+  }
+}
 
 function ensureDataDir() {
   try {
@@ -39,6 +54,7 @@ function ensureDataDir() {
 
 function loadDevicesFromDisk() {
   try {
+    migrateLegacyDevicesFileIfNeeded();
     if (!fs.existsSync(DEVICES_FILE)) return;
     const raw = fs.readFileSync(DEVICES_FILE, "utf8");
     const parsed = JSON.parse(raw);

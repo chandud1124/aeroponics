@@ -2,6 +2,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <DHT.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #include <Preferences.h>
 #include <math.h>
 #include <time.h>
@@ -46,6 +48,12 @@ const int PIN_LDR_SENSOR   = 36;
 const int PIN_MOTOR_BUTTON = 19;
 const int PIN_LIGHT_BUTTON = 23;
 const int PIN_BATTERY_BUTTON = 22;
+const int PIN_FLOW_SENSOR  = 32; // pulse-output flow sensor
+const int PIN_RESERVOIR_TEMP = 14; // DS18B20 data pin for reservoir
+const int PIN_TOWER_TEMP     = 13; // DS18B20 data pin for tower
+
+// Flow sensor calibration: pulses per liter (default, calibrate for your sensor)
+const float PULSES_PER_LITER = 450.0f;
 
 const uint16_t LDR_DARK_THRESHOLD = 2000;
 const unsigned long BUTTON_DEBOUNCE_MS = 50UL;
@@ -95,11 +103,16 @@ const char* NVS_SCHED_DUR   = "schedDur";
 const char* NVS_SCHED_SH    = "schedSH";
 const char* NVS_SCHED_EH    = "schedEH";
 const char* NVS_SCHED_EN    = "schedEn";
+const char* NVS_SCHED_DAY_INT   = "schedDayInt";
+const char* NVS_SCHED_DAY_DUR   = "schedDayDur";
+const char* NVS_SCHED_NIGHT_INT = "schedNightInt";
+const char* NVS_SCHED_NIGHT_DUR = "schedNightDur";
 const char* NVS_LAST_RUN    = "lastRun";
 const char* NVS_LAST_FAULT  = "lastFault";
 const char* NVS_LOG_COUNT   = "logCount";
 const char* NVS_TIME_CACHE  = "timeCache";
 const char* NVS_TIME_VALID  = "timeValid";  // [IMP-5] Track if NTP succeeded
+const char* NVS_CUR_PUMPLOG = "curPumpLog";
 
 const int   OFFLINE_LOG_MAX = 20;
 
@@ -113,6 +126,10 @@ struct Schedule {
   int  startHour       = 6;
   int  endHour         = 19;
   bool enabled         = true;
+  int  dayIntervalMinutes = 0; // optional override for daytime
+  int  dayDurationSeconds = 0; // optional override for daytime
+  int  nightIntervalMinutes = 0; // optional override for nighttime
+  int  nightDurationSeconds = 0; // optional override for nighttime
 };
 
 struct SensorData {
@@ -130,6 +147,8 @@ struct SystemStatus {
   bool   flowing        = false;
   float  humidityPct    = 0.0f;
   int    lightRaw       = 0;
+  float  reservoirTempC = NAN;
+  float  towerTempC = NAN;
   String fault          = "OK";
   time_t lastRunEpoch   = 0;
 };
@@ -139,6 +158,7 @@ struct LogEntry {
   uint16_t durationSeconds;
   bool     flowed;
   char     fault[16];
+  float    volumeLiters;
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -171,6 +191,24 @@ unsigned long tsLastWifiCheck      = 0;
 unsigned long tsLastRemoteSync     = 0;
 unsigned long tsLastWdtFeed        = 0;
 unsigned long tsLastLogFlush       = 0;
+String currentPumpLogId = "";
+volatile unsigned long flowPulseCount = 0;
+volatile unsigned long lastFlowPulseMs = 0;
+unsigned long tsLastFlowSampleMs = 0;
+unsigned long lastFlowSampleCount = 0;
+float flowRateLpm = 0.0f;
+
+OneWire oneWireReservoir(PIN_RESERVOIR_TEMP);
+DallasTemperature resTempSensor(&oneWireReservoir);
+OneWire oneWireTower(PIN_TOWER_TEMP);
+DallasTemperature towerTempSensor(&oneWireTower);
+float reservoirTempC = NAN;
+float towerTempC = NAN;
+
+void IRAM_ATTR flowPulseISR() {
+  flowPulseCount++;
+  lastFlowPulseMs = millis();
+}
 
 // Non-blocking DS18B20 conversion state to avoid long blocking calls
 unsigned long tsTempRequestMs = 0;
@@ -193,7 +231,6 @@ bool ntpSynced      = false;  // [IMP-5] Better time validity tracking
 bool reservoirDsMissingLogged = false;
 bool towerDsMissingLogged     = false;
 bool dhtMissingLogged         = false;
-bool sensorFaultLatched       = false;
 String bootResetReason = "UNKNOWN";
 String bootLastFault = "NONE";
 
@@ -401,6 +438,11 @@ bool saveScheduleToNVS() {
             (prefs.putInt(NVS_SCHED_SH,  schedule.startHour) > 0) &&
             (prefs.putInt(NVS_SCHED_EH,  schedule.endHour) > 0) &&
             (prefs.putBool(NVS_SCHED_EN, schedule.enabled) > 0);
+  // Optional day/night overrides
+  prefs.putInt(NVS_SCHED_DAY_INT, schedule.dayIntervalMinutes);
+  prefs.putInt(NVS_SCHED_DAY_DUR, schedule.dayDurationSeconds);
+  prefs.putInt(NVS_SCHED_NIGHT_INT, schedule.nightIntervalMinutes);
+  prefs.putInt(NVS_SCHED_NIGHT_DUR, schedule.nightDurationSeconds);
   prefs.end();
   if (!ok) Serial.println("[NVS] ✗ Schedule save failed");
   return ok;
@@ -446,6 +488,12 @@ bool clampScheduleValues() {
     changed = true;
   }
 
+  // Clamp optional day/night values to sane ranges
+  if (schedule.dayIntervalMinutes < 0) schedule.dayIntervalMinutes = 0;
+  if (schedule.dayDurationSeconds < 0) schedule.dayDurationSeconds = 0;
+  if (schedule.nightIntervalMinutes < 0) schedule.nightIntervalMinutes = 0;
+  if (schedule.nightDurationSeconds < 0) schedule.nightDurationSeconds = 0;
+
   return changed;
 }
 
@@ -456,6 +504,10 @@ void loadScheduleFromNVS() {
   schedule.startHour       = prefs.getInt(NVS_SCHED_SH,  6);
   schedule.endHour         = prefs.getInt(NVS_SCHED_EH,  19);
   schedule.enabled         = prefs.getBool(NVS_SCHED_EN, true);
+  schedule.dayIntervalMinutes = prefs.getInt(NVS_SCHED_DAY_INT, 0);
+  schedule.dayDurationSeconds = prefs.getInt(NVS_SCHED_DAY_DUR, 0);
+  schedule.nightIntervalMinutes = prefs.getInt(NVS_SCHED_NIGHT_INT, 0);
+  schedule.nightDurationSeconds = prefs.getInt(NVS_SCHED_NIGHT_DUR, 0);
   status.lastRunEpoch      = (time_t)prefs.getUInt(NVS_LAST_RUN, 0);
   ntpSynced                = prefs.getBool(NVS_TIME_VALID, false);  // [IMP-5]
   prefs.end();
@@ -729,8 +781,19 @@ void setup() {
   pinMode(PIN_BATTERY_BUTTON, INPUT_PULLUP);
 
   dht.begin();
+  // Flow sensor input
+  pinMode(PIN_FLOW_SENSOR, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_FLOW_SENSOR), flowPulseISR, RISING);
+
+  // Water temperature sensor
+  resTempSensor.begin();
+  towerTempSensor.begin();
 
   loadScheduleFromNVS();
+  // load any persisted in-progress pump log id
+  prefs.begin(NVS_NS, true);
+  currentPumpLogId = prefs.getString(NVS_CUR_PUMPLOG, "");
+  prefs.end();
   initWiFi();
   readSensors();
 
@@ -833,6 +896,8 @@ void runStateMachine(unsigned long now) {
 
 void stateIdle(unsigned long now) {
   if (!schedule.enabled) return;
+  // Prevent immediate run during startup grace period
+  if (millis() - tsBootMs < RELAY_STARTUP_GRACE_MS) return;
   if (isTimeToWater()) {
     curState = STATE_CHECK_WATER;
   }
@@ -846,7 +911,56 @@ void stateCheckWater(unsigned long now) {
 void statePumpOn(unsigned long now) {
   setRelayState(PIN_PUMP_RELAY, true);
   status.pumpOn = true;
-  pumpScheduledEndMs = pumpStartMs + (unsigned long)(schedule.durationSeconds * 1000UL);
+  // reset flow pulse counter for this run
+  flowPulseCount = 0;
+  lastFlowPulseMs = 0;
+  status.flowing = false;
+
+  // Determine effective run duration (respect day/night overrides)
+  time_t epochNow = getCurrentEpoch();
+  int effectiveDuration = schedule.durationSeconds;
+  if (epochNow > 0) {
+    struct tm* t = localtime(&epochNow);
+    int hour = t->tm_hour;
+    bool isDay = hour >= schedule.startHour && hour < schedule.endHour;
+    if (isDay) {
+      if (schedule.dayDurationSeconds > 0) effectiveDuration = schedule.dayDurationSeconds;
+    } else {
+      if (schedule.nightDurationSeconds > 0) effectiveDuration = schedule.nightDurationSeconds;
+    }
+  }
+
+  pumpScheduledEndMs = pumpStartMs + (unsigned long)(effectiveDuration * 1000UL);
+
+  // Notify backend immediately of run start so server can compute next cycle
+  time_t applied = getCurrentEpoch();
+  if (applied > 0) {
+    String body = "{";
+    body += "\"lastRunAt\":" + String((uint32_t)applied) + ",";
+    body += "\"pumpOn\":true";
+    body += "}";
+    int c = httpRequest("PUT", "/api/status", body);
+    if (c != 200 && c != 204) {
+      Serial.printf("[API] Failed to notify backend of run start (HTTP %d)\n", c);
+    }
+  }
+
+  // Create an initial pump-log entry on the server and persist the id
+  if (wifiConnected) {
+    String mode = "DAY";
+    time_t epochNow = getCurrentEpoch();
+    if (epochNow > 0) {
+      struct tm* t = localtime(&epochNow);
+      int hour = t->tm_hour;
+      bool isDay = hour >= schedule.startHour && hour < schedule.endHour;
+      mode = isDay ? "DAY" : "NIGHT";
+    }
+    String id = createPumpLogStartOnServer(mode, effectiveDuration, schedule.intervalMinutes);
+    if (id.length() > 0) {
+      currentPumpLogId = id;
+    }
+  }
+
   curState = STATE_RUNNING;
 }
 
@@ -873,7 +987,18 @@ void stateStopping(unsigned long now) {
     saveLastRunToNVS(epochNow);
   }
 
-  logPumpCycle((now - pumpStartMs) / 1000.0f, false, status.fault);
+  int durationSec = (int)round((now - pumpStartMs) / 1000.0f);
+  bool patched = false;
+  // Determine if flow was detected during this run
+  bool flowed = flowPulseCount > 0 || status.flowing;
+  float volumeLiters = ((float)flowPulseCount) / PULSES_PER_LITER;
+  if (currentPumpLogId.length() > 0 && wifiConnected) {
+    patched = patchPumpLogOnServer(currentPumpLogId, max(1, durationSec), flowed, status.fault, volumeLiters);
+    if (patched) currentPumpLogId = "";
+  }
+  if (!patched) {
+    logPumpCycle((now - pumpStartMs) / 1000.0f, false, status.fault, volumeLiters);
+  }
   status.fault   = "OK";
   // If a fault was deferred while pump was running, enter FAULT now.
   if (deferredFault) {
@@ -949,9 +1074,7 @@ bool isTimeToWater() {
   }
   
   if (epochNow == 0) {
-    // No time at all — check failsafe: if >48h since last run, force run
-    // (Can't check exact time, but if NTP never synced, use millis as proxy)
-    // This is a rough estimate only — prefer actual epoch time
+    // No valid epoch yet — don't trigger normal cycles. Use offline failsafe only.
     return false;
   }
 
@@ -962,8 +1085,23 @@ bool isTimeToWater() {
     return false;
   }
 
+  // Use day/night override if present
+  struct tm* t = localtime(&epochNow);
+  int hour = t->tm_hour;
+  bool isDay = hour >= schedule.startHour && hour < schedule.endHour;
+
+  int effectiveIntervalMinutes = schedule.intervalMinutes;
+  int effectiveDurationSeconds = schedule.durationSeconds;
+  if (isDay) {
+    if (schedule.dayIntervalMinutes > 0) effectiveIntervalMinutes = schedule.dayIntervalMinutes;
+    if (schedule.dayDurationSeconds > 0) effectiveDurationSeconds = schedule.dayDurationSeconds;
+  } else {
+    if (schedule.nightIntervalMinutes > 0) effectiveIntervalMinutes = schedule.nightIntervalMinutes;
+    if (schedule.nightDurationSeconds > 0) effectiveDurationSeconds = schedule.nightDurationSeconds;
+  }
+
   time_t secondsSinceLastRun = epochNow - status.lastRunEpoch;
-  time_t intervalSeconds     = (time_t)(schedule.intervalMinutes * 60);
+  time_t intervalSeconds     = (time_t)(effectiveIntervalMinutes * 60);
 
   if (secondsSinceLastRun < intervalSeconds) {
     return false;
@@ -984,31 +1122,106 @@ void readSensors() {
   if (dhtOk) {
     sensors.humidityPct = humidity;
     status.dhtOk = true;
-    status.sensorDataOk = true;
-    if (sensorFaultLatched && status.fault == "SENSOR_FAIL") {
-      status.fault = "OK";
-    }
-    sensorFaultLatched = false;
     if (dhtMissingLogged) {
       Serial.println("[SENSOR] DHT22 recovered");
       dhtMissingLogged = false;
     }
   } else {
     status.dhtOk = false;
-    status.sensorDataOk = false;
     if (!dhtMissingLogged) {
       Serial.println("[SENSOR] DHT22 missing or unreadable; continuing without reboot");
       dhtMissingLogged = true;
-    }
-    if (status.fault == "OK") {
-      status.fault = "SENSOR_FAIL";
-      sensorFaultLatched = true;
     }
   }
 
   // Read LDR immediately (fast)
   sensors.lightRaw = analogRead(PIN_LDR_SENSOR);
   status.lightRaw = sensors.lightRaw;
+  // DS18B20 non-blocking conversion flow:
+  // 1) If no pending request, start conversion on both buses and mark timestamp.
+  // 2) On a subsequent call after a short delay (>=750ms), read temperatures.
+  unsigned long nowMs = millis();
+  if (!pendingTempRequest) {
+    // start conversions asynchronously
+    resTempSensor.requestTemperatures();
+    towerTempSensor.requestTemperatures();
+    pendingTempRequest = true;
+    tsTempRequestMs = nowMs;
+  } else {
+    // If a conversion gets stuck, abandon it rather than letting sensor reads stall.
+    if (nowMs - tsTempRequestMs > 2500UL) {
+      pendingTempRequest = false;
+      if (!reservoirDsMissingLogged || !towerDsMissingLogged) {
+        Serial.println("[SENSOR] DS18B20 conversion timed out; retrying later");
+      }
+    }
+
+    // Only read results after at least 700ms to allow conversion to finish
+    if (pendingTempRequest && nowMs - tsTempRequestMs >= 700) {
+      float t0 = resTempSensor.getTempCByIndex(0);
+      float t1 = towerTempSensor.getTempCByIndex(0);
+
+      if (t0 != DEVICE_DISCONNECTED_C) {
+        reservoirTempC = t0;
+        if (reservoirDsMissingLogged) {
+          Serial.println("[SENSOR] Reservoir DS18B20 recovered");
+          reservoirDsMissingLogged = false;
+        }
+      } else {
+        if (!reservoirDsMissingLogged) {
+          Serial.println("[SENSOR] Reservoir DS18B20 missing or unreadable; continuing");
+          reservoirDsMissingLogged = true;
+        }
+        reservoirTempC = NAN;
+      }
+
+      if (t1 != DEVICE_DISCONNECTED_C) {
+        towerTempC = t1;
+        if (towerDsMissingLogged) {
+          Serial.println("[SENSOR] Tower DS18B20 recovered");
+          towerDsMissingLogged = false;
+        }
+      } else {
+        if (!towerDsMissingLogged) {
+          Serial.println("[SENSOR] Tower DS18B20 missing or unreadable; continuing");
+          towerDsMissingLogged = true;
+        }
+        towerTempC = NAN;
+      }
+
+      pendingTempRequest = false;
+    }
+  }
+
+  // Flow detection: consider flowing if pulses detected recently
+  // A minimum of 1 pulse during run indicates water movement for basic detection
+  unsigned long pulses = flowPulseCount; // atomic read (volatile)
+  status.flowing = pulses > 0;
+
+  // Compute instantaneous flow rate (L/min) based on pulses since last sample
+  unsigned long flowSampleNowMs = millis();
+  unsigned long elapsedMs = (tsLastFlowSampleMs == 0) ? IV_SENSOR : (flowSampleNowMs - tsLastFlowSampleMs);
+  unsigned long pulsesSince = pulses - lastFlowSampleCount;
+  if (elapsedMs > 0 && pulsesSince > 0) {
+    flowRateLpm = ((float)pulsesSince / PULSES_PER_LITER) * (60000.0f / (float)elapsedMs);
+  } else if (pulsesSince == 0) {
+    flowRateLpm = 0.0f;
+  }
+  tsLastFlowSampleMs = flowSampleNowMs;
+  lastFlowSampleCount = pulses;
+
+  // Explicit soft-fail guard: missing sensors must not escalate to a fault or restart.
+  status.sensorDataOk = dhtOk || (!isnan(reservoirTempC) && !isnan(towerTempC));
+  if (!status.sensorDataOk) {
+    status.fault = "OK";
+  }
+
+  // expose flow rate
+  // (also included in postStatus below)
+
+  // expose reservoir temp
+  status.reservoirTempC = (isnan(reservoirTempC) ? NAN : reservoirTempC);
+  status.towerTempC = (isnan(towerTempC) ? NAN : towerTempC);
 
   sensors.valid = dhtOk;
   status.humidityPct    = sensors.humidityPct;
@@ -1056,6 +1269,73 @@ int httpRequest(const char* method, const char* path,
   return code;
 }
 
+// Create a pump-log start record on the server and return the created id (or empty)
+String createPumpLogStartOnServer(const String& mode, int onDurationSeconds, int offIntervalMinutes) {
+  if (!wifiConnected) return String("");
+  HTTPClient http;
+  http.setTimeout(API_TIMEOUT_MS);
+  http.begin(String(API_BASE_URL) + "/api/pump-log/start");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-ID",  DEVICE_ID);
+  http.addHeader("X-API-Key",    DEVICE_SECRET);
+
+  unsigned long startedAtMs = (unsigned long)(getCurrentEpoch() > 0 ? (uint32_t)getCurrentEpoch() * 1000UL : millis());
+  String body = "{";
+  body += "\"mode\":\"" + mode + "\",";
+  body += "\"onDurationSeconds\":" + String(onDurationSeconds) + ",";
+  body += "\"offIntervalMinutes\":" + String(offIntervalMinutes) + ",";
+  body += "\"startedAtMs\":" + String(startedAtMs);
+  body += "}";
+
+  int code = http.POST(body);
+  String resp = "";
+  if (code == 200 || code == 201) {
+    resp = http.getString();
+  }
+  http.end();
+
+  if (resp.length() == 0) return String("");
+  String id = extractJsonString(resp, "id");
+  if (id.length() == 0) return String("");
+  // persist id to NVS
+  prefs.begin(NVS_NS, false);
+  prefs.putString(NVS_CUR_PUMPLOG, id);
+  prefs.end();
+  return id;
+}
+
+// Update an existing pump-log by id (PATCH)
+// Updated patch with volumeLiters
+bool patchPumpLogOnServer(const String& id, int durationSeconds, bool flowed, const String& fault, float volumeLiters) {
+  if (!wifiConnected) return false;
+  if (id.length() == 0) return false;
+  HTTPClient http;
+  http.setTimeout(API_TIMEOUT_MS);
+  String path = String(API_BASE_URL) + "/api/pump-log/" + id;
+  http.begin(path);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-ID",  DEVICE_ID);
+  http.addHeader("X-API-Key",    DEVICE_SECRET);
+
+  String body = "{";
+  body += "\"durationSeconds\":" + String(durationSeconds) + ",";
+  body += "\"flowed\":" + String(flowed ? "true" : "false") + ",";
+  body += "\"fault\":\"" + fault + "\",";
+  body += "\"volumeLiters\":" + String(volumeLiters, 3);
+  body += "}";
+
+  int code = http.sendRequest("PATCH", body);
+  http.end();
+  if (code == 200 || code == 204) {
+    // clear persisted id
+    prefs.begin(NVS_NS, false);
+    prefs.remove(NVS_CUR_PUMPLOG);
+    prefs.end();
+    return true;
+  }
+  return false;
+
+
 void fetchSchedule() {
   if (!wifiConnected) {
     Serial.println(F("[API] Offline — using NVS schedule"));
@@ -1095,22 +1375,52 @@ void fetchSchedule() {
       return;
     }
 
+    // Also parse optional planName and day/night overrides if present
+    String planName = extractJsonString(resp, "planName");
+    int newDayInt = extractJsonInt(resp, "dayIntervalMinutes");
+    int newDayDur = extractJsonInt(resp, "dayDurationSeconds");
+    int newNightInt = extractJsonInt(resp, "nightIntervalMinutes");
+    int newNightDur = extractJsonInt(resp, "nightDurationSeconds");
+
     bool changed = (newInterval != schedule.intervalMinutes ||
-                    newDuration != schedule.durationSeconds ||
-                    newStartH   != schedule.startHour       ||
-                    newEndH     != schedule.endHour         ||
-                    newEnabled  != schedule.enabled);
+            newDuration != schedule.durationSeconds ||
+            newStartH   != schedule.startHour       ||
+            newEndH     != schedule.endHour         ||
+            newEnabled  != schedule.enabled ||
+            (planName.length() > 0 && planName != ""));
 
     schedule.intervalMinutes = newInterval;
     schedule.durationSeconds = newDuration;
     schedule.startHour       = newStartH;
     schedule.endHour         = newEndH;
     schedule.enabled         = newEnabled;
+    if (newDayInt > 0) schedule.dayIntervalMinutes = newDayInt;
+    if (newDayDur > 0) schedule.dayDurationSeconds = newDayDur;
+    if (newNightInt > 0) schedule.nightIntervalMinutes = newNightInt;
+    if (newNightDur > 0) schedule.nightDurationSeconds = newNightDur;
 
     if (changed) {
       if (saveScheduleToNVS()) {
         Serial.printf("[API] Backend command applied: schedule %dmin/%ds\n",
           newInterval, newDuration);
+
+        // Inform backend that device applied the schedule
+        time_t applied = getCurrentEpoch();
+        if (applied > 0) {
+          String body = "{";
+          body += "\"scheduleAppliedAt\":" + String((uint32_t)applied) + ",";
+          if (planName.length() > 0) {
+            body += "\"planName\":\"" + planName + "\"";
+          } else {
+            // remove trailing comma
+            if (body.endsWith(",")) body = body.substring(0, body.length() - 1);
+          }
+          body += "}";
+          int c = httpRequest("PUT", "/api/status", body);
+          if (c != 200 && c != 204) {
+            Serial.printf("[API] Failed to notify backend of applied schedule (HTTP %d)\n", c);
+          }
+        }
       }
     } else {
       Serial.println(F("[API] Backend command received: schedule unchanged"));
@@ -1157,6 +1467,17 @@ void postStatus() {
   body += "\"lightOn\":"          + String(status.lightOn ? "true" : "false") + ",";
   body += "\"batteryChargeOn\":" + String(status.batteryChargeOn ? "true" : "false") + ",";
   body += "\"flowing\":"          + String(status.flowing ? "true" : "false") + ",";
+  if (!isnan(status.reservoirTempC)) {
+    body += "\"reservoirTempC\":" + String(status.reservoirTempC, 1) + ",";
+  } else {
+    body += "\"reservoirTempC\":null,";
+  }
+  if (!isnan(status.towerTempC)) {
+    body += "\"towerTempC\":" + String(status.towerTempC, 1) + ",";
+  } else {
+    body += "\"towerTempC\":null,";
+  }
+  body += "\"flowRateLpm\":" + String(flowRateLpm, 2) + ",";
   body += "\"humidityPct\":"      + String(sensors.humidityPct, 1) + ",";
   body += "\"lightLux\":"         + String(sensors.lightRaw) + ",";
   body += "\"fault\":\""          + status.fault + "\",";
@@ -1190,12 +1511,13 @@ void sendHeartbeat() {
   }
 }
 
-void logPumpCycle(float durationSec, bool flowed, String fault) {
+void logPumpCycle(float durationSec, bool flowed, String fault, float volumeLiters = 0.0f) {
   LogEntry entry;
   entry.timestamp       = getCurrentEpoch();
   entry.durationSeconds = (uint16_t)durationSec;
   entry.flowed          = flowed;
   fault.toCharArray(entry.fault, sizeof(entry.fault));
+  entry.volumeLiters = volumeLiters;
 
   if (!wifiConnected) {
     pushOfflineLog(entry);
@@ -1213,7 +1535,8 @@ bool postLogEntryToAPI(const LogEntry& entry) {
   body += "\"timestamp\":"        + String((uint32_t)entry.timestamp) + ",";
   body += "\"durationSeconds\":"  + String(entry.durationSeconds) + ",";
   body += "\"flowed\":"           + String(entry.flowed ? "true" : "false") + ",";
-  body += "\"fault\":\""          + String(entry.fault) + "\"";
+  body += "\"fault\":\""          + String(entry.fault) + "\",";
+  body += "\"volumeLiters\":" + String(entry.volumeLiters, 3);
   body += "}";
 
   int code = httpRequest("POST", "/api/pump-log", body);

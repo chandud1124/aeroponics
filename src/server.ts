@@ -4,6 +4,8 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import {
   addPumpLog,
+  startPumpLog,
+  updatePumpLog,
   addReading,
   deleteReading,
   getPumpLogs,
@@ -35,6 +37,7 @@ type ServerEntry = {
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let manualPumpStartedAtMs: number | null = null;
+let manualPumpLogId: string | null = null;
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -184,6 +187,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           dhtOk?: boolean;
           reservoirDsOk?: boolean;
           towerDsOk?: boolean;
+          // Optional flow field may be omitted by device without triggering restart
+          flowRateLpm?: number | null;
       };
 
       // Validate temperature ranges (reasonable bounds for hydroponics: -10°C to 60°C)
@@ -202,31 +207,72 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         }
       }
 
-      return jsonResponse(
-        updateStatus({
-          pumpOn: payload.pumpOn,
-          flowing: payload.flowing,
-          pumpState: payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE,
-          humidityPct: payload.humidityPct ?? undefined,
-          lightLux: payload.lightLux ?? undefined,
-          reservoirTempC: null,
-          towerTempC: null,
-          lightOn: payload.lightOn ?? undefined,
-          batteryChargeOn: payload.batteryChargeOn ?? undefined,
-          fault: payload.fault ?? undefined,
-          resetReason: payload.resetReason ?? undefined,
-          lastBootFault: payload.lastBootFault ?? undefined,
-          uptimeSec: payload.uptimeSec ?? undefined,
-          lastRunISO: payload.lastRunAt ?? undefined,
-          sensorDataOk: payload.sensorDataOk ?? undefined,
-          dhtOk: payload.dhtOk ?? undefined,
-          reservoirDsOk: payload.reservoirDsOk ?? undefined,
-          towerDsOk: payload.towerDsOk ?? undefined,
-        }, { source: "esp32" }) ?? { success: true },
-      );
+      const updated = updateStatus({
+        pumpOn: payload.pumpOn,
+        flowing: payload.flowing,
+        pumpState: payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE,
+        humidityPct: payload.humidityPct ?? undefined,
+        lightLux: payload.lightLux ?? undefined,
+        reservoirTempC: payload.reservoirTempC ?? undefined,
+        towerTempC: payload.towerTempC ?? undefined,
+        flowRateLpm: (payload as any).flowRateLpm ?? undefined,
+        lightOn: payload.lightOn ?? undefined,
+        batteryChargeOn: payload.batteryChargeOn ?? undefined,
+        fault: payload.fault ?? undefined,
+        resetReason: payload.resetReason ?? undefined,
+        lastBootFault: payload.lastBootFault ?? undefined,
+        uptimeSec: payload.uptimeSec ?? undefined,
+        lastRunISO: payload.lastRunAt ?? undefined,
+        sensorDataOk: payload.sensorDataOk ?? undefined,
+        dhtOk: payload.dhtOk ?? undefined,
+        reservoirDsOk: payload.reservoirDsOk ?? undefined,
+        towerDsOk: payload.towerDsOk ?? undefined,
+        // accept optional device-sent fields
+        scheduleAppliedAt: (payload as any).scheduleAppliedAt ?? undefined,
+        appliedPlanName: (payload as any).planName ?? undefined,
+      }, { source: "esp32" });
+
+      // If device reported a lastRunAt and indicates pump is ON, create a start pump-log entry
+      let createdPumpLog: any = null;
+      try {
+        if (payload.lastRunAt && payload.pumpOn) {
+          // Parse epoch seconds or ISO and compute ms
+          let startedAtMs = Number(payload.lastRunAt);
+          if (!Number.isFinite(startedAtMs) || startedAtMs === 0) {
+            const parsed = Date.parse(String(payload.lastRunAt));
+            startedAtMs = Number.isFinite(parsed) ? parsed : Date.now();
+          } else {
+            // if likely epoch seconds (<= 1e12), convert to ms
+            if (startedAtMs < 1e12) startedAtMs = startedAtMs * 1000;
+          }
+
+          const onDur = (payload as any).onDurationSeconds ?? getCycleProfile(new Date(startedAtMs)).onDurationSeconds;
+          createdPumpLog = startPumpLog({
+            mode: undefined,
+            onDurationSeconds: onDur,
+            offIntervalMinutes: (payload as any).offIntervalMinutes ?? getCycleProfile(new Date(startedAtMs)).offIntervalMinutes,
+            startedAtMs: startedAtMs,
+          });
+        }
+      } catch (e) {
+        // ignore start log failures
+        console.error("Failed to create start pump log:", e);
+      }
+
+      const respBody: any = updated ?? { success: true };
+      if (createdPumpLog && createdPumpLog.id) respBody.pumpLogId = createdPumpLog.id;
+      return jsonResponse(respBody);
     }
 
     return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  // Test endpoint: simulate a device status update without any sensor fields
+  if (url.pathname === "/api/test/no-sensor") {
+    if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
+    // Create a minimal status update (pump off) with no sensor fields
+    const updated = updateStatus({ pumpOn: false, flowing: false }, { source: "server" });
+    return jsonResponse({ success: true, status: updated }, 200);
   }
 
   if (url.pathname === "/api/heartbeat") {
@@ -257,17 +303,13 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (request.method === "PUT") {
-      const payload = (await request.json()) as {
-        planName?: string;
-        intervalMinutes: number;
-        durationSeconds: number;
-        startHour: number;
-        endHour: number;
-        enabled: boolean;
-      };
+      // Accept the full Schedule object from the UI (including day/night overrides)
+      const payload = (await request.json()) as any;
 
-      if (payload.startHour >= payload.endHour) {
-        return jsonResponse({ error: "Start hour must be earlier than end hour" }, 400);
+      if (typeof payload.startHour === "number" && typeof payload.endHour === "number") {
+        if (payload.startHour >= payload.endHour) {
+          return jsonResponse({ error: "Start hour must be earlier than end hour" }, 400);
+        }
       }
 
       return jsonResponse(updateSchedule(payload));
@@ -284,6 +326,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         durationSeconds: log.durationSeconds,
         flowed: log.flowed,
         fault: log.fault,
+        volumeLiters: (log as any).volumeLiters ?? null,
+        flowRateLpm: (log as any).flowRateLpm ?? null,
       }));
 
       const successfulCycles = cycles.filter((cycle) => cycle.flowed && !cycle.fault).length;
@@ -325,6 +369,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         mode?: "DAY" | "NIGHT" | "MANUAL";
         onDurationSeconds?: number;
         offIntervalMinutes?: number;
+        volumeLiters?: number;
+        flowRateLpm?: number;
       };
 
       if (typeof payload.durationSeconds !== "number" || typeof payload.flowed !== "boolean") {
@@ -338,9 +384,68 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         mode: payload.mode,
         onDurationSeconds: payload.onDurationSeconds,
         offIntervalMinutes: payload.offIntervalMinutes,
+        volumeLiters: payload.volumeLiters ?? null,
+        flowRateLpm: payload.flowRateLpm ?? null,
       });
 
       return jsonResponse(created, 201);
+    }
+
+    // Create a pump-log entry at start (device can call this and receive an id)
+    if (request.method === "POST" && url.pathname === "/api/pump-log/start") {
+      const deviceIdHeader = request.headers.get("x-device-id");
+      const deviceKeyHeader = request.headers.get("x-api-key");
+      if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
+        return jsonResponse({ error: "Unauthorized (device)" }, 401);
+      }
+
+      const payload = (await request.json()) as {
+        mode?: "DAY" | "NIGHT" | "MANUAL";
+        onDurationSeconds?: number;
+        offIntervalMinutes?: number;
+        startedAtMs?: number;
+      };
+
+      const created = startPumpLog({
+        mode: payload.mode,
+        onDurationSeconds: payload.onDurationSeconds,
+        offIntervalMinutes: payload.offIntervalMinutes,
+        startedAtMs: payload.startedAtMs,
+      });
+
+      return jsonResponse(created, 201);
+    }
+
+    // Update an existing pump-log entry by id
+    if (request.method === "PATCH" && url.pathname.match(/^\/api\/pump-log\/[\w\-]+$/)) {
+      const deviceIdHeader = request.headers.get("x-device-id");
+      const deviceKeyHeader = request.headers.get("x-api-key");
+      if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
+        return jsonResponse({ error: "Unauthorized (device)" }, 401);
+      }
+
+      const parts = url.pathname.split("/").filter(Boolean);
+      const id = parts[parts.length - 1];
+      const payload = (await request.json()) as {
+        durationSeconds?: number;
+        flowed?: boolean;
+        fault?: string | null;
+        endedAtMs?: number;
+        volumeLiters?: number | null;
+        flowRateLpm?: number | null;
+      };
+
+      const updated = updatePumpLog(id, {
+        durationSeconds: payload.durationSeconds,
+        flowed: payload.flowed,
+        fault: payload.fault ?? null,
+        endedAtMs: payload.endedAtMs,
+        volumeLiters: payload.volumeLiters ?? null,
+        flowRateLpm: payload.flowRateLpm ?? null,
+      });
+
+      if (!updated) return jsonResponse({ error: "Pump log not found" }, 404);
+      return jsonResponse(updated, 200);
     }
 
     return jsonResponse({ error: "Method not allowed" }, 405);
@@ -443,7 +548,16 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         motorManualMode: "FORCED_ON",
         fault: null,
       });
-      return jsonResponse({ success: true, state: "MANUAL_MODE", startedAt: manualPumpStartedAtMs }, 201);
+      // create a start pump-log entry so frontend and server track it
+      try {
+        const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs });
+        if (created && created.id) {
+          manualPumpLogId = created.id;
+        }
+        return jsonResponse({ success: true, state: "MANUAL_MODE", startedAt: manualPumpStartedAtMs, pumpLogId: manualPumpLogId }, 201);
+      } catch (e) {
+        return jsonResponse({ success: true, state: "MANUAL_MODE", startedAt: manualPumpStartedAtMs }, 201);
+      }
     }
 
     const startedAtMs = manualPumpStartedAtMs ?? Date.now();
@@ -457,15 +571,20 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       motorManualMode: "FORCED_OFF",
     });
     if (manualPumpStartedAtMs != null) {
-      addPumpLog({
-        durationSeconds: Math.max(1, durationSeconds),
-        flowed: durationSeconds > 0,
-        fault: null,
-        mode: "MANUAL",
-        startedAtMs,
-        endedAtMs,
-      });
+      if (manualPumpLogId) {
+        updatePumpLog(manualPumpLogId, { durationSeconds: Math.max(1, durationSeconds), flowed: durationSeconds > 0, endedAtMs });
+      } else {
+        addPumpLog({
+          durationSeconds: Math.max(1, durationSeconds),
+          flowed: durationSeconds > 0,
+          fault: null,
+          mode: "MANUAL",
+          startedAtMs,
+          endedAtMs,
+        });
+      }
     }
+    manualPumpLogId = null;
     manualPumpStartedAtMs = null;
     return jsonResponse({ success: true, state: "IDLE", durationSeconds }, 201);
   }

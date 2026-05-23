@@ -106,12 +106,18 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
 
   useEffect(() => {
     const updateCountdown = () => {
-      const seconds = status.nextCycleIn;
-
-      if (seconds < 0) {
+      if (!status.nextCycleISO) {
         setCountdown("--:--");
         return;
       }
+
+      const targetMs = new Date(status.nextCycleISO).getTime();
+      if (Number.isNaN(targetMs)) {
+        setCountdown("--:--");
+        return;
+      }
+
+      const seconds = Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
 
       const mins = Math.floor(seconds / 60);
       const secs = seconds % 60;
@@ -126,7 +132,7 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [status.nextCycleIn]);
+  }, [status.nextCycleISO]);
 
   if (!status.nextCycleISO) {
     return (
@@ -161,6 +167,40 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
     hour12: true,
   });
 
+  // Device-applied schedule timestamp (optional)
+  const appliedAtRaw = (status as any).scheduleAppliedAt as number | string | undefined;
+  const appliedAtMs = appliedAtRaw
+    ? typeof appliedAtRaw === "number"
+      ? appliedAtRaw > 1e12
+        ? appliedAtRaw
+        : appliedAtRaw * 1000
+      : Date.parse(String(appliedAtRaw))
+    : null;
+  const appliedAtStr = appliedAtMs ? new Date(appliedAtMs).toLocaleString() : null;
+  const appliedPlanName = (status as any).appliedPlanName as string | undefined;
+
+  // If pump is running, compute remaining on-time from lastRunISO + expectedDuration
+  let runningRemainingSec: number | null = null;
+  if (status.pumpOn && status.lastRunISO) {
+    const raw = (status.lastRunISO as any) as number | string;
+    const lastMs = typeof raw === "number" ? (raw > 1e12 ? raw : raw * 1000) : Date.parse(String(raw));
+    const expectedMs = expectedDuration * 1000;
+    runningRemainingSec = Math.max(0, Math.ceil((lastMs + expectedMs - Date.now()) / 1000));
+  }
+
+  // If light is on, compute remaining time until end of active window
+  let lightRemainingSec: number | null = null;
+  if (status.lightOn) {
+    const now = new Date();
+    const end = new Date(now);
+    end.setHours(schedule.endHour, 0, 0, 0);
+    if (end.getTime() <= now.getTime()) {
+      // If already past end today, set to tomorrow's end
+      end.setDate(end.getDate() + 1);
+    }
+    lightRemainingSec = Math.max(0, Math.ceil((end.getTime() - now.getTime()) / 1000));
+  }
+
   return (
     <Card className="p-6">
       <div className="space-y-4">
@@ -172,7 +212,11 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
               <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">next mist</span>
             </div>
             <div className="text-xs text-muted-foreground">Next run: {timeStr}</div>
-            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+            {appliedAtStr && (
+              <div className="text-xs text-muted-foreground">Plan applied: {appliedAtStr} {appliedPlanName ? `· ${appliedPlanName}` : null}</div>
+            )}
+            <div className="text-xs text-muted-foreground">Lights: {String(schedule.startHour).padStart(2, "0")}:00 - {String(schedule.endHour).padStart(2, "0")}:00</div>
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
               <div className="rounded-md bg-secondary px-3 py-2">
                 <div className="text-muted-foreground">Mode</div>
                 <div className="font-semibold">{modeLabel}</div>
@@ -185,9 +229,38 @@ export function NextCyclePanel({ status, schedule }: { status: LiveStatus; sched
                 <div className="text-muted-foreground">OFF interval</div>
                 <div className="font-semibold">{expectedOff} min</div>
               </div>
+              <div className="rounded-md bg-secondary px-3 py-2">
+                <div className="text-muted-foreground">Flow</div>
+                <div className="font-semibold">{status.flowRateLpm != null ? `${status.flowRateLpm.toFixed(1)} L/min` : "—"}</div>
+              </div>
+            </div>
+            <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+              <div className="rounded-md bg-secondary px-3 py-2">
+                <div className="text-muted-foreground">Reservoir temp</div>
+                <div className="font-semibold">{status.reservoirTempC != null ? `${status.reservoirTempC.toFixed(1)}°C` : "—"}</div>
+              </div>
+              <div className="rounded-md bg-secondary px-3 py-2">
+                <div className="text-muted-foreground">Tower temp</div>
+                <div className="font-semibold">{status.towerTempC != null ? `${status.towerTempC.toFixed(1)}°C` : "—"}</div>
+              </div>
             </div>
             <div className="mt-3 rounded-lg border border-border bg-secondary/60 px-3 py-2 text-xs">
               Current cycle: <span className="font-semibold">{modeLabel}</span> · {expectedDuration}s ON · {expectedOff} min OFF
+              <div className="mt-2 flex gap-3">
+                {status.pumpOn && runningRemainingSec != null && (
+                  <div className="rounded-md bg-green-50 px-2 py-1 text-xs">
+                    <div className="text-muted-foreground">Running — time left</div>
+                    <div className="font-semibold">{String(Math.floor(runningRemainingSec / 60)).padStart(2, "0")}:{String(runningRemainingSec % 60).padStart(2, "0")}</div>
+                  </div>
+                )}
+
+                {status.lightOn && lightRemainingSec != null && (
+                  <div className="rounded-md bg-amber-50 px-2 py-1 text-xs">
+                    <div className="text-muted-foreground">Light — time left</div>
+                    <div className="font-semibold">{Math.floor(lightRemainingSec / 60)}m {lightRemainingSec % 60}s</div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <Clock className="h-6 w-6 text-primary" />
@@ -204,6 +277,8 @@ export function LiveCycleHistoryPanel() {
     durationSeconds: number;
     flowed: boolean;
     fault: string | null;
+    volumeLiters?: number | null;
+    flowRateLpm?: number | null;
   };
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -213,17 +288,35 @@ export function LiveCycleHistoryPanel() {
 
     const load = async () => {
       try {
-        const response = await fetch("/api/pump-log");
-        if (!response.ok) return;
-        const payload = (await response.json()) as { cycles: Row[] };
-        if (active) setRows(payload.cycles.slice(0, 5));
+        const [respLogs, respStatus] = await Promise.all([fetch("/api/pump-log"), fetch("/api/status")]);
+        if (!respLogs.ok) return;
+        const logsPayload = (await respLogs.json()) as { cycles: Row[] };
+        const statusPayload = respStatus.ok ? (await respStatus.json()) as any : null;
+
+        let combined: Row[] = logsPayload.cycles.slice(0, 5);
+
+        // If pump is currently running, prepend an in-progress row
+        if (statusPayload && statusPayload.pumpOn && statusPayload.lastRunISO) {
+          const startedAt = new Date(statusPayload.lastRunISO).toISOString();
+          const elapsed = Math.max(0, Math.round((Date.now() - new Date(statusPayload.lastRunISO).getTime()) / 1000));
+          const runningRow: Row = {
+            id: statusPayload.pumpLogId ?? "running",
+            startedAt,
+            durationSeconds: elapsed,
+            flowed: false,
+            fault: null,
+          };
+          combined = [runningRow, ...combined].slice(0, 5);
+        }
+
+        if (active) setRows(combined);
       } catch {
         // keep last good state
       }
     };
 
     load();
-    const interval = setInterval(load, 10000);
+    const interval = setInterval(load, 5000);
 
     return () => {
       active = false;
@@ -256,10 +349,18 @@ export function LiveCycleHistoryPanel() {
                     {new Date(row.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {row.durationSeconds}s ON · {ok ? "Success" : row.fault ?? "Skipped"}
+                      {row.durationSeconds}s ON · {ok ? "Success" : row.fault ?? "Skipped"}
+                      {row.volumeLiters != null && (
+                        <span> · {row.volumeLiters.toFixed(2)} L</span>
+                      )}
                   </div>
                 </div>
-                <Badge variant={ok ? "default" : "destructive"}>{ok ? "OK" : "CHECK"}</Badge>
+                <div className="flex items-center gap-2">
+                  {row.id === "running" && (
+                    <Badge variant="secondary">Running</Badge>
+                  )}
+                  <Badge variant={ok ? "default" : "destructive"}>{ok ? "OK" : "CHECK"}</Badge>
+                </div>
               </div>
             );
           })}
