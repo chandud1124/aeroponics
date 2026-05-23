@@ -45,8 +45,8 @@ function Index() {
   const [status, setStatus] = useState<LiveStatus | null>(null);
   const [schedule, setSchedule] = useState<Schedule>(defaultSchedule);
   const [mounted, setMounted] = useState(false);
-  const liveStatus = mounted && status?.isOnline ? status : null;
-  const isOnline = liveStatus !== null;
+  const liveStatus = mounted ? status : null;
+  const isOnline = mounted ? Boolean(status?.isOnline) : false;
 
   useEffect(() => {
     setMounted(true);
@@ -102,9 +102,9 @@ function Index() {
                     <Card className="border-dashed p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-sm font-medium">ESP32 offline</div>
+                          <div className="text-sm font-medium">ESP32 telemetry stale</div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            No current live readings are available. Historical cycles and faults still show below.
+                            Relay controls still work, but live sensor updates have stopped. Historical cycles and faults still show below.
                           </div>
                         </div>
                         <Badge variant="destructive">OFFLINE</Badge>
@@ -112,7 +112,7 @@ function Index() {
                     </Card>
 
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <RelayStatesCard status={null} online={false} />
+                      <RelayStatesCard status={status} online={false} />
                       <Card className="border-dashed p-6">
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-muted-foreground">Live telemetry hidden</div>
