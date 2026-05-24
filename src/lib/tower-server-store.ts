@@ -263,7 +263,7 @@ let statuses: Record<string, LiveStatus> = {};
 let sensorHistory: SensorSnapshot[] = [];
 let readings: ManualReading[] = [];
 let pumpLogs: PumpLog[] = [];
-let faultHistory: Array<{ timestamp: number; fault: string; resolved?: number }> = [];
+let faultHistory: Array<{ timestamp: number; fault: string; deviceId?: string; resolved?: number }> = [];
 let autoPumpStartedAtMs: number | null = null;
 let autoPumpLogId: string | null = null;
 
@@ -297,7 +297,25 @@ function normalizeDeviceId(deviceId?: string | null): string {
 }
 
 function getPrimaryStatusDeviceId() {
-  return Object.keys(statuses)[0] ?? null;
+  const entries = Object.entries(statuses);
+  if (entries.length === 0) return null;
+
+  let freshestOnline: { deviceId: string; signalAt: number } | null = null;
+  let freshestAny: { deviceId: string; signalAt: number } | null = null;
+
+  for (const [deviceId, status] of entries) {
+    const signalAt = getLatestDeviceSignalAt(status) ?? -1;
+
+    if (!freshestAny || signalAt > freshestAny.signalAt) {
+      freshestAny = { deviceId, signalAt };
+    }
+
+    if (status?.isOnline && (!freshestOnline || signalAt > freshestOnline.signalAt)) {
+      freshestOnline = { deviceId, signalAt };
+    }
+  }
+
+  return (freshestOnline ?? freshestAny)?.deviceId ?? entries[0][0];
 }
 
 function getPrimaryStatus() {
@@ -823,7 +841,7 @@ export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?
     fault: null,
     startedAtMs: input.startedAtMs ?? Date.now(),
     endedAtMs: input.startedAtMs ?? Date.now(),
-    deviceId: input.deviceId ?? null,
+    deviceId: input.deviceId ?? undefined,
   });
   return next;
 }

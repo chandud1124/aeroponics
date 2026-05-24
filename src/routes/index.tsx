@@ -56,7 +56,10 @@ function Index() {
   const backendReachable = mounted ? status !== null : false;
   const telemetryFresh = mounted ? Boolean(status?.isOnline) : false;
   const controlsAllowed = mounted ? telemetryFresh && hasRegisteredDevice : false;
-  const activeDeviceId = selectedDeviceId.trim() || (status?.deviceId ?? null);
+  const selectedDeviceKnown = selectedDeviceId.trim()
+    ? devices.some((device) => device.deviceId === selectedDeviceId.trim())
+    : false;
+  const activeDeviceId = selectedDeviceKnown ? selectedDeviceId.trim() : (status?.deviceId ?? null);
 
   useEffect(() => {
     setMounted(true);
@@ -110,6 +113,22 @@ function Index() {
 
     return () => clearInterval(interval);
   }, [mounted, selectedDeviceId]);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    const trimmedSelection = selectedDeviceId.trim();
+    const knownSelection = trimmedSelection ? devices.some((device) => device.deviceId === trimmedSelection) : false;
+
+    if (!trimmedSelection && status?.deviceId && devices.some((device) => device.deviceId === status.deviceId)) {
+      setSelectedDeviceId(status.deviceId);
+      return;
+    }
+
+    if (trimmedSelection && !knownSelection && status?.deviceId) {
+      setSelectedDeviceId(status.deviceId);
+    }
+  }, [mounted, selectedDeviceId, status?.deviceId, devices]);
 
   return (
     <ErrorBoundary>
