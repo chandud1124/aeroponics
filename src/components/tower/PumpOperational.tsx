@@ -244,7 +244,8 @@ export function NextCyclePanel({
   const timetable: Array<{ label: string; time: string }> = [];
   if (plannedNextCycle && !Number.isNaN(plannedNextCycle.getTime())) {
     for (let i = 0; i < 4; i++) {
-      const slot = new Date(plannedNextCycle.getTime() + i * expectedOff * 60 * 1000);
+      const totalCycleMs = (expectedOff * 60 + expectedDuration) * 1000;
+      const slot = new Date(plannedNextCycle.getTime() + i * totalCycleMs);
       if (slot.getHours() >= schedule.endHour) break;
       timetable.push({
         label: i === 0 ? "Next" : `+${i}`,

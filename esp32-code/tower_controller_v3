@@ -938,8 +938,7 @@ bool isTimeToWater() {
     return false;
 
   time_t secondsSinceLastRun = epochNow - status.lastRunEpoch;
-  // Interval is now calculated from start-to-start (OFF interval + ON duration)
-  time_t intervalSeconds     = (time_t)((schedule.intervalMinutes * 60) + schedule.durationSeconds);
+  time_t intervalSeconds     = (time_t)(schedule.intervalMinutes * 60);
 
   return (secondsSinceLastRun >= intervalSeconds);
 }

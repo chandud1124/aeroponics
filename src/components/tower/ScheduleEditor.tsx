@@ -61,12 +61,12 @@ export function ScheduleEditor() {
   const nightRestMinutes = s.nightIntervalMinutes ?? Math.max(s.intervalMinutes, 15);
   const dayRunSeconds = s.dayDurationSeconds ?? s.durationSeconds;
   const nightRunSeconds = s.nightDurationSeconds ?? Math.max(15, Math.round(s.durationSeconds * 0.75));
-  const dayCycles = activeWindowHours > 0 ? Math.max(0, Math.floor((activeWindowHours * 60) / dayRestMinutes)) : 0;
-  const nightCycles = inactiveWindowHours > 0 ? Math.max(0, Math.floor((inactiveWindowHours * 60) / nightRestMinutes)) : 0;
-  const totalCycles = dayCycles + nightCycles;
-  const litresEstimate = (((dayCycles * dayRunSeconds) + (nightCycles * nightRunSeconds)) / 60) * 2;
   const dayCycleMinutes = Math.round((dayRunSeconds + dayRestMinutes * 60) / 60);
   const nightCycleMinutes = Math.round((nightRunSeconds + nightRestMinutes * 60) / 60);
+  const dayCycles = activeWindowHours > 0 && dayCycleMinutes > 0 ? Math.max(0, Math.floor((activeWindowHours * 60) / dayCycleMinutes)) : 0;
+  const nightCycles = inactiveWindowHours > 0 && nightCycleMinutes > 0 ? Math.max(0, Math.floor((inactiveWindowHours * 60) / nightCycleMinutes)) : 0;
+  const totalCycles = dayCycles + nightCycles;
+  const litresEstimate = (((dayCycles * dayRunSeconds) + (nightCycles * nightRunSeconds)) / 60) * 2;
 
   return (
     <Card className="p-6">

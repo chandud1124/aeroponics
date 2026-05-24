@@ -280,7 +280,17 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         resetReason: payload.resetReason ?? undefined,
         lastBootFault: payload.lastBootFault ?? undefined,
         uptimeSec: payload.uptimeSec ?? undefined,
-        lastRunISO: payload.lastRunAt ?? undefined,
+        lastRunISO: (() => {
+          if (!payload.lastRunAt) return undefined;
+          let val = Number(payload.lastRunAt);
+          if (Number.isFinite(val) && val > 0) {
+            if (val < 1e12) val *= 1000;
+            return new Date(val).toISOString();
+          }
+          const parsed = Date.parse(String(payload.lastRunAt));
+          if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+          return undefined;
+        })(),
         sensorDataOk: payload.sensorDataOk ?? undefined,
         dhtOk: payload.dhtOk ?? undefined,
         // accept optional device-sent fields
@@ -359,7 +369,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         serverTime: Date.now(),
         hasRegisteredDevice: true,
         ...schedule,
-        intervalMinutes: cycleProfile.offIntervalMinutes,
+        intervalMinutes: cycleProfile.offIntervalMinutes + Math.round(cycleProfile.onDurationSeconds / 60),
         durationSeconds: cycleProfile.onDurationSeconds,
         ...(status ?? {}),
       },

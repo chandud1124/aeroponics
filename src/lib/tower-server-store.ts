@@ -410,8 +410,7 @@ function pushSensorSnapshot(nextStatus: LiveStatus) {
   void appendEvent("sensor_snapshot_added", nextSnapshot);
 }
 
-// ==================== HELPER: CALCULATE NEXT CYCLE ====================
-function calculatePlannedNextCycle(now = new Date()): { nextCycleISO: string | null; nextCycleIn: number } {
+function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null): { nextCycleISO: string | null; nextCycleIn: number } {
   if (!schedule.enabled) {
     return { nextCycleISO: null, nextCycleIn: -1 };
   }
@@ -419,24 +418,43 @@ function calculatePlannedNextCycle(now = new Date()): { nextCycleISO: string | n
   const currentHour = now.getHours();
   const { offIntervalMinutes, onDurationSeconds } = getCycleProfile(now);
   const intervalMs = (offIntervalMinutes * 60 + onDurationSeconds) * 1000;
-  const windowStart = new Date(now);
-  windowStart.setHours(schedule.startHour, 0, 0, 0);
 
-  // Outside active hours?
-  if (currentHour < schedule.startHour || currentHour >= schedule.endHour) {
-    // Next cycle is at start of tomorrow's window
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(schedule.startHour, 0, 0, 0);
-    const secondsUntil = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
-    return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
+  let nextCycleTime: Date | null = null;
+
+  // Try using actual last run time if present and valid
+  const lastRunMs = status?.lastRunISO ? Date.parse(status.lastRunISO) : null;
+  if (lastRunMs && Number.isFinite(lastRunMs)) {
+    let targetTime = lastRunMs + intervalMs;
+    if (targetTime < now.getTime()) {
+      const elapsed = now.getTime() - targetTime;
+      const additionalCycles = Math.ceil(elapsed / intervalMs);
+      targetTime += additionalCycles * intervalMs;
+    }
+    nextCycleTime = new Date(targetTime);
   }
 
-  const elapsedMs = now.getTime() - windowStart.getTime();
-  const slotsElapsed = Math.max(0, Math.ceil(elapsedMs / intervalMs));
-  const nextCycleTime = new Date(windowStart.getTime() + slotsElapsed * intervalMs);
+  // Fallback to slot-based prediction
+  if (!nextCycleTime) {
+    const windowStart = new Date(now);
+    windowStart.setHours(schedule.startHour, 0, 0, 0);
 
-  if (nextCycleTime.getHours() >= schedule.endHour || nextCycleTime.getTime() < now.getTime()) {
+    // Outside active hours?
+    if (currentHour < schedule.startHour || currentHour >= schedule.endHour) {
+      // Next cycle is at start of tomorrow's window
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(schedule.startHour, 0, 0, 0);
+      const secondsUntil = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
+      return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
+    }
+
+    const elapsedMs = now.getTime() - windowStart.getTime();
+    const slotsElapsed = Math.max(0, Math.ceil(elapsedMs / intervalMs));
+    nextCycleTime = new Date(windowStart.getTime() + slotsElapsed * intervalMs);
+  }
+
+  const nextHour = nextCycleTime.getHours();
+  if (nextHour < schedule.startHour || nextHour >= schedule.endHour || nextCycleTime.getTime() < now.getTime()) {
     const nextDay = new Date(now);
     nextDay.setDate(nextDay.getDate() + 1);
     nextDay.setHours(schedule.startHour, 0, 0, 0);
@@ -633,7 +651,7 @@ export function getStatus(deviceId?: string | null) {
   if (!currentStatus) return null;
   
   // Calculate next cycle and update status
-  const plannedNextCycle = calculatePlannedNextCycle();
+  const plannedNextCycle = calculatePlannedNextCycle(new Date(), currentStatus);
   const retryCycle = calculateRetryCycle(currentStatus);
   const cycleProfile = getCycleProfile();
   const heartbeatUpdatedAt = currentStatus.heartbeatUpdatedAt ?? null;
@@ -671,6 +689,22 @@ export function getStatus(deviceId?: string | null) {
   };
 }
 
+export function normalizeLastRunISO(val: any): string | null {
+  if (!val) return null;
+  let numeric = Number(val);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    if (numeric < 1e12) {
+      numeric *= 1000;
+    }
+    return new Date(numeric).toISOString();
+  }
+  const parsed = Date.parse(String(val));
+  if (Number.isFinite(parsed)) {
+    return new Date(parsed).toISOString();
+  }
+  return null;
+}
+
 export function updateStatus(
   patch: Partial<LiveStatus>,
   options: { source?: "esp32" | "server"; deviceId?: string | null } = {},
@@ -690,7 +724,7 @@ export function updateStatus(
   const resolvedLastRunISO = transitionToOn 
     ? new Date().toISOString() 
     : patch.lastRunISO !== undefined 
-      ? patch.lastRunISO 
+      ? normalizeLastRunISO(patch.lastRunISO) 
       : currentStatus.lastRunISO;
 
   const mergedStatus = {
