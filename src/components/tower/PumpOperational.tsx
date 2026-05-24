@@ -311,10 +311,10 @@ export function NextCyclePanel({
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              {status.motorManualMode === "FORCED_ON"
+              {status.motorManualMode === "FORCED_ON" || status.motorManualMode === "FORCED_OFF"
                 ? "Next mist (suspended)"
                 : isMisting
-                ? "Next mist after this one"
+                ? "Current Cycle"
                 : "Next Cycle"}
             </div>
 
@@ -322,14 +322,18 @@ export function NextCyclePanel({
             <div className="flex items-baseline gap-2">
               <div
                 className={`font-mono text-5xl font-black tabular-nums tracking-tight ${
-                  isMisting && status.motorManualMode !== "FORCED_ON" ? "text-emerald-600" : "text-foreground"
+                  isMisting && status.motorManualMode !== "FORCED_ON" ? "text-emerald-600 animate-pulse" : "text-foreground"
                 }`}
               >
-                {idleCountdown}
+                {status.motorManualMode === "FORCED_ON" || status.motorManualMode === "FORCED_OFF"
+                  ? "PAUSED"
+                  : isMisting
+                  ? "ACTIVE"
+                  : idleCountdown}
               </div>
-              {idleCountdown !== "PAUSED" && idleCountdown !== "DUE NOW" && idleCountdown !== "--:--" && (
+              {!isMisting && status.motorManualMode !== "FORCED_OFF" && idleCountdown !== "DUE NOW" && idleCountdown !== "--:--" && (
                 <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-                  {isMisting ? "until next" : "until mist"}
+                  until mist
                 </span>
               )}
             </div>
@@ -412,7 +416,7 @@ export function NextCyclePanel({
         </div>
 
         {/* ── Blueprint timetable ───────────────────────────────────── */}
-        {timetable.length > 0 && (
+        {timetable.length > 0 && status.motorManualMode !== "FORCED_ON" && status.motorManualMode !== "FORCED_OFF" && (
           <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs">
             <div className="mb-2 font-semibold uppercase tracking-[0.18em] text-muted-foreground">
               Upcoming mists
