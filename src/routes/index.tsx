@@ -60,6 +60,7 @@ function Index() {
     ? devices.some((device) => device.deviceId === selectedDeviceId.trim())
     : false;
   const activeDeviceId = selectedDeviceKnown ? selectedDeviceId.trim() : (status?.deviceId ?? null);
+  const requestDeviceId = selectedDeviceKnown ? selectedDeviceId.trim() : null;
 
   useEffect(() => {
     setMounted(true);
@@ -97,14 +98,14 @@ function Index() {
     if (!mounted) return;
 
     // Initial fetch
-    fetchStatusEnvelope(selectedDeviceId.trim() || null).then((payload) => {
+    fetchStatusEnvelope(requestDeviceId).then((payload) => {
       setStatus(payload?.status ?? null);
       setHasRegisteredDevice(Boolean(payload?.hasRegisteredDevice));
     });
     fetchSchedule().then((s) => s && setSchedule(s));
 
     const interval = setInterval(() => {
-      fetchStatusEnvelope(selectedDeviceId.trim() || null).then((payload) => {
+      fetchStatusEnvelope(requestDeviceId).then((payload) => {
         setStatus(payload?.status ?? null);
         setHasRegisteredDevice(Boolean(payload?.hasRegisteredDevice));
       });
@@ -112,7 +113,7 @@ function Index() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [mounted, selectedDeviceId]);
+  }, [mounted, requestDeviceId]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -127,6 +128,11 @@ function Index() {
 
     if (trimmedSelection && !knownSelection && status?.deviceId) {
       setSelectedDeviceId(status.deviceId);
+      return;
+    }
+
+    if (trimmedSelection && !knownSelection && !status?.deviceId && devices.length > 0) {
+      setSelectedDeviceId(devices[0].deviceId);
     }
   }, [mounted, selectedDeviceId, status?.deviceId, devices]);
 
