@@ -225,7 +225,7 @@ export function NextCyclePanel({
     return () => clearInterval(id);
   }, [
     isMisting,
-    lastRunMs,
+    status.lastRunISO,
     expectedDuration,
     expectedOff,
     status.nextCycleISO,

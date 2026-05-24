@@ -48,8 +48,8 @@ const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend
 const char* API_BASE_URL  = "http://13.234.122.175:8080";
-const char* DEVICE_ID     = "device-81yyyc";
-const char* DEVICE_SECRET = "70b12fe8c70d9b07da981e01089fd1f9700264890b156a48";
+const char* DEVICE_ID     = "device-zp07xd";
+const char* DEVICE_SECRET = "c5f86f564a628618afffccfcc8f7a42ee11741c51d9941eb";
 // GPIO
 const int PIN_DHT_DATA           = 16;
 const int PIN_LDR_SENSOR         = 36;
