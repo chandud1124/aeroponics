@@ -149,18 +149,29 @@ export function NextCyclePanel({
       const offMs = expectedOff * 60 * 1000;          // 420 000 ms
       const fullCycleMs = onMs + offMs;               // 600 000 ms
 
-      // ── MISTING countdown (remaining ON time) ────────────────────
-      if (isMisting && lastRunMs != null) {
-        const onEndMs = lastRunMs + onMs;
-        const remaining = Math.max(0, Math.ceil((onEndMs - now) / 1000));
-        setMistingRemainingSec(remaining);
+      // ── MANUAL FORCE OFF ──────────────────────────────────────────
+      if (status.motorManualMode === "FORCED_OFF") {
+        setMistingRemainingSec(0);
+        setIdleCountdown("PAUSED");
+      }
+      // ── MISTING countdown (remaining ON time / manual elapsed time) ──
+      else if (isMisting && lastRunMs != null) {
+        if (status.motorManualMode === "FORCED_ON") {
+          const elapsed = Math.max(0, Math.floor((now - lastRunMs) / 1000));
+          setMistingRemainingSec(elapsed);
+          setIdleCountdown("PAUSED");
+        } else {
+          const onEndMs = lastRunMs + onMs;
+          const remaining = Math.max(0, Math.ceil((onEndMs - now) / 1000));
+          setMistingRemainingSec(remaining);
 
-        // "Next mist after this one" = end of current ON + full OFF rest
-        const nextMistMs = lastRunMs + fullCycleMs;
-        const nextSecs = Math.max(0, Math.floor((nextMistMs - now) / 1000));
-        const mm = String(Math.floor(nextSecs / 60)).padStart(2, "0");
-        const ss = String(nextSecs % 60).padStart(2, "0");
-        setIdleCountdown(`${mm}:${ss}`);
+          // "Next mist after this one" = end of current ON + full OFF rest
+          const nextMistMs = lastRunMs + fullCycleMs;
+          const nextSecs = Math.max(0, Math.floor((nextMistMs - now) / 1000));
+          const mm = String(Math.floor(nextSecs / 60)).padStart(2, "0");
+          const ss = String(nextSecs % 60).padStart(2, "0");
+          setIdleCountdown(`${mm}:${ss}`);
+        }
       } else if (!isMisting && lastRunMs != null) {
         // ── IDLE countdown (pump is OFF, waiting for next mist) ─────
         setMistingRemainingSec(0);
@@ -220,6 +231,7 @@ export function NextCyclePanel({
     status.nextCycleISO,
     status.nextCycleIn,
     status.retryNextCycleISO,
+    status.motorManualMode,
   ]);
 
   // ── Blueprint timetable ─────────────────────────────────────────────
@@ -274,19 +286,21 @@ export function NextCyclePanel({
           </span>
           <div className="flex-1">
             <div className="text-sm font-bold uppercase tracking-widest text-white">
-              🌿 MISTING NOW
+              🌿 {status.motorManualMode === "FORCED_ON" ? "MANUAL RUN ACTIVE" : "MISTING NOW"}
             </div>
             <div className="text-xs text-emerald-100">
-              Pump relay is energised — aeroponics cycle active
+              {status.motorManualMode === "FORCED_ON"
+                ? "Pump is running in manual override mode"
+                : "Pump relay is energised — aeroponics cycle active"}
             </div>
           </div>
-          {/* Remaining ON time */}
+          {/* Remaining or Elapsed ON time */}
           <div className="text-right">
             <div className="font-mono text-2xl font-black tabular-nums text-white">
               {mistingMM}:{mistingSS}
             </div>
             <div className="text-[10px] uppercase tracking-widest text-emerald-100">
-              left ON
+              {status.motorManualMode === "FORCED_ON" ? "elapsed" : "left ON"}
             </div>
           </div>
         </div>
@@ -297,25 +311,31 @@ export function NextCyclePanel({
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              {isMisting ? "Next mist after this one" : "Next Cycle"}
+              {status.motorManualMode === "FORCED_ON"
+                ? "Next mist (suspended)"
+                : isMisting
+                ? "Next mist after this one"
+                : "Next Cycle"}
             </div>
 
             {/* Big countdown */}
             <div className="flex items-baseline gap-2">
               <div
                 className={`font-mono text-5xl font-black tabular-nums tracking-tight ${
-                  isMisting ? "text-emerald-600" : "text-foreground"
+                  isMisting && status.motorManualMode !== "FORCED_ON" ? "text-emerald-600" : "text-foreground"
                 }`}
               >
-                {isMisting ? idleCountdown : idleCountdown}
+                {idleCountdown}
               </div>
-              <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-                {isMisting ? "until next" : "until mist"}
-              </span>
+              {idleCountdown !== "PAUSED" && idleCountdown !== "DUE NOW" && idleCountdown !== "--:--" && (
+                <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                  {isMisting ? "until next" : "until mist"}
+                </span>
+              )}
             </div>
 
             {/* Next run time */}
-            {!isMisting && (
+            {!isMisting && status.motorManualMode !== "FORCED_OFF" && (
               <div className="mt-1 text-xs text-muted-foreground">
                 Starts at <span className="font-semibold text-foreground">{nextTimeStr}</span>
               </div>
