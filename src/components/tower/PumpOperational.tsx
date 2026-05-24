@@ -108,108 +108,7 @@ export function NextCyclePanel({
   schedule: Schedule;
   online?: boolean;
 }) {
-  const [countdown, setCountdown] = useState<string>("--:--");
-  const [retryCountdown, setRetryCountdown] = useState<string | null>(null);
-  const manualOverrideActive = status.motorManualMode != null && status.motorManualMode !== "AUTO";
-  const controlModeLabel = manualOverrideActive ? "MANUAL OVERRIDE" : "AUTOMATIC";
-  const controlModeHint = manualOverrideActive
-    ? `Motor: ${status.motorManualMode ?? "AUTO"}`
-    : online
-      ? "ESP32 and backend are following the automatic schedule"
-      : "Controller offline: showing the last known schedule state";
-
-  useEffect(() => {
-    const updateCountdown = () => {
-      if (!status.nextCycleISO || status.nextCycleIn < 0) {
-        setCountdown("--:--");
-        return;
-      }
-
-      if (status.nextCycleIn === 0) {
-        // If schedule is due but the pump hasn't reported as running yet,
-        // show a clearer message so users know we're awaiting device confirmation.
-        if (!status.pumpOn) {
-          setCountdown("DUE NOW — awaiting device");
-        } else {
-          setCountdown("RUNNING");
-        }
-        return;
-      }
-
-      const targetMs = new Date(status.nextCycleISO).getTime();
-      if (Number.isNaN(targetMs)) {
-        setCountdown("--:--");
-        return;
-      }
-
-      const seconds = Math.max(0, Math.floor((targetMs - Date.now()) / 1000));
-
-      const mins = Math.floor(seconds / 60);
-      const secs = seconds % 60;
-      const formatted =
-        mins < 100
-          ? `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
-          : `${mins}:${String(secs).padStart(2, "0")}`;
-
-      setCountdown(formatted);
-    };
-
-    const updateRetryCountdown = () => {
-      if (!status.retryNextCycleISO) {
-        setRetryCountdown(null);
-        return;
-      }
-
-      const targetMs = new Date(status.retryNextCycleISO).getTime();
-      if (Number.isNaN(targetMs)) {
-        setRetryCountdown(null);
-        return;
-      }
-
-      const seconds = Math.max(0, Math.ceil((targetMs - Date.now()) / 1000));
-      setRetryCountdown(
-        seconds <= 1
-          ? "00:01"
-          : `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`,
-      );
-    };
-
-    updateCountdown();
-    updateRetryCountdown();
-    const interval = setInterval(updateCountdown, 1000);
-    const retryInterval = setInterval(updateRetryCountdown, 1000);
-    return () => {
-      clearInterval(interval);
-      clearInterval(retryInterval);
-    };
-  }, [status.nextCycleISO, status.retryNextCycleISO, status.pumpOn]);
-
-  if (!status.nextCycleISO) {
-      const waitingText = schedule.enabled
-        ? status.lastRunISO
-          ? "Waiting for the next scheduled run"
-          : "Awaiting first automatic cycle"
-        : "Schedule disabled";
-    return (
-      <Card className="p-6">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="mb-1 text-sm font-medium text-muted-foreground">Next Cycle</div>
-                <div className="text-xs text-muted-foreground">{waitingText}</div>
-            </div>
-            <Clock className="h-5 w-5 text-muted-foreground" />
-          </div>
-            <div className="rounded-md border border-dashed border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-              Control mode: <span className="font-semibold text-foreground">{controlModeLabel}</span>
-              <div className="mt-1">{controlModeHint}</div>
-            </div>
-        </div>
-      </Card>
-    );
-  }
-
-  const nextDate = new Date(status.nextCycleISO);
+  // ── Derived schedule values ─────────────────────────────────────────
   const isDayMode = (status.cycleMode ?? "DAY") === "DAY";
   const modeLabel = isDayMode ? "DAY MODE" : "NIGHT MODE";
   const expectedDuration = status.cycleOnDurationSeconds ?? (isDayMode
@@ -220,162 +119,283 @@ export function NextCyclePanel({
     : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15));
   const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
   const lightEndHour = schedule.lightEndHour ?? schedule.endHour;
-  const timeStr = nextDate.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
 
-  // Device-applied schedule timestamp (optional)
-  const appliedAtRaw = (status as any).scheduleAppliedAt as number | string | undefined;
-  const appliedAtMs = appliedAtRaw
-    ? typeof appliedAtRaw === "number"
-      ? appliedAtRaw > 1e12
-        ? appliedAtRaw
-        : appliedAtRaw * 1000
-      : Date.parse(String(appliedAtRaw))
-    : null;
-  const appliedAtStr = appliedAtMs ? new Date(appliedAtMs).toLocaleString() : null;
-  const appliedPlanName = (status as any).appliedPlanName as string | undefined;
-  const plannedNextCycle = status.plannedNextCycleISO ? new Date(status.plannedNextCycleISO) : new Date(status.nextCycleISO);
+  // ── Pump running state ──────────────────────────────────────────────
+  const isMisting = Boolean(status.pumpOn);
+  const manualOverrideActive = status.motorManualMode != null && status.motorManualMode !== "AUTO";
+
+  // Parse lastRunISO to ms
+  const lastRunMs = (() => {
+    if (!status.lastRunISO) return null;
+    const raw = (status.lastRunISO as any) as number | string;
+    const ms = typeof raw === "number" ? (raw > 1e12 ? raw : raw * 1000) : Date.parse(String(raw));
+    return Number.isFinite(ms) ? ms : null;
+  })();
+
+  // ── Live countdowns ─────────────────────────────────────────────────
+  // mistingRemainingSec: seconds the pump still has left this cycle
+  const [mistingRemainingSec, setMistingRemainingSec] = useState<number>(0);
+  // idleCountdown: MM:SS until next mist
+  const [idleCountdown, setIdleCountdown] = useState<string>("--:--");
+  const [retryCountdown, setRetryCountdown] = useState<string | null>(null);
+
+  useEffect(() => {
+    const tick = () => {
+      const now = Date.now();
+
+      // ── MISTING countdown (remaining ON time) ────────────────────
+      if (isMisting && lastRunMs != null) {
+        const endMs = lastRunMs + expectedDuration * 1000;
+        const remaining = Math.max(0, Math.ceil((endMs - now) / 1000));
+        setMistingRemainingSec(remaining);
+      } else {
+        setMistingRemainingSec(0);
+      }
+
+      // ── IDLE countdown (time to next mist) ──────────────────────
+      if (!status.nextCycleISO || status.nextCycleIn < 0) {
+        setIdleCountdown("--:--");
+      } else if (status.nextCycleIn === 0 && !isMisting) {
+        setIdleCountdown("DUE NOW");
+      } else {
+        const targetMs = new Date(status.nextCycleISO).getTime();
+        if (Number.isNaN(targetMs)) {
+          setIdleCountdown("--:--");
+        } else {
+          const secs = Math.max(0, Math.floor((targetMs - now) / 1000));
+          const mm = String(Math.floor(secs / 60)).padStart(2, "0");
+          const ss = String(secs % 60).padStart(2, "0");
+          setIdleCountdown(`${mm}:${ss}`);
+        }
+      }
+
+      // ── RETRY countdown ──────────────────────────────────────────
+      if (!status.retryNextCycleISO) {
+        setRetryCountdown(null);
+      } else {
+        const targetMs = new Date(status.retryNextCycleISO).getTime();
+        if (Number.isNaN(targetMs)) {
+          setRetryCountdown(null);
+        } else {
+          const secs = Math.max(0, Math.ceil((targetMs - now) / 1000));
+          setRetryCountdown(
+            secs <= 1
+              ? "00:01"
+              : `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`,
+          );
+        }
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [
+    isMisting,
+    lastRunMs,
+    expectedDuration,
+    status.nextCycleISO,
+    status.nextCycleIn,
+    status.retryNextCycleISO,
+  ]);
+
+  // ── Blueprint timetable ─────────────────────────────────────────────
+  const plannedNextCycle = status.plannedNextCycleISO
+    ? new Date(status.plannedNextCycleISO)
+    : status.nextCycleISO
+      ? new Date(status.nextCycleISO)
+      : null;
 
   const timetable: Array<{ label: string; time: string }> = [];
   if (plannedNextCycle && !Number.isNaN(plannedNextCycle.getTime())) {
-    const intervalMinutes = status.cycleOffIntervalMinutes ?? expectedOff;
-    const slotCount = 4;
-    for (let index = 0; index < slotCount; index += 1) {
-      const slot = new Date(plannedNextCycle.getTime() + index * intervalMinutes * 60 * 1000);
+    for (let i = 0; i < 4; i++) {
+      const slot = new Date(plannedNextCycle.getTime() + i * expectedOff * 60 * 1000);
       if (slot.getHours() >= schedule.endHour) break;
       timetable.push({
-        label: index === 0 ? "Next" : `+${index}`,
-        time: slot.toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true,
-        }),
+        label: i === 0 ? "Next" : `+${i}`,
+        time: slot.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }),
       });
     }
   }
 
-  // If pump is running, compute remaining on-time from lastRunISO + expectedDuration
-  let runningRemainingSec: number | null = null;
-  if (status.pumpOn && status.lastRunISO) {
-    const raw = (status.lastRunISO as any) as number | string;
-    const lastMs = typeof raw === "number" ? (raw > 1e12 ? raw : raw * 1000) : Date.parse(String(raw));
-    const expectedMs = expectedDuration * 1000;
-    runningRemainingSec = Math.max(0, Math.ceil((lastMs + expectedMs - Date.now()) / 1000));
-  }
+  // ── Plan applied metadata ───────────────────────────────────────────
+  const appliedAtRaw = (status as any).scheduleAppliedAt as number | string | undefined;
+  const appliedAtMs = appliedAtRaw
+    ? typeof appliedAtRaw === "number"
+      ? appliedAtRaw > 1e12 ? appliedAtRaw : appliedAtRaw * 1000
+      : Date.parse(String(appliedAtRaw))
+    : null;
+  const appliedAtStr = appliedAtMs ? new Date(appliedAtMs).toLocaleString("en-IN") : null;
 
-  // If light is on, compute remaining time until end of active window
-  let lightRemainingSec: number | null = null;
-  if (status.lightOn) {
-    const now = new Date();
-    const end = new Date(now);
-    end.setHours(schedule.endHour, 0, 0, 0);
-    if (end.getTime() <= now.getTime()) {
-      // If already past end today, set to tomorrow's end
-      end.setDate(end.getDate() + 1);
-    }
-    lightRemainingSec = Math.max(0, Math.ceil((end.getTime() - now.getTime()) / 1000));
-  }
+  // ── Next run time string ────────────────────────────────────────────
+  const nextTimeStr = status.nextCycleISO
+    ? new Date(status.nextCycleISO).toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : "—";
+
+  // ── Misting remaining formatted ─────────────────────────────────────
+  const mistingMM = String(Math.floor(mistingRemainingSec / 60)).padStart(2, "0");
+  const mistingSS = String(mistingRemainingSec % 60).padStart(2, "0");
 
   return (
-    <Card className="p-6">
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="mb-1 text-sm font-medium text-muted-foreground">Next Cycle</div>
-            <div className="mb-2 flex items-baseline gap-2">
-              <div className="text-4xl font-black tracking-tight tabular-nums">{countdown}</div>
-              <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">next mist</span>
+    <Card className="overflow-hidden p-0">
+      {/* ── MISTING ACTIVE banner ─────────────────────────────────── */}
+      {isMisting && (
+        <div className="flex items-center gap-3 bg-emerald-500 px-5 py-3">
+          <span className="relative flex h-3 w-3">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-white" />
+          </span>
+          <div className="flex-1">
+            <div className="text-sm font-bold uppercase tracking-widest text-white">
+              🌿 MISTING NOW
             </div>
-            <div className="text-xs text-muted-foreground">Next run: {timeStr}</div>
-            {status.retryNextCycleISO && retryCountdown && (
-              <div className="mt-1 text-xs font-medium text-red-700">Retrying in {retryCountdown}</div>
-            )}
-            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              <Badge variant={manualOverrideActive ? "destructive" : "default"}>{controlModeLabel}</Badge>
-              <Badge variant={status.pumpState === PumpState.MANUAL_MODE ? "secondary" : "outline"}>
-                Pump: {status.pumpState === PumpState.MANUAL_MODE ? "Manual" : "Automatic"}
-              </Badge>
-            </div>
-            {appliedAtStr && (
-              <div className="text-xs text-muted-foreground">Plan applied: {appliedAtStr} {appliedPlanName ? `· ${appliedPlanName}` : null}</div>
-            )}
-            <div className="text-xs text-muted-foreground">Lights: {String(lightStartHour).padStart(2, "0")}:00 - {String(lightEndHour).padStart(2, "0")}:00</div>
-            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
-              <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Mode</div>
-                <div className="font-semibold">{modeLabel}</div>
-              </div>
-              <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Expected duration</div>
-                <div className="font-semibold">{expectedDuration} sec</div>
-              </div>
-              <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">OFF interval</div>
-                <div className="font-semibold">{expectedOff} min</div>
-              </div>
-              <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Humidity</div>
-                <div className="font-semibold">{status.humidityPct != null ? `${status.humidityPct.toFixed(1)}%` : "—"}</div>
-              </div>
-            </div>
-            <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
-              <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Ambient light</div>
-                <div className="font-semibold">{status.lightLux != null ? `${status.lightLux} lux` : "—"}</div>
-              </div>
-              <div className="rounded-md bg-secondary px-3 py-2">
-                <div className="text-muted-foreground">Light relay</div>
-                <div className="font-semibold">{status.lightOn ? "On" : "Off"}</div>
-              </div>
-            </div>
-            <div className="mt-3 rounded-lg border border-border bg-secondary/60 px-3 py-2 text-xs">
-              Current cycle: <span className="font-semibold">{modeLabel}</span> · {expectedDuration}s ON · {expectedOff} min OFF
-              <div className="mt-2 flex gap-3">
-                {status.pumpOn && runningRemainingSec != null && (
-                  <div className="rounded-md bg-green-50 px-2 py-1 text-xs">
-                    <div className="text-muted-foreground">Running — time left</div>
-                    <div className="font-semibold">{String(Math.floor(runningRemainingSec / 60)).padStart(2, "0")}:{String(runningRemainingSec % 60).padStart(2, "0")}</div>
-                  </div>
-                )}
-
-                {status.lightOn && lightRemainingSec != null && (
-                  <div className="rounded-md bg-amber-50 px-2 py-1 text-xs">
-                    <div className="text-muted-foreground">Light — time left</div>
-                    <div className="font-semibold">{Math.floor(lightRemainingSec / 60)}m {lightRemainingSec % 60}s</div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="mt-3 rounded-lg border border-border bg-background/70 p-3 text-xs">
-              <div className="mb-2 font-semibold uppercase tracking-[0.2em] text-muted-foreground">Blueprint timetable</div>
-              {timetable.length > 0 ? (
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  {timetable.map((slot) => (
-                    <div key={`${slot.label}-${slot.time}`} className="rounded-md bg-secondary px-3 py-2">
-                      <div className="text-muted-foreground">{slot.label}</div>
-                      <div className="font-semibold tabular-nums">{slot.time}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-muted-foreground">No timetable available for the current schedule.</div>
-              )}
-              <div className="mt-2 text-muted-foreground">
-                Failed flow checks retry every 1 second without shifting the blueprint.
-              </div>
+            <div className="text-xs text-emerald-100">
+              Pump relay is energised — aeroponics cycle active
             </div>
           </div>
-          <Clock className="h-6 w-6 text-primary" />
+          {/* Remaining ON time */}
+          <div className="text-right">
+            <div className="font-mono text-2xl font-black tabular-nums text-white">
+              {mistingMM}:{mistingSS}
+            </div>
+            <div className="text-[10px] uppercase tracking-widest text-emerald-100">
+              left ON
+            </div>
+          </div>
         </div>
+      )}
+
+      <div className="space-y-4 p-5">
+        {/* ── Header row ─────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              {isMisting ? "Next mist after this one" : "Next Cycle"}
+            </div>
+
+            {/* Big countdown */}
+            <div className="flex items-baseline gap-2">
+              <div
+                className={`font-mono text-5xl font-black tabular-nums tracking-tight ${
+                  isMisting ? "text-emerald-600" : "text-foreground"
+                }`}
+              >
+                {isMisting ? idleCountdown : idleCountdown}
+              </div>
+              <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                {isMisting ? "until next" : "until mist"}
+              </span>
+            </div>
+
+            {/* Next run time */}
+            {!isMisting && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                Starts at <span className="font-semibold text-foreground">{nextTimeStr}</span>
+              </div>
+            )}
+
+            {retryCountdown && (
+              <div className="mt-1 text-xs font-medium text-red-600">
+                ⚠ Retrying in {retryCountdown}
+              </div>
+            )}
+          </div>
+
+          {/* Control mode badge */}
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
+                manualOverrideActive
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-sky-100 text-sky-700"
+              }`}
+            >
+              {manualOverrideActive ? `⚡ ${status.motorManualMode}` : "🔄 AUTO"}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {modeLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* ── Cycle stats grid ─────────────────────────────────────── */}
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <div className="rounded-lg bg-secondary px-3 py-2.5">
+            <div className="text-muted-foreground">ON duration</div>
+            <div className="mt-0.5 font-bold text-foreground">{expectedDuration}s</div>
+          </div>
+          <div className="rounded-lg bg-secondary px-3 py-2.5">
+            <div className="text-muted-foreground">OFF interval</div>
+            <div className="mt-0.5 font-bold text-foreground">{expectedOff} min</div>
+          </div>
+          <div className="rounded-lg bg-secondary px-3 py-2.5">
+            <div className="text-muted-foreground">Humidity</div>
+            <div className="mt-0.5 font-bold text-foreground">
+              {status.humidityPct != null ? `${status.humidityPct.toFixed(1)}%` : "—"}
+            </div>
+          </div>
+          <div className="rounded-lg bg-secondary px-3 py-2.5">
+            <div className="text-muted-foreground">Ambient light</div>
+            <div className="mt-0.5 font-bold text-foreground">
+              {status.lightLux != null ? `${status.lightLux} lx` : "—"}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Light & schedule info ─────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>
+            💡 Light window:{" "}
+            <span className="font-medium text-foreground">
+              {String(lightStartHour).padStart(2, "0")}:00 – {String(lightEndHour).padStart(2, "0")}:00
+            </span>
+          </span>
+          <span>
+            Light relay:{" "}
+            <span className={`font-medium ${status.lightOn ? "text-emerald-600" : "text-foreground"}`}>
+              {status.lightOn ? "ON ✓" : "OFF"}
+            </span>
+          </span>
+          {appliedAtStr && (
+            <span>
+              Plan synced:{" "}
+              <span className="font-medium text-foreground">{appliedAtStr}</span>
+            </span>
+          )}
+        </div>
+
+        {/* ── Blueprint timetable ───────────────────────────────────── */}
+        {timetable.length > 0 && (
+          <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs">
+            <div className="mb-2 font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Upcoming mists
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {timetable.map((slot) => (
+                <div
+                  key={`${slot.label}-${slot.time}`}
+                  className={`rounded-md px-3 py-2 ${
+                    slot.label === "Next" && isMisting
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-secondary"
+                  }`}
+                >
+                  <div className="text-muted-foreground">{slot.label}</div>
+                  <div className="font-semibold tabular-nums">{slot.time}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );
 }
+
 
 export function LiveCycleHistoryPanel({ deviceId }: { deviceId?: string | null }) {
   type Row = {
@@ -683,41 +703,89 @@ type RelayStateCardProps = {
   toggleLabel?: string;
   onToggleMode?: () => void;
   toggling?: boolean;
+  controlsAllowed?: boolean;
+  online?: boolean;
 };
 
-function RelayStateCard({ label, icon, active, manualMode, modeLabel, detail, toggleLabel, onToggleMode, toggling = false }: RelayStateCardProps) {
+function RelayStateCard({
+  label,
+  icon,
+  active,
+  manualMode,
+  detail,
+  toggleLabel,
+  onToggleMode,
+  toggling = false,
+  controlsAllowed = true,
+  online = true,
+}: RelayStateCardProps) {
+  const isManual = manualMode && manualMode !== "AUTO";
+  const canToggle = online && controlsAllowed && Boolean(toggleLabel) && Boolean(onToggleMode);
+
   return (
-    <Card className={`p-5 ${active ? "border-primary/40 bg-primary/5" : "border-border"}`}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className={`rounded-full p-2 ${active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+    <div
+      className={`relative flex flex-col gap-3 rounded-xl border p-4 transition-all ${
+        active
+          ? "border-emerald-400/50 bg-emerald-50/60 dark:bg-emerald-950/20"
+          : "border-border bg-card"
+      }`}
+    >
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+              active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+            }`}
+          >
             {icon}
           </div>
-          <div>
-            <div className="text-sm font-medium text-muted-foreground">{label}</div>
-            <div className="mt-1 text-2xl font-semibold tracking-tight">{active ? "ON" : "OFF"}</div>
-          </div>
+          <span className="text-sm font-semibold leading-tight text-foreground">{label}</span>
         </div>
-        <div className="flex flex-col gap-2 sm:items-end">
-          <Badge variant={active ? "default" : "secondary"}>{active ? "Relay active" : "Relay idle"}</Badge>
-          {toggleLabel && onToggleMode ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onToggleMode}
-              disabled={toggling}
-              className="h-7 w-full px-2 text-[11px] uppercase tracking-[0.18em] sm:w-auto"
-            >
-              {toggleLabel}
-            </Button>
-          ) : null}
-        </div>
+        {/* Live ON/OFF pill */}
+        <span
+          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold tracking-widest ${
+            active
+              ? "bg-emerald-500 text-white"
+              : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              active ? "animate-pulse bg-white" : "bg-slate-400"
+            }`}
+          />
+          {active ? "ON" : "OFF"}
+        </span>
       </div>
-      <div className="mt-3 text-xs leading-relaxed text-muted-foreground">
-        {detail}
-        {manualMode && manualMode !== "AUTO" ? ` • ${modeLabel ?? "Control mode"}: ${manualMode}` : ""}
+
+      {/* Detail text */}
+      <p className="text-xs leading-relaxed text-muted-foreground">{detail}</p>
+
+      {/* Footer row: mode badge + toggle button */}
+      <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+        <span
+          className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${
+            isManual
+              ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+              : "bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
+          }`}
+        >
+          {isManual ? `MANUAL · ${manualMode}` : "AUTO"}
+        </span>
+        {toggleLabel && onToggleMode ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onToggleMode}
+            disabled={!canToggle || toggling}
+            className="h-6 px-2.5 text-[10px] font-semibold uppercase tracking-[0.15em]"
+          >
+            {toggling ? "…" : toggleLabel}
+          </Button>
+        ) : null}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -775,64 +843,106 @@ export function RelayStatesCard({
   }
 
   return (
-    <Card className="p-6">
-      <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-medium text-muted-foreground">Relay states</div>
-              <div className="text-xs text-muted-foreground">
-                {online ? "Major controls and their current relay state" : "Offline mode: showing the last known relay state"}
-              </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge variant={online ? "secondary" : "outline"} className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
-              {online ? <Wifi className="mr-1 h-3 w-3" /> : <WifiOff className="mr-1 h-3 w-3" />}
-                {online ? "Online" : "Offline"}
-            </Badge>
-            <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase tracking-[0.18em]">
-              Controls ready
-            </Badge>
-          </div>
+    <div className="flex flex-col gap-4">
+      {/* Section header */}
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold tracking-tight text-foreground">Relay States</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {online
+              ? "Live relay output from the ESP32 controller"
+              : "Offline — showing last known relay state"}
+          </p>
         </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <RelayStateCard
-            label="Motor / pump"
-            icon={<ToggleRight className="h-4 w-4" />}
-            active={status.pumpOn}
-            manualMode={status.motorManualMode}
-            modeLabel="Pump mode"
-            detail={online ? (status.pumpOn ? "Relay state is on right now" : "Relay state is off") : "Last known relay state"}
-          />
-          <RelayStateCard
-            label="LED grow light"
-            icon={<ToggleRight className="h-4 w-4" />}
-            active={Boolean(status.lightOn)}
-            manualMode={status.lightManualMode}
-            modeLabel="Light mode"
-            detail={online ? (status.lightOn ? "Light relay is supplying the LED strip" : "Light relay is off") : "Last known relay state"}
-            toggleLabel={status.lightManualMode && status.lightManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
-            onToggleMode={() => toggleRelayMode("light", Boolean(status.lightOn), status.lightManualMode)}
-            toggling={modeLoading.light || !online || !controlsAllowed}
-          />
-          <RelayStateCard
-            label="Battery charging"
-            icon={<BatteryCharging className="h-4 w-4" />}
-            active={Boolean(status.batteryChargeOn)}
-            manualMode={status.batteryManualMode}
-            modeLabel="Battery mode"
-            detail={online ? (status.batteryChargeOn ? "Battery charge relay is active" : "Battery charge relay is off") : "Last known relay state"}
-            toggleLabel={status.batteryManualMode && status.batteryManualMode !== "AUTO" ? "AUTO" : "MANUAL"}
-            onToggleMode={() => toggleRelayMode("battery", Boolean(status.batteryChargeOn), status.batteryManualMode)}
-            toggling={modeLoading.battery || !online || !controlsAllowed}
-          />
-        </div>
-
-        <div className="rounded-lg border border-dashed border-border bg-secondary/40 p-4 text-sm text-muted-foreground">
-          Above cards show whether each relay is switched on or off. Use the buttons below to force pump or light manually.
+        <div className="flex shrink-0 items-center gap-2">
+          {online ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+              <Wifi className="h-3 w-3" />
+              Online
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400">
+              <WifiOff className="h-3 w-3" />
+              Offline
+            </span>
+          )}
         </div>
       </div>
-    </Card>
+
+      {/* Relay cards grid */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <RelayStateCard
+          label="Motor / Pump"
+          icon={<ToggleRight className="h-4 w-4" />}
+          active={status.pumpOn}
+          manualMode={status.motorManualMode}
+          detail={
+            !online
+              ? "Last known relay state"
+              : status.pumpOn
+              ? "Pump relay is energised — water is flowing"
+              : "Pump relay is open — watering idle"
+          }
+          online={online}
+          controlsAllowed={controlsAllowed}
+        />
+        <RelayStateCard
+          label="LED Grow Light"
+          icon={<ToggleRight className="h-4 w-4" />}
+          active={Boolean(status.lightOn)}
+          manualMode={status.lightManualMode}
+          detail={
+            !online
+              ? "Last known relay state"
+              : status.lightOn
+              ? "LED strip is powered on"
+              : "LED strip relay is open"
+          }
+          toggleLabel={
+            status.lightManualMode && status.lightManualMode !== "AUTO" ? "Set AUTO" : "Force ON/OFF"
+          }
+          onToggleMode={() =>
+            toggleRelayMode("light", Boolean(status.lightOn), status.lightManualMode)
+          }
+          toggling={modeLoading.light}
+          online={online}
+          controlsAllowed={controlsAllowed}
+        />
+        <RelayStateCard
+          label="Battery Charging"
+          icon={<BatteryCharging className="h-4 w-4" />}
+          active={Boolean(status.batteryChargeOn)}
+          manualMode={status.batteryManualMode}
+          detail={
+            !online
+              ? "Last known relay state"
+              : status.batteryChargeOn
+              ? "Charge relay active — battery is charging"
+              : "Charge relay open — battery idle"
+          }
+          toggleLabel={
+            status.batteryManualMode && status.batteryManualMode !== "AUTO"
+              ? "Set AUTO"
+              : "Force ON/OFF"
+          }
+          onToggleMode={() =>
+            toggleRelayMode("battery", Boolean(status.batteryChargeOn), status.batteryManualMode)
+          }
+          toggling={modeLoading.battery}
+          online={online}
+          controlsAllowed={controlsAllowed}
+        />
+      </div>
+
+      {/* Info footer */}
+      <div className="flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/40 px-4 py-3">
+        <Gauge className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Each card reflects the actual ESP32 relay output. Green&nbsp;=&nbsp;energised, grey&nbsp;=&nbsp;idle.
+          Use the toggle buttons to override AUTO mode temporarily.
+        </p>
+      </div>
+    </div>
   );
 }
 

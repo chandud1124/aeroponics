@@ -349,6 +349,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     touchStatus({ source: "esp32", deviceId: resolvedDeviceId });
     const status = getStatus(resolvedDeviceId);
     const schedule = getSchedule();
+    const cycleProfile = getCycleProfile();
 
     return jsonResponse(
       {
@@ -358,6 +359,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         serverTime: Date.now(),
         hasRegisteredDevice: true,
         ...schedule,
+        intervalMinutes: cycleProfile.offIntervalMinutes,
+        durationSeconds: cycleProfile.onDurationSeconds,
         ...(status ?? {}),
       },
       200,

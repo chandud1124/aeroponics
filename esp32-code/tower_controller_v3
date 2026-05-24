@@ -1096,8 +1096,10 @@ void postStatus() {
   body += "\"lightOn\":"          + String(status.lightOn       ? "true" : "false") + ",";
   body += "\"batteryChargeOn\":"  + String(status.batteryChargeOn ? "true" : "false") + ",";
   body += "\"humidityPct\":"      + String(status.humidityPct, 1) + ",";
-  body += "\"lightRaw\":"         + String(status.lightRaw) + ",";     // [FIX-7] correct name
-  body += "\"lightDark\":"        + String(status.lightDark ? "true" : "false") + ","; // [FIX-7]
+  // Map lightRaw to lightLux so backend/dashboard shows real sensor value
+  body += "\"lightLux\":"         + String(status.lightRaw) + ",";
+  body += "\"lightRaw\":"         + String(status.lightRaw) + ",";
+  body += "\"lightDark\":"        + String(status.lightDark ? "true" : "false") + ",";
   body += "\"dhtOk\":"            + String(status.dhtOk ? "true" : "false") + ",";
   body += "\"humiditySensorOk\":"  + String(sensors.humidityValid ? "true" : "false") + ",";
   body += "\"lightSensorOk\":"     + String(sensors.lightValid ? "true" : "false") + ",";
@@ -1109,6 +1111,10 @@ void postStatus() {
   body += "\"lastBootFault\":\""  + bootLastFault + "\",";
   body += "\"uptimeSec\":"        + String((uint32_t)(millis() / 1000UL)) + ",";
   body += "\"pendingLogs\":"      + String(getOfflineLogCount()) + ",";
+  // Send last pump run epoch so backend can timestamp cycles correctly
+  if (status.lastRunEpoch > 0) {
+    body += "\"lastRunAt\":"      + String((uint32_t)status.lastRunEpoch) + ",";
+  }
   body += "\"wifiConnected\":"    + String(wifiConnected ? "true" : "false");
   // Optional fields
   if (appliedPlanName.length() > 0) {
