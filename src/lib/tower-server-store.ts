@@ -719,12 +719,13 @@ export function updateStatus(
   const telemetryUpdatedAt = source === "esp32" ? Date.now() : currentStatus.telemetryUpdatedAt ?? null;
   const heartbeatUpdatedAt = source === "esp32" ? Date.now() : currentStatus.heartbeatUpdatedAt ?? null;
 
-  // Transition check: if pump turns ON, set lastRunISO to current time
+  // Prefer an explicit run timestamp from the device/backend.
+  // Only infer "now" when the pump turns on and no timestamp was supplied.
   const transitionToOn = patch.pumpOn === true && !currentStatus.pumpOn;
-  const resolvedLastRunISO = transitionToOn 
-    ? new Date().toISOString() 
-    : patch.lastRunISO !== undefined 
-      ? normalizeLastRunISO(patch.lastRunISO) 
+  const resolvedLastRunISO = patch.lastRunISO !== undefined
+    ? normalizeLastRunISO(patch.lastRunISO)
+    : transitionToOn
+      ? currentStatus.lastRunISO ?? new Date().toISOString()
       : currentStatus.lastRunISO;
 
   const mergedStatus = {

@@ -17,6 +17,7 @@ void enterFault(unsigned long now, const char* code);
 time_t getCurrentEpoch();
 void readSensors();
 void postStatus();
+void stopPumpCycle();
 
 // ─────────────────────────────────────────────────────────────────────
 //  STATE MACHINE ENUM
@@ -239,6 +240,12 @@ ButtonState lightButton;
 void setRelayState(int pin, bool on) {
   // RELAY_ACTIVE_HIGH=false → LOW turns relay ON (most opto-isolated boards)
   digitalWrite(pin, RELAY_ACTIVE_HIGH ? (on ? HIGH : LOW) : (on ? LOW : HIGH));
+}
+
+void stopPumpCycle() {
+  setRelayState(PIN_PUMP_RELAY, false);
+  status.pumpOn = false;
+  status.flowing = false;
 }
 
 const char* manualModeToString(ManualMode mode) {
@@ -618,7 +625,15 @@ void readSensors() {
 // ─────────────────────────────────────────────────────────────────────
 
 void manageLightRelay() {
-  if (lightManualMode != MANUAL_AUTO) return;
+  if (lightManualMode != MANUAL_AUTO) {
+    bool shouldBeOn = (lightManualMode == MANUAL_FORCE_ON);
+    if (shouldBeOn != status.lightOn) {
+      setRelayState(PIN_LED_RELAY, shouldBeOn);
+      status.lightOn = shouldBeOn;
+      Serial.printf("[LIGHT] MANUAL Override -> %s\n", shouldBeOn ? "ON" : "OFF");
+    }
+    return;
+  }
 
   // Only auto-control if LDR gave a valid reading
   bool ldrValid = (sensors.lightRaw >= LDR_MIN_VALID);
@@ -707,6 +722,22 @@ void handleManualButtons(unsigned long now) {
 void checkSafety(unsigned long now) {
   if (!sensors.valid) return;
 
+  if (motorManualMode == MANUAL_AUTO && status.pumpOn) {
+    if (pumpStartMs == 0 || pumpScheduledEndMs == 0) {
+      Serial.println("[SAFETY] Pump state out of sync — forcing stop");
+      stopPumpCycle();
+      enterFault(now, "PUMP_STATE_MISMATCH");
+      return;
+    }
+
+    if (now >= pumpScheduledEndMs + 1000UL) {
+      Serial.println("[SAFETY] Pump exceeded scheduled runtime — forcing stop");
+      stopPumpCycle();
+      enterFault(now, "PUMP_TIMEOUT");
+      return;
+    }
+  }
+
   // Very high humidity alert (risk of fungal disease on plants)
   if (sensors.humidityPct > HUMIDITY_MAX_PCT) {
     Serial.printf("[SAFETY] Humidity %.1f%% exceeds %.1f%% limit\n",
@@ -726,7 +757,7 @@ void checkSafety(unsigned long now) {
 void runStateMachine(unsigned long now) {
   // [FIX-2] Handle manual mode FIRST as a complete override.
   // Apply outputs and return — do NOT fall through to other states.
-  if (motorManualMode != MANUAL_AUTO || lightManualMode != MANUAL_AUTO) {
+  if (motorManualMode != MANUAL_AUTO) {
     if (curState != STATE_MANUAL_MODE) {
       Serial.println("[SM] → MANUAL_MODE");
       curState = STATE_MANUAL_MODE;
@@ -738,6 +769,9 @@ void runStateMachine(unsigned long now) {
   // If we just left manual mode, return to IDLE
   if (curState == STATE_MANUAL_MODE) {
     Serial.println("[SM] MANUAL_MODE → IDLE");
+    setRelayState(PIN_PUMP_RELAY, false);
+    status.pumpOn = false;
+    status.flowing = false;
     curState = STATE_IDLE;
   }
 
@@ -812,12 +846,10 @@ void stateRunning(unsigned long now) {
 }
 
 void stateStopping(unsigned long now) {
-  setRelayState(PIN_PUMP_RELAY, false);
-  status.pumpOn = false;
-  status.flowing = false;
-  status.flowing = false;
-
   unsigned long durMs = now - pumpStartMs;
+  stopPumpCycle();
+  pumpStartMs = 0;
+  pumpScheduledEndMs = 0;
   Serial.printf("[PUMP] Stopped — runtime %.1fs\n", durMs / 1000.0f);
 
   // Log cycle as successful when it completed without a fault.
@@ -844,8 +876,7 @@ void stateStopping(unsigned long now) {
 void stateFault(unsigned long now) {
   // Ensure pump is off
   if (status.pumpOn) {
-    setRelayState(PIN_PUMP_RELAY, false);
-    status.pumpOn = false;
+    stopPumpCycle();
     Serial.println("[FAULT] Forced pump OFF");
   }
   if (now - faultStartMs >= FAULT_RETRY_MS) {
@@ -882,8 +913,7 @@ void stateManual(unsigned long now) {
     setRelayState(PIN_PUMP_RELAY, true);
     status.pumpOn = true;
   } else if (motorManualMode == MANUAL_FORCE_OFF) {
-    setRelayState(PIN_PUMP_RELAY, false);
-    status.pumpOn = false;
+    stopPumpCycle();
   }
 
   // Light

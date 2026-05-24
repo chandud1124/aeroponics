@@ -39,8 +39,104 @@ type ServerEntry = {
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
-let manualPumpStartedAtMs: number | null = null;
-let manualPumpLogId: string | null = null;
+
+type ManualPumpSession = {
+  startedAtMs: number;
+  logId: string | null;
+};
+
+const manualPumpSessions = new Map<string, ManualPumpSession>();
+
+function getManualPumpSession(deviceId: string): ManualPumpSession | null {
+  return manualPumpSessions.get(deviceId) ?? null;
+}
+
+function beginManualPumpSession(deviceId: string): ManualPumpSession {
+  const existing = manualPumpSessions.get(deviceId);
+  if (existing) {
+    return existing;
+  }
+
+  const session: ManualPumpSession = {
+    startedAtMs: Date.now(),
+    logId: null,
+  };
+  manualPumpSessions.set(deviceId, session);
+  return session;
+}
+
+function clearManualPumpSession(deviceId: string) {
+  manualPumpSessions.delete(deviceId);
+}
+
+function startManualPump(deviceId: string) {
+  const session = beginManualPumpSession(deviceId);
+
+  updateStatus(
+    {
+      pumpOn: true,
+      flowing: false,
+      pumpState: PumpState.MANUAL_MODE,
+      motorManualMode: "FORCED_ON",
+      fault: null,
+    },
+    { deviceId },
+  );
+
+  if (!session.logId) {
+    try {
+      const created = startPumpLog({ mode: "MANUAL", startedAtMs: session.startedAtMs, deviceId });
+      session.logId = created.id;
+    } catch {
+      session.logId = null;
+    }
+  }
+
+  return session;
+}
+
+function stopManualPump(deviceId: string) {
+  const session = getManualPumpSession(deviceId);
+  const startedAtMs = session?.startedAtMs ?? Date.now();
+  const endedAtMs = Date.now();
+  const durationSeconds = Math.max(0, Math.round((endedAtMs - startedAtMs) / 1000));
+
+  updateStatus(
+    {
+      pumpOn: false,
+      flowing: false,
+      pumpState: PumpState.MANUAL_MODE,
+      motorManualMode: "FORCED_OFF",
+    },
+    { deviceId },
+  );
+
+  if (session) {
+    if (session.logId) {
+      updatePumpLog(session.logId, {
+        durationSeconds: Math.max(1, durationSeconds),
+        flowed: durationSeconds > 0,
+        endedAtMs,
+        deviceId,
+      });
+    } else {
+      addPumpLog({
+        durationSeconds: Math.max(1, durationSeconds),
+        flowed: durationSeconds > 0,
+        fault: null,
+        mode: "MANUAL",
+        onDurationSeconds: Math.max(1, durationSeconds),
+        offIntervalMinutes: getCycleProfile().offIntervalMinutes,
+        startedAtMs,
+        endedAtMs,
+        deviceId,
+      });
+    }
+  }
+
+  clearManualPumpSession(deviceId);
+  return { startedAtMs, endedAtMs, durationSeconds };
+}
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -686,8 +782,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     const targetDevice = getTargetDeviceId(request);
 
     if (payload.action === "auto") {
-      manualPumpStartedAtMs = null;
-      manualPumpLogId = null;
+      clearManualPumpSession(targetDevice!);
       updateStatus({
         pumpOn: false,
         flowing: false,
@@ -700,78 +795,21 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     if (payload.action === "manual") {
       const desiredOn = Boolean(payload.desiredOn);
-      manualPumpStartedAtMs = desiredOn ? Date.now() : null;
-      updateStatus({
-        pumpOn: desiredOn,
-        flowing: false,
-        pumpState: PumpState.MANUAL_MODE,
-        motorManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF",
-        fault: null,
-      }, { deviceId: targetDevice });
       if (desiredOn) {
-        try {
-          const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs ?? Date.now(), deviceId: targetDevice });
-          if (created && created.id) {
-            manualPumpLogId = created.id;
-          }
-        } catch {
-          // ignore log creation failures for manual override
-        }
+        startManualPump(targetDevice!);
+      } else {
+        stopManualPump(targetDevice!);
       }
       return jsonResponse({ success: true, state: "MANUAL_MODE", pumpOn: desiredOn }, 201);
     }
 
     if (payload.action === "start") {
-      manualPumpStartedAtMs = Date.now();
-      updateStatus({
-        pumpOn: true,
-        flowing: false,
-        pumpState: PumpState.MANUAL_MODE,
-        motorManualMode: "FORCED_ON",
-        fault: null,
-      }, { deviceId: targetDevice });
-      // create a start pump-log entry so frontend and server track it
-      try {
-        const created = startPumpLog({ mode: "MANUAL", startedAtMs: manualPumpStartedAtMs, deviceId: targetDevice });
-        if (created && created.id) {
-          manualPumpLogId = created.id;
-        }
-        return jsonResponse({ success: true, state: "MANUAL_MODE", startedAt: manualPumpStartedAtMs, pumpLogId: manualPumpLogId }, 201);
-      } catch (e) {
-        return jsonResponse({ success: true, state: "MANUAL_MODE", startedAt: manualPumpStartedAtMs }, 201);
-      }
+      const session = startManualPump(targetDevice!);
+      return jsonResponse({ success: true, state: "MANUAL_MODE", startedAt: session.startedAtMs, pumpLogId: session.logId }, 201);
     }
 
-    const startedAtMs = manualPumpStartedAtMs ?? Date.now();
-    const endedAtMs = Date.now();
-    const durationSeconds = Math.max(0, Math.round((endedAtMs - startedAtMs) / 1000));
-
-    updateStatus({
-      pumpOn: false,
-      flowing: false,
-      pumpState: PumpState.MANUAL_MODE,
-      motorManualMode: "FORCED_OFF",
-    }, { deviceId: targetDevice });
-    if (manualPumpStartedAtMs != null) {
-      if (manualPumpLogId) {
-        updatePumpLog(manualPumpLogId, { durationSeconds: Math.max(1, durationSeconds), flowed: durationSeconds > 0, endedAtMs, deviceId: targetDevice ?? undefined });
-      } else {
-        addPumpLog({
-          durationSeconds: Math.max(1, durationSeconds),
-          flowed: durationSeconds > 0,
-          fault: null,
-          mode: "MANUAL",
-          onDurationSeconds: Math.max(1, durationSeconds),
-          offIntervalMinutes: getCycleProfile().offIntervalMinutes,
-          startedAtMs,
-          endedAtMs,
-          deviceId: targetDevice ?? undefined,
-        });
-      }
-    }
-    manualPumpLogId = null;
-    manualPumpStartedAtMs = null;
-    return jsonResponse({ success: true, state: "IDLE", durationSeconds }, 201);
+    const stopped = stopManualPump(targetDevice!);
+    return jsonResponse({ success: true, state: "IDLE", durationSeconds: stopped.durationSeconds }, 201);
   }
 
   if (url.pathname === "/api/manual-light") {

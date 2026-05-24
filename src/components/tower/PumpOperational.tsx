@@ -124,14 +124,6 @@ export function NextCyclePanel({
   const isMisting = Boolean(status.pumpOn);
   const manualOverrideActive = status.motorManualMode != null && status.motorManualMode !== "AUTO";
 
-  // Parse lastRunISO to ms
-  const lastRunMs = (() => {
-    if (!status.lastRunISO) return null;
-    const raw = (status.lastRunISO as any) as number | string;
-    const ms = typeof raw === "number" ? (raw > 1e12 ? raw : raw * 1000) : Date.parse(String(raw));
-    return Number.isFinite(ms) ? ms : null;
-  })();
-
   // ── Live countdowns ─────────────────────────────────────────────────
   // mistingRemainingSec: seconds the pump still has left this cycle
   const [mistingRemainingSec, setMistingRemainingSec] = useState<number>(0);
@@ -143,11 +135,8 @@ export function NextCyclePanel({
     const tick = () => {
       const now = Date.now();
 
-      // Full cycle: ON duration then OFF interval
-      // e.g. 180 s ON + 420 s OFF = 600 s total (10 min)
-      const onMs = expectedDuration * 1000;          // 180 000 ms
-      const offMs = expectedOff * 60 * 1000;          // 420 000 ms
-      const fullCycleMs = onMs + offMs;               // 600 000 ms
+      const nextCycleTargetISO = status.plannedNextCycleISO ?? status.nextCycleISO;
+      const pumpEndTargetISO = status.pumpEndISO ?? status.lastRunISO;
 
       // ── MANUAL FORCE OFF ──────────────────────────────────────────
       if (status.motorManualMode === "FORCED_OFF") {
@@ -155,42 +144,53 @@ export function NextCyclePanel({
         setIdleCountdown("PAUSED");
       }
       // ── MISTING countdown (remaining ON time / manual elapsed time) ──
-      else if (isMisting && lastRunMs != null) {
+      else if (isMisting && pumpEndTargetISO) {
         if (status.motorManualMode === "FORCED_ON") {
-          const elapsed = Math.max(0, Math.floor((now - lastRunMs) / 1000));
+          const elapsed = Math.max(0, Math.floor((now - new Date(pumpEndTargetISO).getTime()) / 1000));
           setMistingRemainingSec(elapsed);
           setIdleCountdown("PAUSED");
         } else {
-          const onEndMs = lastRunMs + onMs;
+          const onEndMs = new Date(pumpEndTargetISO).getTime();
           const remaining = Math.max(0, Math.ceil((onEndMs - now) / 1000));
           setMistingRemainingSec(remaining);
 
-          // "Next mist after this one" = end of current ON + full OFF rest
-          const nextMistMs = lastRunMs + fullCycleMs;
-          const nextSecs = Math.max(0, Math.floor((nextMistMs - now) / 1000));
-          const mm = String(Math.floor(nextSecs / 60)).padStart(2, "0");
-          const ss = String(nextSecs % 60).padStart(2, "0");
-          setIdleCountdown(`${mm}:${ss}`);
+          if (nextCycleTargetISO) {
+            const nextMistMs = new Date(nextCycleTargetISO).getTime();
+            if (Number.isFinite(nextMistMs)) {
+              const nextSecs = Math.max(0, Math.floor((nextMistMs - now) / 1000));
+              const mm = String(Math.floor(nextSecs / 60)).padStart(2, "0");
+              const ss = String(nextSecs % 60).padStart(2, "0");
+              setIdleCountdown(`${mm}:${ss}`);
+            } else {
+              setIdleCountdown("--:--");
+            }
+          } else {
+            setIdleCountdown("--:--");
+          }
         }
-      } else if (!isMisting && lastRunMs != null) {
+      } else if (!isMisting && nextCycleTargetISO) {
         // ── IDLE countdown (pump is OFF, waiting for next mist) ─────
         setMistingRemainingSec(0);
-        const nextMistMs = lastRunMs + fullCycleMs;
-        const nextSecs = Math.max(0, Math.floor((nextMistMs - now) / 1000));
-        if (nextSecs <= 0) {
-          setIdleCountdown("DUE NOW");
+        const targetMs = new Date(nextCycleTargetISO).getTime();
+        if (Number.isFinite(targetMs)) {
+          const nextSecs = Math.max(0, Math.floor((targetMs - now) / 1000));
+          if (nextSecs <= 0) {
+            setIdleCountdown("DUE NOW");
+          } else {
+            const mm = String(Math.floor(nextSecs / 60)).padStart(2, "0");
+            const ss = String(nextSecs % 60).padStart(2, "0");
+            setIdleCountdown(`${mm}:${ss}`);
+          }
         } else {
-          const mm = String(Math.floor(nextSecs / 60)).padStart(2, "0");
-          const ss = String(nextSecs % 60).padStart(2, "0");
-          setIdleCountdown(`${mm}:${ss}`);
+          setIdleCountdown("--:--");
         }
       } else {
-        // No lastRunMs — fall back to backend nextCycleISO
+        // No reliable schedule data — fall back to backend fields only.
         setMistingRemainingSec(0);
-        if (!status.nextCycleISO || status.nextCycleIn < 0) {
+        if (!nextCycleTargetISO || status.nextCycleIn < 0) {
           setIdleCountdown("--:--");
         } else {
-          const targetMs = new Date(status.nextCycleISO).getTime();
+          const targetMs = new Date(nextCycleTargetISO).getTime();
           if (Number.isNaN(targetMs)) {
             setIdleCountdown("--:--");
           } else {
@@ -229,6 +229,8 @@ export function NextCyclePanel({
     expectedDuration,
     expectedOff,
     status.nextCycleISO,
+    status.plannedNextCycleISO,
+    status.pumpEndISO,
     status.nextCycleIn,
     status.retryNextCycleISO,
     status.motorManualMode,
