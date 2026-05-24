@@ -1,9 +1,25 @@
-export {
+import {
   PumpState,
   PUMP_STATE_LABELS,
   PUMP_STATE_COLORS,
   defaultSchedule,
 } from "./tower-shared";
+
+import type {
+  Schedule,
+  ManualReading,
+  LiveStatus,
+  SensorSnapshot,
+  PumpLogEntry,
+  AnalyticsSummary,
+} from "./tower-shared";
+
+export {
+  PumpState,
+  PUMP_STATE_LABELS,
+  PUMP_STATE_COLORS,
+  defaultSchedule,
+};
 
 export type {
   Schedule,
@@ -12,7 +28,7 @@ export type {
   SensorSnapshot,
   PumpLogEntry,
   AnalyticsSummary,
-} from "./tower-shared";
+};
 
 export type StatusEnvelope = {
   status: LiveStatus | null;

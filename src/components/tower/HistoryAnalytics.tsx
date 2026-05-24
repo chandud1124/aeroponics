@@ -207,7 +207,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
       setSummary(nextSummary ?? EMPTY_SUMMARY);
       setSensorHistory(nextSensors);
       setPumpLogs(nextLogs);
-      setManualReadings(nextReadings.filter((reading) => reading.timestamp >= Date.now() - days * 24 * 60 * 60 * 1000));
+      setManualReadings(nextReadings.filter((reading: ManualReading) => reading.timestamp >= Date.now() - days * 24 * 60 * 60 * 1000));
       setFaults((nextFaults as FaultRow[]).filter((fault) => fault.timestamp >= Date.now() - days * 24 * 60 * 60 * 1000));
     } finally {
       setLoading(false);

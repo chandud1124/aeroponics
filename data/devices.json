@@ -8,4 +8,14 @@
     "ipAddress": "192.168.0.244",
     "createdAt": "2026-05-21T08:56:10.654Z"
   }
+  ,
+  {
+    "id": "1779353779999-81yyyc",
+    "name": "esp32-device-81yyyc",
+    "deviceId": "device-81yyyc",
+    "secretHash": "d89e6bbd249d4e2f7945dc8970ca2aad95bfd5e56f7dc90460e73004cc980f55",
+    "macAddress": null,
+    "ipAddress": null,
+    "createdAt": "2026-05-24T00:00:00.000Z"
+  }
 ]

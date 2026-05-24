@@ -88,9 +88,14 @@ function normalizeValue(value?: string | null) {
   return trimmed ? trimmed.toLowerCase() : null;
 }
 
+function normalizeMac(mac?: string | null): string | null {
+  if (!mac) return null;
+  return mac.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
 function findDuplicateDevice(opts: { deviceId?: string | null; macAddress?: string | null }) {
   const normalizedDeviceId = normalizeValue(opts.deviceId);
-  const normalizedMacAddress = normalizeValue(opts.macAddress);
+  const normalizedMacAddress = normalizeMac(opts.macAddress);
 
   return (
     devices.find((device) => {
@@ -98,7 +103,7 @@ function findDuplicateDevice(opts: { deviceId?: string | null; macAddress?: stri
         return true;
       }
 
-      if (normalizedMacAddress && normalizeValue(device.macAddress) === normalizedMacAddress) {
+      if (normalizedMacAddress && normalizeMac(device.macAddress) === normalizedMacAddress) {
         return true;
       }
 
@@ -113,7 +118,7 @@ function sortAndDedupeDevices(entries: DeviceEntry[]) {
 
   return entries.filter((entry) => {
     const deviceIdKey = normalizeValue(entry.deviceId);
-    const macKey = normalizeValue(entry.macAddress);
+    const macKey = normalizeMac(entry.macAddress);
 
     if (deviceIdKey && seenDeviceIds.has(deviceIdKey)) {
       return false;
@@ -167,10 +172,32 @@ export function deleteDevice(deviceId: string) {
   return changed;
 }
 
-export function validateDeviceSecret(deviceId: string, secret: string) {
-  const found = devices.find((d) => d.deviceId === deviceId);
+export function validateDeviceSecret(identifier: string, secret: string) {
+  const normalized = normalizeValue(identifier);
+  const normalizedMac = normalizeMac(identifier);
+
+  const found = devices.find((d) => {
+    return (
+      normalizeValue(d.deviceId) === normalized ||
+      (d.macAddress && normalizeMac(d.macAddress) === normalizedMac)
+    );
+  });
   if (!found) return false;
   return found.secretHash === hashSecret(secret);
+}
+
+export function resolveDeviceId(identifier: string): string {
+  const normalized = normalizeValue(identifier);
+  const normalizedMac = normalizeMac(identifier);
+  if (!normalized) return identifier;
+
+  const found = devices.find((d) => {
+    return (
+      normalizeValue(d.deviceId) === normalized ||
+      (d.macAddress && normalizeMac(d.macAddress) === normalizedMac)
+    );
+  });
+  return found ? found.deviceId : identifier;
 }
 
 export function rotateDeviceSecret(deviceId: string) {

@@ -184,6 +184,7 @@ Preferences prefs;
 
 // DHT22 + LDR
 float humidityPct = 0.0f;
+String deviceMacAddress = "";
 
 PumpState curState  = STATE_IDLE;
 PumpState prevState = STATE_IDLE;
@@ -947,7 +948,8 @@ int httpRequest(const char* method, const char* path,
   Serial.printf("[API] %s %s\n", method, path);
   http.begin(String(API_BASE_URL) + path);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Device-ID",  DEVICE_ID);
+  String finalDeviceID = (deviceMacAddress.length() > 0) ? deviceMacAddress : String(DEVICE_ID);
+  http.addHeader("X-Device-ID",  finalDeviceID);
   http.addHeader("X-API-Key",    DEVICE_SECRET);
   int code = -1;
   if (strcmp(method, "GET")  == 0) code = http.GET();
@@ -968,7 +970,8 @@ bool fetchHandshakeAndSync() {
   http.setTimeout(API_TIMEOUT_MS);
   Serial.printf("[API] GET /api/device/handshake\n");
   http.begin(String(API_BASE_URL) + "/api/device/handshake");
-  http.addHeader("X-Device-ID", DEVICE_ID);
+  String finalDeviceID = (deviceMacAddress.length() > 0) ? deviceMacAddress : String(DEVICE_ID);
+  http.addHeader("X-Device-ID", finalDeviceID);
   http.addHeader("X-API-Key",   DEVICE_SECRET);
 
   int code = http.GET();
@@ -1205,6 +1208,8 @@ void setup() {
 
   // ── WiFi (async — completes in loop) ──────────────────────────────
   initWiFi();
+  deviceMacAddress = WiFi.macAddress();
+  Serial.printf("[BOOT] MAC Address: %s\n", deviceMacAddress.c_str());
 
   // ── Initial sensor read ───────────────────────────────────────────
   readSensors();

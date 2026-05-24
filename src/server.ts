@@ -30,6 +30,7 @@ import {
   deleteDevice,
   validateDeviceSecret,
   rotateDeviceSecret,
+  resolveDeviceId,
 } from "./lib/device-registry.server";
 import { analyzeSensorDataWithGemini } from "./lib/gemini-service";
 
@@ -79,7 +80,8 @@ function requireRegisteredDeviceForControl() {
 }
 
 function getTargetDeviceId(request: Request): string | null {
-  return request.headers.get("x-device-id")?.trim() ?? null;
+  const rawId = request.headers.get("x-device-id")?.trim() ?? null;
+  return rawId ? resolveDeviceId(rawId) : null;
 }
 
 function requireRegisteredTargetDevice(request: Request): Response | null {
@@ -234,6 +236,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
         return jsonResponse({ error: "Unauthorized (device)" }, 401);
       }
+      const resolvedDeviceId = resolveDeviceId(deviceIdHeader);
       const payload = (await request.json()) as {
         pumpOn?: boolean;
         flowing?: boolean;
@@ -283,7 +286,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         // accept optional device-sent fields
         scheduleAppliedAt: (payload as any).scheduleAppliedAt ?? undefined,
         appliedPlanName: (payload as any).planName ?? undefined,
-      }, { source: "esp32", deviceId: deviceIdHeader });
+      }, { source: "esp32", deviceId: resolvedDeviceId });
 
       // If device reported a lastRunAt and indicates pump is ON, create a start pump-log entry
       let createdPumpLog: any = null;
@@ -305,6 +308,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
             onDurationSeconds: onDur,
             offIntervalMinutes: (payload as any).offIntervalMinutes ?? getCycleProfile(new Date(startedAtMs)).offIntervalMinutes,
             startedAtMs: startedAtMs,
+            deviceId: resolvedDeviceId,
           });
         }
       } catch (e) {
@@ -332,7 +336,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Missing device id" }, 400);
     }
 
-    const deviceExists = listDevices().some((device) => device.deviceId === deviceIdHeader);
+    const resolvedDeviceId = resolveDeviceId(deviceIdHeader);
+    const deviceExists = listDevices().some((device) => device.deviceId === resolvedDeviceId);
     if (!deviceExists) {
       return jsonResponse({ error: "Device not registered" }, 404);
     }
@@ -341,15 +346,15 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Unauthorized (device)" }, 401);
     }
 
-    touchStatus({ source: "esp32", deviceId: deviceIdHeader });
-    const status = getStatus(deviceIdHeader);
+    touchStatus({ source: "esp32", deviceId: resolvedDeviceId });
+    const status = getStatus(resolvedDeviceId);
     const schedule = getSchedule();
 
     return jsonResponse(
       {
         ok: true,
         authenticated: true,
-        deviceId: deviceIdHeader,
+        deviceId: resolvedDeviceId,
         serverTime: Date.now(),
         hasRegisteredDevice: true,
         ...schedule,
@@ -364,12 +369,13 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    const deviceIdHeader = request.headers.get("x-device-id");
-    const deviceKeyHeader = request.headers.get("x-api-key");
+    const deviceIdHeader = request.headers.get("x-device-id") ?? "";
+    const deviceKeyHeader = request.headers.get("x-api-key") ?? "";
     if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
       return jsonResponse({ error: "Unauthorized (device)" }, 401);
     }
 
+    const resolvedDeviceId = resolveDeviceId(deviceIdHeader);
     const payload = (await request.json()) as {
       mode?: "DAY" | "NIGHT" | "MANUAL";
       onDurationSeconds?: number;
@@ -382,6 +388,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       onDurationSeconds: payload.onDurationSeconds ?? 0,
       offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
       startedAtMs: payload.startedAtMs,
+      deviceId: resolvedDeviceId,
     });
 
     return jsonResponse(created, 201);
@@ -404,13 +411,14 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    const deviceIdHeader = request.headers.get("x-device-id");
-    const deviceKeyHeader = request.headers.get("x-api-key");
+    const deviceIdHeader = request.headers.get("x-device-id") ?? "";
+    const deviceKeyHeader = request.headers.get("x-api-key") ?? "";
     if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
       return jsonResponse({ error: "Unauthorized (device)" }, 401);
     }
 
-    const status = touchStatus({ source: "esp32", deviceId: deviceIdHeader });
+    const resolvedDeviceId = resolveDeviceId(deviceIdHeader);
+    const status = touchStatus({ source: "esp32", deviceId: resolvedDeviceId });
     return jsonResponse(
       {
         success: true,
@@ -453,7 +461,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
   if (url.pathname === "/api/pump-log") {
     if (request.method === "GET") {
       const deviceId = request.headers.get("x-device-id") ?? null;
-      const cycles = getPumpLogs(deviceId).map((log) => ({
+      const resolvedDeviceId = deviceId ? resolveDeviceId(deviceId) : null;
+      const cycles = getPumpLogs(resolvedDeviceId).map((log) => ({
         id: log.id,
         startedAt: log.startedAt,
         durationSeconds: log.durationSeconds,
@@ -488,11 +497,12 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     if (request.method === "POST") {
       // If device is reporting pump log, require device authentication
-      const deviceIdHeader = request.headers.get("x-device-id");
-      const deviceKeyHeader = request.headers.get("x-api-key");
+      const deviceIdHeader = request.headers.get("x-device-id") ?? "";
+      const deviceKeyHeader = request.headers.get("x-api-key") ?? "";
       if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
         return jsonResponse({ error: "Unauthorized (device)" }, 401);
       }
+      const resolvedDeviceId = resolveDeviceId(deviceIdHeader);
 
       const payload = (await request.json()) as {
         durationSeconds?: number;
@@ -516,7 +526,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         onDurationSeconds: payload.onDurationSeconds ?? payload.durationSeconds,
         offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
         volumeLiters: payload.volumeLiters ?? null,
-        deviceId: deviceIdHeader,
+        deviceId: resolvedDeviceId,
       });
 
       return jsonResponse(created, 201);
@@ -524,11 +534,12 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     // Update an existing pump-log entry by id
     if (request.method === "PATCH" && url.pathname.match(/^\/api\/pump-log\/[\w\-]+$/)) {
-      const deviceIdHeader = request.headers.get("x-device-id");
-      const deviceKeyHeader = request.headers.get("x-api-key");
+      const deviceIdHeader = request.headers.get("x-device-id") ?? "";
+      const deviceKeyHeader = request.headers.get("x-api-key") ?? "";
       if (!deviceIdHeader || !deviceKeyHeader || !validateDeviceSecret(deviceIdHeader, deviceKeyHeader)) {
         return jsonResponse({ error: "Unauthorized (device)" }, 401);
       }
+      const resolvedDeviceId = resolveDeviceId(deviceIdHeader);
 
       const parts = url.pathname.split("/").filter(Boolean);
       const id = parts[parts.length - 1];
@@ -547,7 +558,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         endedAtMs: payload.endedAtMs,
         volumeLiters: payload.volumeLiters ?? null,
         // keep device scoping consistent — ensure pump log remains attributed to device
-        deviceId: deviceIdHeader,
+        deviceId: resolvedDeviceId,
       });
 
       if (!updated) return jsonResponse({ error: "Pump log not found" }, 404);
@@ -597,7 +608,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
   if (url.pathname === "/api/fault-history") {
     if (request.method === "GET") {
       const deviceId = request.headers.get("x-device-id") ?? null;
-      const history = getFaultHistory(20, deviceId);
+      const resolvedDeviceId = deviceId ? resolveDeviceId(deviceId) : null;
+      const history = getFaultHistory(20, resolvedDeviceId);
       return jsonResponse({ faults: history });
     }
 
@@ -611,7 +623,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     const days = Number(url.searchParams.get("days") ?? "7");
     const deviceId = request.headers.get("x-device-id") ?? null;
-    return jsonResponse({ snapshots: getSensorHistory(Number.isFinite(days) ? days : 7, deviceId) });
+    const resolvedDeviceId = deviceId ? resolveDeviceId(deviceId) : null;
+    return jsonResponse({ snapshots: getSensorHistory(Number.isFinite(days) ? days : 7, resolvedDeviceId) });
   }
 
   if (url.pathname === "/api/pump-logs") {
@@ -622,8 +635,9 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     const days = Number(url.searchParams.get("days") ?? "7");
     const limit = Number(url.searchParams.get("limit") ?? "100");
     const deviceId = request.headers.get("x-device-id") ?? null;
+    const resolvedDeviceId = deviceId ? resolveDeviceId(deviceId) : null;
     const cutoff = Date.now() - (Number.isFinite(days) ? days : 7) * 24 * 60 * 60 * 1000;
-    const cycles = getPumpLogs(deviceId)
+    const cycles = getPumpLogs(resolvedDeviceId)
       .filter((log) => new Date(log.startedAt).getTime() >= cutoff)
       .slice(0, Number.isFinite(limit) ? limit : 100);
     return jsonResponse({ cycles });
@@ -636,7 +650,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     const days = Number(url.searchParams.get("days") ?? "7");
     const deviceId = request.headers.get("x-device-id") ?? null;
-    return jsonResponse(getAnalyticsSummary(Number.isFinite(days) ? days : 7, deviceId));
+    const resolvedDeviceId = deviceId ? resolveDeviceId(deviceId) : null;
+    return jsonResponse(getAnalyticsSummary(Number.isFinite(days) ? days : 7, resolvedDeviceId));
   }
 
   if (url.pathname === "/api/manual-pump") {
