@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, AlertCircle, Droplet, Zap, AlertOctagon } from "lucide-react";
+import { AlertTriangle, AlertCircle, Zap, AlertOctagon } from "lucide-react";
 import { parseFault, FAULT_INFO, type FaultCode } from "@/lib/tower-faults";
 import type { LiveStatus } from "@/lib/tower-storage";
 
@@ -52,53 +52,48 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
           </div>
         </Card>
 
-        {/* Flow Status */}
+        {/* Light Status */}
         <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Flow</span>
-            <Droplet className="h-5 w-5 text-blue-500" />
+            <span className="text-sm text-muted-foreground">Light</span>
+            <Zap className="h-5 w-5 text-amber-500" />
           </div>
           <div className="mt-2">
-            <Badge variant="secondary">Next feature</Badge>
+            <Badge variant={status.lightOn ? "default" : "secondary"}>
+              {status.lightOn ? "ON" : "OFF"}
+            </Badge>
           </div>
-          <p className="text-xs text-muted-foreground">Flow sensor removed from the current build</p>
+          <p className="text-xs text-muted-foreground">Ambient-light based control</p>
         </Card>
 
-        {/* Reservoir Temperature */}
+        {/* Humidity */}
         <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Res. Temp</span>
-            <Zap className="h-5 w-5 text-orange-500" />
+            <span className="text-sm text-muted-foreground">Humidity</span>
+            <Zap className="h-5 w-5 text-sky-500" />
           </div>
           <div className="mt-2">
-            <Badge variant="secondary">Next feature</Badge>
+            <Badge variant={status.dhtOk ? "default" : "secondary"}>
+              {status.humidityPct != null ? `${status.humidityPct.toFixed(1)} %` : "Waiting"}
+            </Badge>
           </div>
-          <p className="text-xs text-muted-foreground">Reservoir temperature probe removed from the current build</p>
+          <p className="text-xs text-muted-foreground">From DHT22 humidity sensor</p>
         </Card>
 
-        {/* Tower Temperature */}
+        {/* Sensor Health */}
         <Card className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Tower Temp</span>
+            <span className="text-sm text-muted-foreground">Sensor health</span>
             <Zap className="h-5 w-5 text-green-500" />
           </div>
           <div className="mt-2">
-            <Badge variant="secondary">Next feature</Badge>
+            <Badge variant={status.sensorDataOk ? "default" : "secondary"}>
+              {status.sensorDataOk ? "OK" : "Degraded"}
+            </Badge>
           </div>
-          <p className="text-xs text-muted-foreground">Tower temperature probe removed from the current build</p>
+          <p className="text-xs text-muted-foreground">Only humidity + light are active</p>
         </Card>
       </div>
-
-      {/* Water Level */}
-      <Card className="p-4 sm:p-5">
-        <div className="flex items-center justify-between">
-          <span className="font-medium">Water Sensor</span>
-          <Droplet className="h-5 w-5 text-blue-500" />
-        </div>
-        <div className="mt-3 rounded border border-dashed border-border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
-          No water level sensor installed right now.
-        </div>
-      </Card>
 
       {/* Last Run */}
       {status.lastRunISO && (

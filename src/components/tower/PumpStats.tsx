@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Activity, Timer, Droplets, AlertTriangle, RefreshCw } from "lucide-react";
+import { Activity, Timer, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { parseFault, FAULT_INFO, type FaultCode } from "@/lib/tower-faults";
 import { withDeviceHeaders } from "@/lib/tower-storage";
@@ -64,8 +64,8 @@ async function loadSummary(deviceId?: string | null): Promise<Summary> {
   const durations = rows.map((r) => r.duration_seconds ?? 0).filter((d) => d > 0);
   const avgDuration =
     durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
-  const flowedCount = rows.filter((r) => r.flowed === true).length;
-  const successRate = total > 0 ? (flowedCount / total) * 100 : 0;
+  const completedCount = rows.filter((r) => !r.fault).length;
+  const successRate = total > 0 ? (completedCount / total) * 100 : 0;
   const faulted = rows.filter((r) => r.fault).length;
   const faultBreakdown = {} as Record<FaultCode, number>;
   for (const r of rows) {
@@ -158,10 +158,10 @@ export function PumpStats({ deviceId }: { deviceId?: string | null }) {
           hint="Per cycle"
         />
         <StatCard
-          icon={<Droplets className="h-5 w-5" />}
-          label="Flow success"
+          icon={<Activity className="h-5 w-5" />}
+          label="Cycle success"
           value={`${summary.successRate.toFixed(0)}%`}
-          hint="Cycles that produced flow"
+          hint="Cycles completed without faults"
         />
         <StatCard
           icon={<AlertTriangle className="h-5 w-5" />}
@@ -208,7 +208,7 @@ export function PumpStats({ deviceId }: { deviceId?: string | null }) {
               <tr>
                 <th className="px-3 py-2 text-left">When</th>
                 <th className="px-3 py-2 text-left">Duration</th>
-                <th className="px-3 py-2 text-left">Flow</th>
+                <th className="px-3 py-2 text-left">Cycle</th>
                 <th className="px-3 py-2 text-left">Fault</th>
               </tr>
             </thead>
@@ -227,12 +227,10 @@ export function PumpStats({ deviceId }: { deviceId?: string | null }) {
                     </td>
                     <td className="px-3 py-2 font-mono">{r.duration_seconds ?? "—"} s</td>
                     <td className="px-3 py-2">
-                      {r.flowed === true ? (
+                      {!r.fault ? (
                         <Badge variant="default">OK</Badge>
-                      ) : r.flowed === false ? (
-                        <Badge variant="destructive">NO FLOW</Badge>
                       ) : (
-                        <Badge variant="secondary">—</Badge>
+                        <Badge variant="destructive">FAULT</Badge>
                       )}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">

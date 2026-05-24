@@ -46,9 +46,9 @@ const char* WIFI_SSID     = "I am Not A Witch I am Your Wifi";
 const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend
-const char* API_BASE_URL  = "http://192.168.0.147:8080";
+const char* API_BASE_URL  = "http://13.234.122.175:8080";
 const char* DEVICE_ID     = "device-489ccw";
-const char* DEVICE_SECRET = "731d389857cf81009bbe67f6111a0e5bb60973c5a1f453e0";
+const char* DEVICE_SECRET = "a8a10bacc1a25b8bb6843782e6d204b9d987fb5ad6c10776";
 
 // GPIO
 const int PIN_DHT_DATA           = 16;
@@ -72,8 +72,11 @@ const uint16_t LDR_MIN_VALID       = 10;
 
 const unsigned long BUTTON_DEBOUNCE_MS = 50UL;
 
-// Safety thresholds (DHT22 reads room air — not water temp in this build)
-const float TEMP_AIR_MAX_C    = 42.0f;   // Alert if room > 42°C
+// If true, invalid sensor reads will block pump start.
+// Keep false for builds that only use humidity + ambient-light sensing.
+const bool REQUIRE_VALID_SENSOR_FOR_PUMP_START = false;
+
+// Safety thresholds
 const float HUMIDITY_MAX_PCT  = 85.0f;   // Alert if humidity > 85%
 
 // Pump timing
@@ -132,6 +135,8 @@ struct SensorData {
   int   lightRaw      = 0;
   bool  isDark        = false;  // true when LDR reads below threshold
   bool  valid         = false;
+  bool  humidityValid = false;
+  bool  lightValid    = false;
 };
 
 struct SystemStatus {
@@ -312,9 +317,9 @@ bool clampScheduleValues() {
   clamp(schedule.intervalMinutes, 5,   1440);
   clamp(schedule.durationSeconds, 10,  600);
   clamp(schedule.startHour,       0,   23);
-  clamp(schedule.endHour,         0,   23);
+  clamp(schedule.endHour,         0,   24);
   if (schedule.endHour <= schedule.startHour) {
-    schedule.endHour = min(schedule.startHour + 1, 23);
+    schedule.endHour = min(schedule.startHour + 1, 24);
     changed = true;
   }
   return changed;
@@ -555,7 +560,7 @@ time_t getCurrentEpoch() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-//  SENSORS — DHT22 (humidity + temperature) + LDR (light)
+//  SENSORS — DHT22 (humidity) + LDR (light)
 // ─────────────────────────────────────────────────────────────────────
 
 void readSensors() {
@@ -565,9 +570,11 @@ void readSensors() {
 
   if (dhtOk) {
     sensors.humidityPct = hum;
+    sensors.humidityValid = true;
     humidityPct = hum;
     Serial.printf("[DHT22] Hum: %.1f%%\n", hum);
   } else {
+    sensors.humidityValid = false;
     Serial.println("[DHT22] Read error (isnan or out of range)");
   }
 
@@ -576,12 +583,14 @@ void readSensors() {
   // If LDR reads below minimum valid threshold, sensor may be disconnected
   bool ldrValid = (ldrRaw >= LDR_MIN_VALID);
   if (ldrValid) {
+    sensors.lightValid = true;
     sensors.lightRaw = ldrRaw;
     // [FIX-7] isDark = raw ADC below threshold (higher raw = darker with pull-down)
     sensors.isDark   = (ldrRaw < LDR_DARK_THRESHOLD);
     Serial.printf("[LDR] Raw: %d  isDark: %s\n",
                   ldrRaw, sensors.isDark ? "yes" : "no");
   } else {
+    sensors.lightValid = false;
     Serial.printf("[LDR] Possibly disconnected (raw=%d)\n", ldrRaw);
     // Don't update sensors.isDark — keep last known value
   }
@@ -595,6 +604,13 @@ void readSensors() {
   status.lightDark   = sensors.isDark;      // [FIX-7]
   status.flowing = status.pumpOn;
   status.sensorDataOk = dhtOk;
+
+  if (!dhtOk) {
+    Serial.println("[SENSOR] Humidity sensor invalid or disconnected");
+  }
+  if (!ldrValid) {
+    Serial.println("[SENSOR] Light sensor invalid or disconnected");
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -754,12 +770,17 @@ void stateIdle(unsigned long now) {
 
 // [FIX-4] stateCheckWater now validates sensor health before allowing pump start
 void stateCheckWater(unsigned long now) {
-  // If DHT sensor has failed, block pump start and raise fault
-  if (!sensors.valid) {
+  // Optional gate: only block if your deployment requires sensor validity.
+  if (!sensors.valid && REQUIRE_VALID_SENSOR_FOR_PUMP_START) {
     Serial.println("[CHECK] Sensor invalid — blocking pump start");
     enterFault(now, "SENSOR_FAIL");
     return;
   }
+
+  if (!sensors.valid) {
+    Serial.println("[CHECK] Sensor invalid — continuing without sensor lockout");
+  }
+
   // All checks passed
   pumpStartMs = now;
   curState    = STATE_PUMP_ON;
@@ -969,7 +990,7 @@ bool fetchHandshakeAndSync() {
   if (ni > 0 && ni <= 1440 &&
       nd > 0 && nd <= 600  &&
       ns >= 0 && ns <= 23  &&
-      ne >= 0 && ne <= 23) {
+      ne >= 0 && ne <= 24) {
     bool changed = (ni != schedule.intervalMinutes ||
                     nd != schedule.durationSeconds ||
                     ns != schedule.startHour       ||
@@ -1072,6 +1093,8 @@ void postStatus() {
   body += "\"lightRaw\":"         + String(status.lightRaw) + ",";     // [FIX-7] correct name
   body += "\"lightDark\":"        + String(status.lightDark ? "true" : "false") + ","; // [FIX-7]
   body += "\"dhtOk\":"            + String(status.dhtOk ? "true" : "false") + ",";
+  body += "\"humiditySensorOk\":"  + String(sensors.humidityValid ? "true" : "false") + ",";
+  body += "\"lightSensorOk\":"     + String(sensors.lightValid ? "true" : "false") + ",";
   body += "\"fault\":\""          + status.fault + "\",";
   body += "\"state\":\""          + reportedState + "\",";
   body += "\"motorManualMode\":\"" + String(manualModeToString(motorManualMode)) + "\",";

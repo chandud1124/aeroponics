@@ -14,11 +14,11 @@ export const PUMP_STATE_LABELS: Record<PumpState, string> = {
   [PumpState.IDLE]: "Idle (waiting for next cycle)",
   [PumpState.WAITING]: "Waiting for scheduled time",
   [PumpState.STARTING]: "Relay activated",
-  [PumpState.VERIFYING_FLOW]: "Verifying flow sensor (3 sec)",
-  [PumpState.RUNNING]: "Pump running - water flowing",
-  [PumpState.FAULT_NO_FLOW]: "ERROR: No flow detected",
-  [PumpState.LOW_WATER_LOCK]: "Locked: Water level too low",
-  [PumpState.TEMP_PAUSE]: "Paused: Reservoir too hot",
+  [PumpState.VERIFYING_FLOW]: "Verifying pump start",
+  [PumpState.RUNNING]: "Pump running",
+  [PumpState.FAULT_NO_FLOW]: "ERROR: Pump verification failed",
+  [PumpState.LOW_WATER_LOCK]: "Locked: Safety input active",
+  [PumpState.TEMP_PAUSE]: "Paused: Safety condition active",
   [PumpState.MANUAL_MODE]: "Manual override active",
 };
 

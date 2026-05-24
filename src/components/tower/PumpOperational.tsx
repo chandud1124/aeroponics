@@ -953,17 +953,17 @@ export function FaultAlertBanner({ status }: { status: LiveStatus }) {
     DRY_RUN: {
       icon: AlertOctagon,
       severity: "critical",
-      message: "Pump running but no water confirmation was received. Check plumbing or pump prime.",
+      message: "Pump started but cycle could not be verified. Check relay, wiring, and pump line.",
     },
     LOW_WATER: {
       icon: AlertTriangle,
       severity: "warning",
-      message: "Water level too low. Watering cycle paused until tank is refilled.",
+      message: "Safety lock is active. Watering remains paused until cleared.",
     },
     FLOW_STOPPED: {
       icon: AlertTriangle,
       severity: "warning",
-      message: "Pump stopped mid-cycle. Check plumbing or power.",
+      message: "Pump stopped mid-cycle. Check power and relay output.",
     },
     PUMP_TIMEOUT: {
       icon: AlertTriangle,
