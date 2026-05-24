@@ -417,8 +417,8 @@ function calculatePlannedNextCycle(now = new Date()): { nextCycleISO: string | n
   }
 
   const currentHour = now.getHours();
-  const { offIntervalMinutes } = getCycleProfile(now);
-  const intervalMs = offIntervalMinutes * 60 * 1000;
+  const { offIntervalMinutes, onDurationSeconds } = getCycleProfile(now);
+  const intervalMs = (offIntervalMinutes * 60 + onDurationSeconds) * 1000;
   const windowStart = new Date(now);
   windowStart.setHours(schedule.startHour, 0, 0, 0);
 
@@ -684,6 +684,15 @@ export function updateStatus(
   const source = options.source ?? "server";
   const telemetryUpdatedAt = source === "esp32" ? Date.now() : currentStatus.telemetryUpdatedAt ?? null;
   const heartbeatUpdatedAt = source === "esp32" ? Date.now() : currentStatus.heartbeatUpdatedAt ?? null;
+
+  // Transition check: if pump turns ON, set lastRunISO to current time
+  const transitionToOn = patch.pumpOn === true && !currentStatus.pumpOn;
+  const resolvedLastRunISO = transitionToOn 
+    ? new Date().toISOString() 
+    : patch.lastRunISO !== undefined 
+      ? patch.lastRunISO 
+      : currentStatus.lastRunISO;
+
   const mergedStatus = {
     ...createBaseStatus(new Date(), deviceId),
     ...currentStatus,
@@ -692,6 +701,7 @@ export function updateStatus(
     telemetryUpdatedAt,
     heartbeatUpdatedAt,
     lightOn: scheduledLightOn,
+    lastRunISO: resolvedLastRunISO,
   };
   const isOnline = isFresh(getLatestDeviceSignalAt(mergedStatus));
 

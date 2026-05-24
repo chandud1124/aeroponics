@@ -793,6 +793,13 @@ void statePumpOn(unsigned long now) {
   status.pumpOn          = true;
   status.flowing         = true;
   pumpScheduledEndMs     = pumpStartMs + (unsigned long)(schedule.durationSeconds * 1000UL);
+
+  time_t epochNow = getCurrentEpoch();
+  if (epochNow > 0) {
+    status.lastRunEpoch = epochNow;
+    saveLastRunToNVS(epochNow);
+  }
+
   curState               = STATE_RUNNING;
 }
 
@@ -812,13 +819,6 @@ void stateStopping(unsigned long now) {
 
   unsigned long durMs = now - pumpStartMs;
   Serial.printf("[PUMP] Stopped — runtime %.1fs\n", durMs / 1000.0f);
-
-  // Update last-run timestamp
-  time_t epochNow = getCurrentEpoch();
-  if (epochNow > 0) {
-    status.lastRunEpoch = epochNow;
-    saveLastRunToNVS(epochNow);
-  }
 
   // Log cycle as successful when it completed without a fault.
   bool flowed = status.fault == "OK" || status.fault.length() == 0;
@@ -872,6 +872,13 @@ void stateManual(unsigned long now) {
 
   // Motor
   if (motorManualMode == MANUAL_FORCE_ON) {
+    if (!status.pumpOn) {
+      time_t epochNow = getCurrentEpoch();
+      if (epochNow > 0) {
+        status.lastRunEpoch = epochNow;
+        saveLastRunToNVS(epochNow);
+      }
+    }
     setRelayState(PIN_PUMP_RELAY, true);
     status.pumpOn = true;
   } else if (motorManualMode == MANUAL_FORCE_OFF) {
@@ -931,7 +938,8 @@ bool isTimeToWater() {
     return false;
 
   time_t secondsSinceLastRun = epochNow - status.lastRunEpoch;
-  time_t intervalSeconds     = (time_t)(schedule.intervalMinutes * 60);
+  // Interval is now calculated from start-to-start (OFF interval + ON duration)
+  time_t intervalSeconds     = (time_t)((schedule.intervalMinutes * 60) + schedule.durationSeconds);
 
   return (secondsSinceLastRun >= intervalSeconds);
 }
