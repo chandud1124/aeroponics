@@ -406,11 +406,12 @@ export function LiveCycleHistoryPanel({ deviceId }: { deviceId?: string | null }
         let combined: Row[] = logsPayload.cycles.slice(0, 5);
 
         // If pump is currently running, prepend an in-progress row
-        if (statusPayload && statusPayload.pumpOn && statusPayload.lastRunISO) {
-          const startedAt = new Date(statusPayload.lastRunISO).toISOString();
-          const elapsed = Math.max(0, Math.round((Date.now() - new Date(statusPayload.lastRunISO).getTime()) / 1000));
+        const statusObj = statusPayload?.status;
+        if (statusObj && statusObj.pumpOn && statusObj.lastRunISO) {
+          const startedAt = new Date(statusObj.lastRunISO).toISOString();
+          const elapsed = Math.max(0, Math.round((Date.now() - new Date(statusObj.lastRunISO).getTime()) / 1000));
           const runningRow: Row = {
-            id: statusPayload.pumpLogId ?? "running",
+            id: statusObj.pumpLogId ?? "running",
             startedAt,
             durationSeconds: elapsed,
             flowed: false,

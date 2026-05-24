@@ -221,8 +221,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       // Include the current schedule so devices can pull it with a single call
       const schedule = getSchedule();
       if (!status) return jsonResponse({ status: null, schedule, hasRegisteredDevice });
-      // Merge status fields and attach schedule under `schedule` key
-      return jsonResponse({ ...status, schedule, hasRegisteredDevice });
+      // Nest status field and attach schedule under `schedule` key to match StatusEnvelope
+      return jsonResponse({ status, schedule, hasRegisteredDevice });
     }
 
     if (request.method === "PATCH" || request.method === "PUT") {
