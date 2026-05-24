@@ -47,9 +47,8 @@ const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend
 const char* API_BASE_URL  = "http://13.234.122.175:8080";
-const char* DEVICE_ID     = "device-489ccw";
-const char* DEVICE_SECRET = "a8a10bacc1a25b8bb6843782e6d204b9d987fb5ad6c10776";
-
+const char* DEVICE_ID     = "device-81yyyc";
+const char* DEVICE_SECRET = "70b12fe8c70d9b07da981e01089fd1f9700264890b156a48";
 // GPIO
 const int PIN_DHT_DATA           = 16;
 const int PIN_LDR_SENSOR         = 36;
@@ -945,6 +944,7 @@ int httpRequest(const char* method, const char* path,
   if (!wifiConnected) return -1;
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
+  Serial.printf("[API] %s %s\n", method, path);
   http.begin(String(API_BASE_URL) + path);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-ID",  DEVICE_ID);
@@ -954,6 +954,7 @@ int httpRequest(const char* method, const char* path,
   if (strcmp(method, "POST") == 0) code = http.POST(body);
   if (strcmp(method, "PUT")  == 0) code = http.PUT(body);
   http.end();
+  Serial.printf("[API] %s %s -> HTTP %d\n", method, path, code);
   return code;
 }
 
@@ -965,6 +966,7 @@ bool fetchHandshakeAndSync() {
 
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
+  Serial.printf("[API] GET /api/device/handshake\n");
   http.begin(String(API_BASE_URL) + "/api/device/handshake");
   http.addHeader("X-Device-ID", DEVICE_ID);
   http.addHeader("X-API-Key",   DEVICE_SECRET);
@@ -977,6 +979,7 @@ bool fetchHandshakeAndSync() {
   }
 
   String resp = http.getString();
+  Serial.printf("[API] Handshake OK (%u bytes)\n", (unsigned)resp.length());
   http.end();
 
   int ni = extractJsonInt(resp, "intervalMinutes");
@@ -1114,6 +1117,7 @@ void postStatus() {
   body += ",\"sensorDataOk\":" + String(status.sensorDataOk ? "true" : "false");
   body += "}";
 
+  Serial.println("[API] PUT /api/status");
   int code = httpRequest("PUT", "/api/status", body);
   if (code != 200 && code != 204) {
     Serial.printf("[API] Status POST failed (HTTP %d)\n", code);

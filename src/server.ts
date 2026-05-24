@@ -224,6 +224,10 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (request.method === "PATCH" || request.method === "PUT") {
+      console.info("[api/status] device update", {
+        method: request.method,
+        deviceId: request.headers.get("x-device-id") ?? "",
+      });
       // Require device authentication for status updates
       const deviceIdHeader = request.headers.get("x-device-id");
       const deviceKeyHeader = request.headers.get("x-api-key");
@@ -323,6 +327,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     const deviceIdHeader = request.headers.get("x-device-id")?.trim() ?? "";
     const deviceKeyHeader = request.headers.get("x-api-key")?.trim() ?? "";
+    console.info("[api/device/handshake] request", { deviceId: deviceIdHeader, hasKey: Boolean(deviceKeyHeader) });
     if (!deviceIdHeader) {
       return jsonResponse({ error: "Missing device id" }, 400);
     }
