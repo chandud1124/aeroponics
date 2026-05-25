@@ -18,6 +18,7 @@ time_t getCurrentEpoch();
 void readSensors();
 void postStatus();
 void stopPumpCycle();
+extern time_t lastAutoRunEpoch;
 
 // ─────────────────────────────────────────────────────────────────────
 //  STATE MACHINE ENUM
@@ -93,7 +94,7 @@ const unsigned long API_TIMEOUT_MS   = 8000UL;
 
 // Loop intervals (milliseconds)
 const unsigned long IV_SENSOR        = 30000UL;  // Read sensors every 30 s
-const unsigned long IV_SCHEDULE      = 60000UL;  // Fetch schedule + remote modes every 60 s
+const unsigned long IV_SCHEDULE      = 1000UL;   // Fetch schedule + remote modes every 1 s
 const unsigned long IV_STATUS_POST   = 10000UL;  // Post status to backend every 10 s
 const unsigned long IV_WIFI_CHECK    = 10000UL;  // WiFi health check every 10 s
 const unsigned long IV_WDT_FEED      = 2000UL;   // Feed watchdog every 2 s [FIX-6]
@@ -106,6 +107,13 @@ const char* NVS_SCHED_DUR  = "schedDur";
 const char* NVS_SCHED_SH   = "schedSH";
 const char* NVS_SCHED_EH   = "schedEH";
 const char* NVS_SCHED_EN   = "schedEn";
+const char* NVS_SCHED_DAY_INT = "schedDayInt";
+const char* NVS_SCHED_DAY_DUR = "schedDayDur";
+const char* NVS_SCHED_NIGHT_INT = "schedNightInt";
+const char* NVS_SCHED_NIGHT_DUR = "schedNightDur";
+const char* NVS_LIGHT_EN = "lightEnabled";
+const char* NVS_LIGHT_SH = "lightStart";
+const char* NVS_LIGHT_EH = "lightEnd";
 const char* NVS_CHG_START  = "chgStart";    // Battery charge start (sec into day)
 const char* NVS_CHG_DUR    = "chgDur";      // Battery charge duration (sec)
 const char* NVS_LAST_RUN   = "lastRun";
@@ -128,6 +136,13 @@ struct Schedule {
   int  startHour       = 0;
   int  endHour         = 24;
   bool enabled         = true;
+  bool lightEnabled    = true;
+  int  lightStartHour  = 5;
+  int  lightEndHour    = 21;
+  int  dayIntervalMinutes = 10;
+  int  dayDurationSeconds = 180;
+  int  nightIntervalMinutes = 10;
+  int  nightDurationSeconds = 180;
 };
 
 struct SensorData {
@@ -193,6 +208,11 @@ PumpState prevState = STATE_IDLE;
 Schedule     schedule;
 SensorData   sensors;
 SystemStatus status;
+
+// Manual pump runs should not advance the automatic schedule clock.
+time_t       lastAutoRunEpoch = 0;
+String       lastPostedStatusSignature = "";
+unsigned long lastStatusPostMs = 0;
 
 // Pump timing
 unsigned long pumpStartMs        = 0;
@@ -325,8 +345,18 @@ bool clampScheduleValues() {
   clamp(schedule.durationSeconds, 10,  600);
   clamp(schedule.startHour,       0,   23);
   clamp(schedule.endHour,         0,   24);
+  clamp(schedule.lightStartHour,   0,   23);
+  clamp(schedule.lightEndHour,     0,   24);
+  clamp(schedule.dayIntervalMinutes,   5,   1440);
+  clamp(schedule.dayDurationSeconds,   10,  600);
+  clamp(schedule.nightIntervalMinutes,  5,   1440);
+  clamp(schedule.nightDurationSeconds,  10,  600);
   if (schedule.endHour <= schedule.startHour) {
     schedule.endHour = min(schedule.startHour + 1, 24);
+    changed = true;
+  }
+  if (schedule.lightEndHour <= schedule.lightStartHour) {
+    schedule.lightEndHour = min(schedule.lightStartHour + 1, 24);
     changed = true;
   }
   return changed;
@@ -339,6 +369,13 @@ void saveScheduleToNVS() {
   prefs.putInt(NVS_SCHED_SH,  schedule.startHour);
   prefs.putInt(NVS_SCHED_EH,  schedule.endHour);
   prefs.putBool(NVS_SCHED_EN, schedule.enabled);
+  prefs.putBool(NVS_LIGHT_EN, schedule.lightEnabled);
+  prefs.putInt(NVS_LIGHT_SH, schedule.lightStartHour);
+  prefs.putInt(NVS_LIGHT_EH, schedule.lightEndHour);
+  prefs.putInt(NVS_SCHED_DAY_INT, schedule.dayIntervalMinutes);
+  prefs.putInt(NVS_SCHED_DAY_DUR, schedule.dayDurationSeconds);
+  prefs.putInt(NVS_SCHED_NIGHT_INT, schedule.nightIntervalMinutes);
+  prefs.putInt(NVS_SCHED_NIGHT_DUR, schedule.nightDurationSeconds);
   prefs.putULong(NVS_CHG_START, batteryChargeStartSec);
   prefs.putULong(NVS_CHG_DUR,   batteryChargeDurSec);
   prefs.end();
@@ -354,7 +391,15 @@ void loadScheduleFromNVS() {
   schedule.startHour       = prefs.getInt(NVS_SCHED_SH,  0);
   schedule.endHour         = prefs.getInt(NVS_SCHED_EH,  24);
   schedule.enabled         = prefs.getBool(NVS_SCHED_EN, true);
-  status.lastRunEpoch      = (time_t)prefs.getUInt(NVS_LAST_RUN, 0);
+  schedule.lightEnabled    = prefs.getBool(NVS_LIGHT_EN, true);
+  schedule.lightStartHour  = prefs.getInt(NVS_LIGHT_SH, 5);
+  schedule.lightEndHour    = prefs.getInt(NVS_LIGHT_EH, 21);
+  schedule.dayIntervalMinutes   = prefs.getInt(NVS_SCHED_DAY_INT, schedule.intervalMinutes);
+  schedule.dayDurationSeconds   = prefs.getInt(NVS_SCHED_DAY_DUR, schedule.durationSeconds);
+  schedule.nightIntervalMinutes = prefs.getInt(NVS_SCHED_NIGHT_INT, schedule.intervalMinutes);
+  schedule.nightDurationSeconds = prefs.getInt(NVS_SCHED_NIGHT_DUR, schedule.durationSeconds);
+  lastAutoRunEpoch         = (time_t)prefs.getUInt(NVS_LAST_RUN, 0);
+  status.lastRunEpoch      = lastAutoRunEpoch;
   batteryChargeStartSec    = prefs.getULong(NVS_CHG_START, 8UL * 3600UL);
   batteryChargeDurSec      = prefs.getULong(NVS_CHG_DUR,   4UL * 3600UL);
   // [FIX-12] This is where ntpSynced is correctly set from NVS — NOT at declaration
@@ -367,6 +412,46 @@ void loadScheduleFromNVS() {
   Serial.printf("[NVS] Schedule loaded: every %dmin for %ds (%02d:00–%02d:00)\n",
     schedule.intervalMinutes, schedule.durationSeconds,
     schedule.startHour, schedule.endHour);
+}
+
+struct PumpCycleProfile {
+  int intervalMinutes;
+  int durationSeconds;
+};
+
+bool shouldLightBeOnBySchedule(time_t epochNow) {
+  if (!schedule.lightEnabled || !schedule.enabled) {
+    return false;
+  }
+
+  struct tm localTime = {};
+  if (!localtime_r(&epochNow, &localTime)) {
+    return false;
+  }
+
+  const bool inWindow = localTime.tm_hour >= schedule.lightStartHour && localTime.tm_hour < schedule.lightEndHour;
+  if (!inWindow) {
+    return false;
+  }
+
+  if (sensors.lightValid) {
+    return sensors.isDark;
+  }
+
+  return true;
+}
+
+PumpCycleProfile getActivePumpProfile(time_t epochNow) {
+  struct tm localTime = {};
+  if (epochNow > 0 && localtime_r(&epochNow, &localTime)) {
+    bool isDay = localTime.tm_hour >= schedule.startHour && localTime.tm_hour < schedule.endHour;
+    if (isDay) {
+      return { schedule.dayIntervalMinutes, schedule.dayDurationSeconds };
+    }
+    return { schedule.nightIntervalMinutes, schedule.nightDurationSeconds };
+  }
+
+  return { schedule.intervalMinutes, schedule.durationSeconds };
 }
 
 void saveLastRunToNVS(time_t epoch) {
@@ -635,12 +720,8 @@ void manageLightRelay() {
     return;
   }
 
-  // Only auto-control if LDR gave a valid reading
-  bool ldrValid = (sensors.lightRaw >= LDR_MIN_VALID);
-  // [FIX-7] Note: sensors.lightRaw > LDR_MIN_VALID ensures sensor is connected.
-  // sensors.isDark == true  → room is dark  → turn light ON
-  // sensors.isDark == false → room has light → turn light OFF
-  bool shouldBeOn = ldrValid && sensors.isDark;
+  time_t epochNow = getCurrentEpoch();
+  bool shouldBeOn = shouldLightBeOnBySchedule(epochNow);
 
   if (shouldBeOn != status.lightOn) {
     setRelayState(PIN_LED_RELAY, shouldBeOn);
@@ -822,15 +903,17 @@ void stateCheckWater(unsigned long now) {
 
 void statePumpOn(unsigned long now) {
   (void)now;
-  Serial.printf("[PUMP] Starting — duration %ds\n", schedule.durationSeconds);
+  time_t epochNow = getCurrentEpoch();
+  PumpCycleProfile profile = getActivePumpProfile(epochNow);
+  Serial.printf("[PUMP] Starting — duration %ds\n", profile.durationSeconds);
   setRelayState(PIN_PUMP_RELAY, true);
   status.pumpOn          = true;
   status.flowing         = true;
-  pumpScheduledEndMs     = pumpStartMs + (unsigned long)(schedule.durationSeconds * 1000UL);
+  pumpScheduledEndMs     = pumpStartMs + (unsigned long)(profile.durationSeconds * 1000UL);
 
-  time_t epochNow = getCurrentEpoch();
   if (epochNow > 0) {
     status.lastRunEpoch = epochNow;
+    lastAutoRunEpoch = epochNow;
     saveLastRunToNVS(epochNow);
   }
 
@@ -903,13 +986,6 @@ void stateManual(unsigned long now) {
 
   // Motor
   if (motorManualMode == MANUAL_FORCE_ON) {
-    if (!status.pumpOn) {
-      time_t epochNow = getCurrentEpoch();
-      if (epochNow > 0) {
-        status.lastRunEpoch = epochNow;
-        saveLastRunToNVS(epochNow);
-      }
-    }
     setRelayState(PIN_PUMP_RELAY, true);
     status.pumpOn = true;
   } else if (motorManualMode == MANUAL_FORCE_OFF) {
@@ -967,8 +1043,9 @@ bool isTimeToWater() {
   if (t.tm_hour < schedule.startHour || t.tm_hour >= schedule.endHour)
     return false;
 
-  time_t secondsSinceLastRun = epochNow - status.lastRunEpoch;
-  time_t intervalSeconds     = (time_t)(schedule.intervalMinutes * 60);
+  time_t secondsSinceLastRun = epochNow - lastAutoRunEpoch;
+  PumpCycleProfile profile = getActivePumpProfile(epochNow);
+  time_t intervalSeconds     = (time_t)(profile.intervalMinutes * 60);
 
   return (secondsSinceLastRun >= intervalSeconds);
 }
@@ -1026,6 +1103,14 @@ bool fetchHandshakeAndSync() {
   int nd = extractJsonInt(resp, "durationSeconds");
   int ns = extractJsonInt(resp, "startHour");
   int ne = extractJsonInt(resp, "endHour");
+  int dDayInt = extractJsonInt(resp, "dayIntervalMinutes");
+  int dDayDur = extractJsonInt(resp, "dayDurationSeconds");
+  int dNightInt = extractJsonInt(resp, "nightIntervalMinutes");
+  int dNightDur = extractJsonInt(resp, "nightDurationSeconds");
+  bool hasLightEnabled = (resp.indexOf("\"lightEnabled\":") >= 0);
+  bool lightEnabled = (resp.indexOf("\"lightEnabled\":true") >= 0);
+  int lightStartHour = extractJsonInt(resp, "lightStartHour");
+  int lightEndHour = extractJsonInt(resp, "lightEndHour");
   int ncs = extractJsonInt(resp, "chargeStartHour");
   int nce = extractJsonInt(resp, "chargeEndHour");
   bool nen = (resp.indexOf("\"enabled\":true") >= 0);
@@ -1038,13 +1123,24 @@ bool fetchHandshakeAndSync() {
                     nd != schedule.durationSeconds ||
                     ns != schedule.startHour       ||
                     ne != schedule.endHour         ||
-                    nen != schedule.enabled);
+                    nen != schedule.enabled        ||
+                    (hasLightEnabled && lightEnabled != schedule.lightEnabled) ||
+                    (lightStartHour >= 0 && lightStartHour <= 23 && lightStartHour != schedule.lightStartHour) ||
+                    (lightEndHour >= 0 && lightEndHour <= 24 && lightEndHour != schedule.lightEndHour));
 
     schedule.intervalMinutes = ni;
     schedule.durationSeconds = nd;
     schedule.startHour = ns;
     schedule.endHour = ne;
     schedule.enabled = nen;
+
+    if (dDayInt > 0 && dDayInt <= 1440) schedule.dayIntervalMinutes = dDayInt;
+    if (dDayDur > 0 && dDayDur <= 600) schedule.dayDurationSeconds = dDayDur;
+    if (dNightInt > 0 && dNightInt <= 1440) schedule.nightIntervalMinutes = dNightInt;
+    if (dNightDur > 0 && dNightDur <= 600) schedule.nightDurationSeconds = dNightDur;
+    if (hasLightEnabled) schedule.lightEnabled = lightEnabled;
+    if (lightStartHour >= 0 && lightStartHour <= 23) schedule.lightStartHour = lightStartHour;
+    if (lightEndHour >= 0 && lightEndHour <= 24) schedule.lightEndHour = lightEndHour;
 
     if (ncs >= 0 && ncs <= 23 && nce >= 0 && nce <= 23 && nce > ncs) {
       unsigned long newStart = (unsigned long)ncs * 3600UL;
@@ -1125,6 +1221,29 @@ void fetchScheduleAndSync() {
 void postStatus() {
   if (!wifiConnected) return;
 
+  const unsigned long STATUS_HEARTBEAT_MS = 12000UL;
+
+  String signature = "";
+  signature += String(status.pumpOn ? "1" : "0");
+  signature += "|" + String(status.flowing ? "1" : "0");
+  signature += "|" + String(status.lightOn ? "1" : "0");
+  signature += "|" + String(status.batteryChargeOn ? "1" : "0");
+  signature += "|" + String(status.lightDark ? "1" : "0");
+  signature += "|" + String(status.dhtOk ? "1" : "0");
+  signature += "|" + String(status.sensorDataOk ? "1" : "0");
+  signature += "|" + String(status.humidityPct, 1);
+  signature += "|" + String(status.lightRaw);
+  signature += "|" + status.fault;
+  signature += "|" + String(status.lastRunEpoch);
+  signature += "|" + String(manualModeToString(motorManualMode));
+  signature += "|" + String(manualModeToString(lightManualMode));
+  signature += "|" + appliedPlanName;
+  signature += "|" + String((uint32_t)scheduleAppliedAt);
+
+  if (signature == lastPostedStatusSignature && (millis() - lastStatusPostMs) < STATUS_HEARTBEAT_MS) {
+    return;
+  }
+
   String reportedState = String(STATE_NAMES[curState]);
 
   String body = "{";
@@ -1167,6 +1286,9 @@ void postStatus() {
   int code = httpRequest("PUT", "/api/status", body);
   if (code != 200 && code != 204) {
     Serial.printf("[API] Status POST failed (HTTP %d)\n", code);
+  } else {
+    lastPostedStatusSignature = signature;
+    lastStatusPostMs = millis();
   }
 }
 

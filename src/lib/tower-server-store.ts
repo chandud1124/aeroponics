@@ -270,9 +270,32 @@ let autoPumpLogId: string | null = null;
 loadStateFromDisk();
 
 const TELEMETRY_STALE_MS = 15000;
+const IST_OFFSET_MS = 19800 * 1000;
 
 function isFresh(timestamp: number | null | undefined, staleMs = TELEMETRY_STALE_MS): boolean {
   return timestamp != null && Date.now() - timestamp <= staleMs;
+}
+
+function getIstDate(now = new Date()) {
+  return new Date(now.getTime() + IST_OFFSET_MS);
+}
+
+function getIstHour(now = new Date()) {
+  return getIstDate(now).getUTCHours();
+}
+
+function makeIstDateAtHour(now = new Date(), hour: number, dayOffset = 0) {
+  const istNow = getIstDate(now);
+  istNow.setUTCDate(istNow.getUTCDate() + dayOffset);
+  return new Date(Date.UTC(
+    istNow.getUTCFullYear(),
+    istNow.getUTCMonth(),
+    istNow.getUTCDate(),
+    hour,
+    0,
+    0,
+    0,
+  ) - IST_OFFSET_MS);
 }
 
 function getLatestDeviceSignalAt(status: LiveStatus | null | undefined): number | null {
@@ -282,7 +305,7 @@ function getLatestDeviceSignalAt(status: LiveStatus | null | undefined): number 
 }
 
 function getModeForNow(now = new Date()): "DAY" | "NIGHT" {
-  const hour = now.getHours();
+  const hour = getIstHour(now);
   return hour >= schedule.startHour && hour < schedule.endHour ? "DAY" : "NIGHT";
 }
 
@@ -349,7 +372,7 @@ function getLatestSensorSnapshot(deviceId?: string | null) {
 function shouldLightBeOnBySchedule(now = new Date(), deviceId?: string | null): boolean {
   if (!schedule.lightEnabled) return false;
   if (!schedule.enabled) return false;
-  const hour = now.getHours();
+  const hour = getIstHour(now);
   const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
   const lightEndHour = schedule.lightEndHour ?? schedule.endHour;
   const inWindow = hour >= lightStartHour && hour < lightEndHour;
@@ -415,7 +438,7 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
     return { nextCycleISO: null, nextCycleIn: -1 };
   }
 
-  const currentHour = now.getHours();
+  const currentHour = getIstHour(now);
   const { offIntervalMinutes, onDurationSeconds } = getCycleProfile(now);
   const intervalMs = (offIntervalMinutes * 60 + onDurationSeconds) * 1000;
 
@@ -435,15 +458,12 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
 
   // Fallback to slot-based prediction
   if (!nextCycleTime) {
-    const windowStart = new Date(now);
-    windowStart.setHours(schedule.startHour, 0, 0, 0);
+    const windowStart = makeIstDateAtHour(now, schedule.startHour);
 
     // Outside active hours?
     if (currentHour < schedule.startHour || currentHour >= schedule.endHour) {
       // Next cycle is at start of tomorrow's window
-      const tomorrow = new Date(now);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(schedule.startHour, 0, 0, 0);
+      const tomorrow = makeIstDateAtHour(now, schedule.startHour, 1);
       const secondsUntil = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
       return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
     }
@@ -453,11 +473,9 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
     nextCycleTime = new Date(windowStart.getTime() + slotsElapsed * intervalMs);
   }
 
-  const nextHour = nextCycleTime.getHours();
+  const nextHour = getIstHour(nextCycleTime);
   if (nextHour < schedule.startHour || nextHour >= schedule.endHour || nextCycleTime.getTime() < now.getTime()) {
-    const nextDay = new Date(now);
-    nextDay.setDate(nextDay.getDate() + 1);
-    nextDay.setHours(schedule.startHour, 0, 0, 0);
+    const nextDay = makeIstDateAtHour(now, schedule.startHour, 1);
     const secondsUntil = Math.floor((nextDay.getTime() - now.getTime()) / 1000);
     return { nextCycleISO: nextDay.toISOString(), nextCycleIn: secondsUntil };
   }
@@ -471,7 +489,7 @@ function calculateRetryCycle(nextStatus: LiveStatus, now = new Date()): { retryN
     return { retryNextCycleISO: null, retryNextCycleIn: null };
   }
 
-  const withinActiveWindow = now.getHours() >= schedule.startHour && now.getHours() < schedule.endHour;
+  const withinActiveWindow = getIstHour(now) >= schedule.startHour && getIstHour(now) < schedule.endHour;
   if (!withinActiveWindow) {
     return { retryNextCycleISO: null, retryNextCycleIn: null };
   }
@@ -524,13 +542,14 @@ function syncScheduledState(deviceId?: string | null, now = new Date()) {
   }
 
   const nextStatus = { ...currentStatus };
+  const currentHour = getIstHour(now);
 
   if (nextStatus.lightManualMode === "AUTO") {
     nextStatus.lightOn = shouldLightBeOnBySchedule(now, resolvedDeviceId);
   }
 
   if (nextStatus.motorManualMode === "AUTO" && schedule.enabled) {
-    const withinActiveWindow = now.getHours() >= schedule.startHour && now.getHours() < schedule.endHour;
+    const withinActiveWindow = currentHour >= schedule.startHour && currentHour < schedule.endHour;
     const cycleProfile = getCycleProfile(now);
     const onDurationMs = cycleProfile.onDurationSeconds * 1000;
     const offIntervalMs = cycleProfile.offIntervalMinutes * 60 * 1000;
