@@ -94,7 +94,7 @@ const unsigned long API_TIMEOUT_MS   = 8000UL;
 
 // Loop intervals (milliseconds)
 const unsigned long IV_SENSOR        = 30000UL;  // Read sensors every 30 s
-const unsigned long IV_SCHEDULE      = 1000UL;   // Fetch schedule + remote modes every 1 s
+const unsigned long IV_SCHEDULE      = 60000UL;  // Fetch schedule + remote modes every 60 s
 const unsigned long IV_STATUS_POST   = 10000UL;  // Post status to backend every 10 s
 const unsigned long IV_WIFI_CHECK    = 10000UL;  // WiFi health check every 10 s
 const unsigned long IV_WDT_FEED      = 2000UL;   // Feed watchdog every 2 s [FIX-6]
@@ -111,6 +111,7 @@ const char* NVS_SCHED_DAY_INT = "schedDayInt";
 const char* NVS_SCHED_DAY_DUR = "schedDayDur";
 const char* NVS_SCHED_NIGHT_INT = "schedNightInt";
 const char* NVS_SCHED_NIGHT_DUR = "schedNightDur";
+const char* NVS_NIGHT_EN = "nightEnabled";
 const char* NVS_LIGHT_EN = "lightEnabled";
 const char* NVS_LIGHT_SH = "lightStart";
 const char* NVS_LIGHT_EH = "lightEnd";
@@ -136,6 +137,7 @@ struct Schedule {
   int  startHour       = 0;
   int  endHour         = 24;
   bool enabled         = true;
+  bool nightEnabled    = true;
   bool lightEnabled    = true;
   int  lightStartHour  = 5;
   int  lightEndHour    = 21;
@@ -369,6 +371,7 @@ void saveScheduleToNVS() {
   prefs.putInt(NVS_SCHED_SH,  schedule.startHour);
   prefs.putInt(NVS_SCHED_EH,  schedule.endHour);
   prefs.putBool(NVS_SCHED_EN, schedule.enabled);
+  prefs.putBool(NVS_NIGHT_EN, schedule.nightEnabled);
   prefs.putBool(NVS_LIGHT_EN, schedule.lightEnabled);
   prefs.putInt(NVS_LIGHT_SH, schedule.lightStartHour);
   prefs.putInt(NVS_LIGHT_EH, schedule.lightEndHour);
@@ -391,6 +394,7 @@ void loadScheduleFromNVS() {
   schedule.startHour       = prefs.getInt(NVS_SCHED_SH,  0);
   schedule.endHour         = prefs.getInt(NVS_SCHED_EH,  24);
   schedule.enabled         = prefs.getBool(NVS_SCHED_EN, true);
+  schedule.nightEnabled    = prefs.getBool(NVS_NIGHT_EN, true);
   schedule.lightEnabled    = prefs.getBool(NVS_LIGHT_EN, true);
   schedule.lightStartHour  = prefs.getInt(NVS_LIGHT_SH, 5);
   schedule.lightEndHour    = prefs.getInt(NVS_LIGHT_EH, 21);
@@ -414,11 +418,6 @@ void loadScheduleFromNVS() {
     schedule.startHour, schedule.endHour);
 }
 
-struct PumpCycleProfile {
-  int intervalMinutes;
-  int durationSeconds;
-};
-
 bool shouldLightBeOnBySchedule(time_t epochNow) {
   if (!schedule.lightEnabled || !schedule.enabled) {
     return false;
@@ -430,28 +429,25 @@ bool shouldLightBeOnBySchedule(time_t epochNow) {
   }
 
   const bool inWindow = localTime.tm_hour >= schedule.lightStartHour && localTime.tm_hour < schedule.lightEndHour;
-  if (!inWindow) {
-    return false;
-  }
-
-  if (sensors.lightValid) {
-    return sensors.isDark;
-  }
-
-  return true;
+  return inWindow;
 }
 
-PumpCycleProfile getActivePumpProfile(time_t epochNow) {
+void getActivePumpProfile(time_t epochNow, int& intervalMinutes, int& durationSeconds) {
   struct tm localTime = {};
   if (epochNow > 0 && localtime_r(&epochNow, &localTime)) {
     bool isDay = localTime.tm_hour >= schedule.startHour && localTime.tm_hour < schedule.endHour;
-    if (isDay) {
-      return { schedule.dayIntervalMinutes, schedule.dayDurationSeconds };
+    if (isDay || !schedule.nightEnabled) {
+      intervalMinutes = schedule.dayIntervalMinutes;
+      durationSeconds = schedule.dayDurationSeconds;
+      return;
     }
-    return { schedule.nightIntervalMinutes, schedule.nightDurationSeconds };
+    intervalMinutes = schedule.nightIntervalMinutes;
+    durationSeconds = schedule.nightDurationSeconds;
+    return;
   }
 
-  return { schedule.intervalMinutes, schedule.durationSeconds };
+  intervalMinutes = schedule.intervalMinutes;
+  durationSeconds = schedule.durationSeconds;
 }
 
 void saveLastRunToNVS(time_t epoch) {
@@ -904,12 +900,14 @@ void stateCheckWater(unsigned long now) {
 void statePumpOn(unsigned long now) {
   (void)now;
   time_t epochNow = getCurrentEpoch();
-  PumpCycleProfile profile = getActivePumpProfile(epochNow);
-  Serial.printf("[PUMP] Starting — duration %ds\n", profile.durationSeconds);
+  int intervalMinutes = schedule.intervalMinutes;
+  int durationSeconds = schedule.durationSeconds;
+  getActivePumpProfile(epochNow, intervalMinutes, durationSeconds);
+  Serial.printf("[PUMP] Starting — duration %ds\n", durationSeconds);
   setRelayState(PIN_PUMP_RELAY, true);
   status.pumpOn          = true;
   status.flowing         = true;
-  pumpScheduledEndMs     = pumpStartMs + (unsigned long)(profile.durationSeconds * 1000UL);
+  pumpScheduledEndMs     = pumpStartMs + (unsigned long)(durationSeconds * 1000UL);
 
   if (epochNow > 0) {
     status.lastRunEpoch = epochNow;
@@ -1040,12 +1038,15 @@ bool isTimeToWater() {
   // [FIX-8] Use thread-safe localtime_r
   if (!localtime_r(&epochNow, &t)) return false;
 
-  if (t.tm_hour < schedule.startHour || t.tm_hour >= schedule.endHour)
+  bool isDay = t.tm_hour >= schedule.startHour && t.tm_hour < schedule.endHour;
+  if (!isDay && !schedule.nightEnabled)
     return false;
 
   time_t secondsSinceLastRun = epochNow - lastAutoRunEpoch;
-  PumpCycleProfile profile = getActivePumpProfile(epochNow);
-  time_t intervalSeconds     = (time_t)(profile.intervalMinutes * 60);
+  int intervalMinutes = schedule.intervalMinutes;
+  int durationSeconds = schedule.durationSeconds;
+  getActivePumpProfile(epochNow, intervalMinutes, durationSeconds);
+  time_t intervalSeconds     = (time_t)(intervalMinutes * 60);
 
   return (secondsSinceLastRun >= intervalSeconds);
 }
@@ -1107,6 +1108,8 @@ bool fetchHandshakeAndSync() {
   int dDayDur = extractJsonInt(resp, "dayDurationSeconds");
   int dNightInt = extractJsonInt(resp, "nightIntervalMinutes");
   int dNightDur = extractJsonInt(resp, "nightDurationSeconds");
+  bool hasNightEnabled = (resp.indexOf("\"nightEnabled\":") >= 0);
+  bool nightEnabled = (resp.indexOf("\"nightEnabled\":true") >= 0);
   bool hasLightEnabled = (resp.indexOf("\"lightEnabled\":") >= 0);
   bool lightEnabled = (resp.indexOf("\"lightEnabled\":true") >= 0);
   int lightStartHour = extractJsonInt(resp, "lightStartHour");
@@ -1124,6 +1127,7 @@ bool fetchHandshakeAndSync() {
                     ns != schedule.startHour       ||
                     ne != schedule.endHour         ||
                     nen != schedule.enabled        ||
+                    (hasNightEnabled && nightEnabled != schedule.nightEnabled) ||
                     (hasLightEnabled && lightEnabled != schedule.lightEnabled) ||
                     (lightStartHour >= 0 && lightStartHour <= 23 && lightStartHour != schedule.lightStartHour) ||
                     (lightEndHour >= 0 && lightEndHour <= 24 && lightEndHour != schedule.lightEndHour));
@@ -1133,6 +1137,7 @@ bool fetchHandshakeAndSync() {
     schedule.startHour = ns;
     schedule.endHour = ne;
     schedule.enabled = nen;
+    if (hasNightEnabled) schedule.nightEnabled = nightEnabled;
 
     if (dDayInt > 0 && dDayInt <= 1440) schedule.dayIntervalMinutes = dDayInt;
     if (dDayDur > 0 && dDayDur <= 600) schedule.dayDurationSeconds = dDayDur;

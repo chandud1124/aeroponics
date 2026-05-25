@@ -309,6 +309,10 @@ function getModeForNow(now = new Date()): "DAY" | "NIGHT" {
   return hour >= schedule.startHour && hour < schedule.endHour ? "DAY" : "NIGHT";
 }
 
+function isNightModeEnabled(): boolean {
+  return schedule.nightEnabled !== false;
+}
+
 function isRetryableFlowFault(fault: string | null | undefined): boolean {
   if (!fault) return false;
   const upper = fault.toUpperCase();
@@ -375,39 +379,27 @@ function shouldLightBeOnBySchedule(now = new Date(), deviceId?: string | null): 
   const hour = getIstHour(now);
   const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
   const lightEndHour = schedule.lightEndHour ?? schedule.endHour;
-  const inWindow = hour >= lightStartHour && hour < lightEndHour;
-  if (!inWindow) return false;
-
-  // If an ambient light sensor is present, prefer auto-on when ambient lux is low (indoor use)
-  try {
-    const latest = getLatestSensorSnapshot(deviceId);
-    // From the indoor lettuce guide: use a higher threshold for indoor rooms
-    // Typical room ambient lux varies; use 2000 lux as a conservative threshold
-    // to decide when supplemental LED grow lights should be enabled.
-    const AMBIENT_LUX_THRESHOLD = 2000; // lux threshold for indoor grow LEDs
-    if (latest && typeof latest.lightLux === "number") {
-      return latest.lightLux < AMBIENT_LUX_THRESHOLD;
-    }
-  } catch {
-    // fall through to schedule-based behavior
-  }
-
-  return true;
+  return hour >= lightStartHour && hour < lightEndHour;
 }
 
 export function getCycleProfile(now = new Date()) {
   const mode = getModeForNow(now);
   const isDay = mode === "DAY";
+  const nightEnabled = isNightModeEnabled();
   const configuredDayIntervalMinutes = schedule.dayIntervalMinutes ?? schedule.intervalMinutes;
 
   return {
     mode,
     onDurationSeconds: isDay
       ? schedule.dayDurationSeconds ?? schedule.durationSeconds
-      : schedule.nightDurationSeconds ?? Math.max(15, Math.round(schedule.durationSeconds * 0.75)),
+      : nightEnabled
+        ? schedule.nightDurationSeconds ?? Math.max(15, Math.round(schedule.durationSeconds * 0.75))
+        : schedule.dayDurationSeconds ?? schedule.durationSeconds,
     offIntervalMinutes: isDay
       ? configuredDayIntervalMinutes
-      : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15),
+      : nightEnabled
+        ? schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15)
+        : configuredDayIntervalMinutes,
   };
 }
 
@@ -438,15 +430,31 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
     return { nextCycleISO: null, nextCycleIn: -1 };
   }
 
-  const currentHour = getIstHour(now);
+  const currentMode = getModeForNow(now);
+  const nightEnabled = isNightModeEnabled();
   const { offIntervalMinutes, onDurationSeconds } = getCycleProfile(now);
   const intervalMs = (offIntervalMinutes * 60 + onDurationSeconds) * 1000;
+  const outsideDayWindow = currentMode === "NIGHT";
+  const currentHour = getIstHour(now);
+
+  const windowStart = currentMode === "DAY"
+    ? makeIstDateAtHour(now, schedule.startHour)
+    : currentHour >= schedule.endHour
+      ? makeIstDateAtHour(now, schedule.endHour)
+      : makeIstDateAtHour(now, schedule.endHour, -1);
+
+  if (outsideDayWindow && !nightEnabled) {
+    const tomorrow = makeIstDateAtHour(now, schedule.startHour, 1);
+    const secondsUntil = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
+    return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
+  }
 
   let nextCycleTime: Date | null = null;
 
   // Try using actual last run time if present and valid
   const lastRunMs = status?.lastRunISO ? Date.parse(status.lastRunISO) : null;
-  if (lastRunMs && Number.isFinite(lastRunMs)) {
+  const lastRunMode = lastRunMs && Number.isFinite(lastRunMs) ? getModeForNow(new Date(lastRunMs)) : null;
+  if (lastRunMs && Number.isFinite(lastRunMs) && (!lastRunMode || lastRunMode === currentMode)) {
     let targetTime = lastRunMs + intervalMs;
     if (targetTime < now.getTime()) {
       const elapsed = now.getTime() - targetTime;
@@ -458,23 +466,13 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
 
   // Fallback to slot-based prediction
   if (!nextCycleTime) {
-    const windowStart = makeIstDateAtHour(now, schedule.startHour);
-
-    // Outside active hours?
-    if (currentHour < schedule.startHour || currentHour >= schedule.endHour) {
-      // Next cycle is at start of tomorrow's window
-      const tomorrow = makeIstDateAtHour(now, schedule.startHour, 1);
-      const secondsUntil = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
-      return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
-    }
-
     const elapsedMs = now.getTime() - windowStart.getTime();
     const slotsElapsed = Math.max(0, Math.ceil(elapsedMs / intervalMs));
     nextCycleTime = new Date(windowStart.getTime() + slotsElapsed * intervalMs);
   }
 
   const nextHour = getIstHour(nextCycleTime);
-  if (nextHour < schedule.startHour || nextHour >= schedule.endHour || nextCycleTime.getTime() < now.getTime()) {
+  if ((nextHour < schedule.startHour || nextHour >= schedule.endHour || nextCycleTime.getTime() < now.getTime()) && (!nightEnabled || currentMode === "DAY")) {
     const nextDay = makeIstDateAtHour(now, schedule.startHour, 1);
     const secondsUntil = Math.floor((nextDay.getTime() - now.getTime()) / 1000);
     return { nextCycleISO: nextDay.toISOString(), nextCycleIn: secondsUntil };
@@ -542,14 +540,16 @@ function syncScheduledState(deviceId?: string | null, now = new Date()) {
   }
 
   const nextStatus = { ...currentStatus };
-  const currentHour = getIstHour(now);
+  const currentMode = getModeForNow(now);
+  const nightEnabled = isNightModeEnabled();
+  const withinScheduledWindow = currentMode === "DAY" || nightEnabled;
 
   if (nextStatus.lightManualMode === "AUTO") {
     nextStatus.lightOn = shouldLightBeOnBySchedule(now, resolvedDeviceId);
   }
 
   if (nextStatus.motorManualMode === "AUTO" && schedule.enabled) {
-    const withinActiveWindow = currentHour >= schedule.startHour && currentHour < schedule.endHour;
+    const withinActiveWindow = withinScheduledWindow;
     const cycleProfile = getCycleProfile(now);
     const onDurationMs = cycleProfile.onDurationSeconds * 1000;
     const offIntervalMs = cycleProfile.offIntervalMinutes * 60 * 1000;
@@ -702,6 +702,7 @@ export function getStatus(deviceId?: string | null) {
     cycleMode: cycleProfile.mode,
     cycleOnDurationSeconds: cycleProfile.onDurationSeconds,
     cycleOffIntervalMinutes: cycleProfile.offIntervalMinutes,
+    nightEnabled: isNightModeEnabled(),
     isOnline,
     pumpEndISO,
     heartbeatUpdatedAt,

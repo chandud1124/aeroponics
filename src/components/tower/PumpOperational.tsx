@@ -110,11 +110,17 @@ export function NextCyclePanel({
 }) {
   // ── Derived schedule values ─────────────────────────────────────────
   const isDayMode = (status.cycleMode ?? "DAY") === "DAY";
-  const modeLabel = isDayMode ? "DAY MODE" : "NIGHT MODE";
-  const expectedDuration = status.cycleOnDurationSeconds ?? (isDayMode
+  const nightModeEnabled = schedule.nightEnabled !== false;
+  const nightModeActive = !isDayMode && nightModeEnabled;
+  const modeLabel = nightModeActive
+    ? "NIGHT MODE"
+    : !nightModeEnabled && !isDayMode
+      ? "NIGHT MODE OFF"
+      : "DAY MODE";
+  const expectedDuration = status.cycleOnDurationSeconds ?? (isDayMode || !nightModeEnabled
     ? schedule.dayDurationSeconds ?? schedule.durationSeconds
     : schedule.nightDurationSeconds ?? Math.max(15, Math.round((schedule.durationSeconds * 0.75) || 30)));
-  const expectedOff = status.cycleOffIntervalMinutes ?? (isDayMode
+  const expectedOff = status.cycleOffIntervalMinutes ?? (isDayMode || !nightModeEnabled
     ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes
     : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15));
   const lightStartHour = schedule.lightStartHour ?? schedule.startHour;

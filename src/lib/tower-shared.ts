@@ -41,6 +41,7 @@ export type Schedule = {
   startHour: number;
   endHour: number;
   enabled: boolean;
+  nightEnabled?: boolean;
   lightEnabled?: boolean;
   lightStartHour?: number;
   lightEndHour?: number;
@@ -85,6 +86,7 @@ export type LiveStatus = {
   cycleMode?: "DAY" | "NIGHT";
   cycleOnDurationSeconds?: number;
   cycleOffIntervalMinutes?: number;
+  nightEnabled?: boolean;
   resetReason?: string | null;
   lastBootFault?: string | null;
   uptimeSec?: number | null;
@@ -161,6 +163,7 @@ export const defaultSchedule: Schedule = {
   startHour: 0,
   endHour: 24,
   enabled: true,
+  nightEnabled: true,
   lightEnabled: true,
   lightStartHour: 5,
   lightEndHour: 21,

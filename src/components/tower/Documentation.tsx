@@ -78,7 +78,7 @@ export function Documentation() {
           <AccordionContent>
             <Card className="space-y-2 p-4 text-sm text-muted-foreground">
               <p>1. Pump scheduling runs from backend plan.</p>
-              <p>2. Light relay is automated from ambient-light threshold and manual mode.</p>
+              <p>2. Light relay follows the configured time window and manual mode.</p>
               <p>3. Humidity is monitored and published to dashboard telemetry.</p>
               <p>4. Manual override buttons can force pump and light modes.</p>
             </Card>

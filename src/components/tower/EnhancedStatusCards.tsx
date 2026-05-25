@@ -63,7 +63,7 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
               {status.lightOn ? "ON" : "OFF"}
             </Badge>
           </div>
-          <p className="text-xs text-muted-foreground">Ambient-light based control</p>
+          <p className="text-xs text-muted-foreground">Time-based light control</p>
         </Card>
 
         {/* Humidity */}

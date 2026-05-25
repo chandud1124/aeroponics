@@ -79,15 +79,15 @@ export function LightScheduleEditor() {
       <div className="mb-4">
         <h3 className="text-lg font-semibold">Light schedule</h3>
         <p className="text-sm text-muted-foreground">
-          Set a separate grow-light window from the pump timing. The light still follows ambient darkness during this window.
+          Set a separate grow-light window from the pump timing. The relay follows the configured hours directly.
         </p>
       </div>
 
       <div className="mb-5 rounded-lg border border-border bg-secondary/40 p-4 text-sm text-secondary-foreground">
         <div className="font-semibold">How the light plan works</div>
         <ul className="mt-2 space-y-1">
-          <li>Light ON window = the hours when the grow light is allowed to run automatically.</li>
-          <li>Grow light still uses the ambient sensor to stay off when daylight is already strong.</li>
+          <li>Light ON window = the hours when the grow light turns on automatically.</li>
+          <li>Outside the window, the grow light turns off automatically.</li>
           <li>Manual controls can still force the light ON or OFF at any time.</li>
           <li>Use presets below for common daylight windows.</li>
         </ul>

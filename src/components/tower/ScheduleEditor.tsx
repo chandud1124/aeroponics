@@ -268,6 +268,16 @@ export function ScheduleEditor() {
             </div>
           </div>
         </div>
+
+        <div className="flex items-center justify-between rounded-md border border-border p-3 sm:col-span-2 lg:col-span-2">
+          <div>
+            <div className="font-medium">Night mode enabled</div>
+            <div className="text-xs text-muted-foreground">
+              When OFF, the controller waits until the next daylight window instead of running a night cycle.
+            </div>
+          </div>
+          <Switch checked={Boolean(s.nightEnabled ?? true)} onCheckedChange={(v) => update("nightEnabled", v)} />
+        </div>
       </div>
 
       <div className="mt-6 rounded-lg border border-border p-4">
