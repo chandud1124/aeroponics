@@ -118,7 +118,7 @@ export async function analyzeSensorDataWithGemini(
   Return JSON with keys: "healthScore", "observations", "recommendations", "riskFactors", "summary". Use the reference targets above when proposing numeric recommendations.
   `;
 
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
