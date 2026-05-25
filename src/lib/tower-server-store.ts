@@ -375,7 +375,7 @@ function shouldLightBeOnBySchedule(now = new Date(), deviceId?: string | null): 
 export function getCycleProfile(now = new Date()) {
   const mode = getModeForNow(now);
   const isDay = mode === "DAY";
-  const safeDayIntervalMinutes = Math.min(schedule.dayIntervalMinutes ?? schedule.intervalMinutes, 7);
+  const configuredDayIntervalMinutes = schedule.dayIntervalMinutes ?? schedule.intervalMinutes;
 
   return {
     mode,
@@ -383,7 +383,7 @@ export function getCycleProfile(now = new Date()) {
       ? schedule.dayDurationSeconds ?? schedule.durationSeconds
       : schedule.nightDurationSeconds ?? Math.max(15, Math.round(schedule.durationSeconds * 0.75)),
     offIntervalMinutes: isDay
-      ? safeDayIntervalMinutes
+      ? configuredDayIntervalMinutes
       : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15),
   };
 }

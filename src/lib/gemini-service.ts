@@ -50,7 +50,9 @@ export async function analyzeSensorDataWithGemini(
 ): Promise<GeminiAnalysisResponse | null> {
   await initializeTowerStore();
 
-  const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
+  const googleAiApiKey = process.env.GOOGLE_AI_API_KEY?.trim();
+  const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = googleAiApiKey || geminiApiKey;
 
   if (!apiKey) {
     logWarn("Google AI API key not configured");

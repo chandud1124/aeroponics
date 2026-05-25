@@ -115,7 +115,7 @@ export function NextCyclePanel({
     ? schedule.dayDurationSeconds ?? schedule.durationSeconds
     : schedule.nightDurationSeconds ?? Math.max(15, Math.round((schedule.durationSeconds * 0.75) || 30)));
   const expectedOff = status.cycleOffIntervalMinutes ?? (isDayMode
-    ? Math.min(schedule.dayIntervalMinutes ?? schedule.intervalMinutes, 7)
+    ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes
     : schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15));
   const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
   const lightEndHour = schedule.lightEndHour ?? schedule.endHour;

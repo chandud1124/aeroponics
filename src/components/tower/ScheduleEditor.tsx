@@ -36,8 +36,19 @@ export function ScheduleEditor() {
       toast.error("Duration must be between 5 and 600 seconds");
       return;
     }
-    if (s.intervalMinutes < 5 || s.intervalMinutes > 240) {
-      toast.error("Interval must be between 5 and 240 minutes");
+    const intervalSeconds = Math.round(s.intervalMinutes * 60);
+    if (intervalSeconds < 5 || intervalSeconds > 14400) {
+      toast.error("OFF interval must be between 5 and 14400 seconds");
+      return;
+    }
+    const dayIntervalSeconds = Math.round((s.dayIntervalMinutes ?? s.intervalMinutes) * 60);
+    if (dayIntervalSeconds < 5 || dayIntervalSeconds > 14400) {
+      toast.error("Day OFF interval must be between 5 and 14400 seconds");
+      return;
+    }
+    const nightIntervalSeconds = Math.round((s.nightIntervalMinutes ?? Math.max(s.intervalMinutes, 15)) * 60);
+    if (nightIntervalSeconds < 5 || nightIntervalSeconds > 14400) {
+      toast.error("Night OFF interval must be between 5 and 14400 seconds");
       return;
     }
     if (s.startHour >= s.endHour) {
@@ -57,14 +68,16 @@ export function ScheduleEditor() {
 
   const activeWindowHours = Math.max(0, s.endHour - s.startHour);
   const inactiveWindowHours = Math.max(0, 24 - activeWindowHours);
-  const dayRestMinutes = Math.min(s.dayIntervalMinutes ?? s.intervalMinutes, 7);
+  const dayRestMinutes = s.dayIntervalMinutes ?? s.intervalMinutes;
   const nightRestMinutes = s.nightIntervalMinutes ?? Math.max(s.intervalMinutes, 15);
+  const dayRestSeconds = Math.max(0, Math.round(dayRestMinutes * 60));
+  const nightRestSeconds = Math.max(0, Math.round(nightRestMinutes * 60));
   const dayRunSeconds = s.dayDurationSeconds ?? s.durationSeconds;
   const nightRunSeconds = s.nightDurationSeconds ?? Math.max(15, Math.round(s.durationSeconds * 0.75));
-  const dayCycleMinutes = Math.round((dayRunSeconds + dayRestMinutes * 60) / 60);
-  const nightCycleMinutes = Math.round((nightRunSeconds + nightRestMinutes * 60) / 60);
-  const dayCycles = activeWindowHours > 0 && dayCycleMinutes > 0 ? Math.max(0, Math.floor((activeWindowHours * 60) / dayCycleMinutes)) : 0;
-  const nightCycles = inactiveWindowHours > 0 && nightCycleMinutes > 0 ? Math.max(0, Math.floor((inactiveWindowHours * 60) / nightCycleMinutes)) : 0;
+  const dayCycleSeconds = dayRunSeconds + dayRestSeconds;
+  const nightCycleSeconds = nightRunSeconds + nightRestSeconds;
+  const dayCycles = activeWindowHours > 0 && dayCycleSeconds > 0 ? Math.max(0, Math.floor((activeWindowHours * 3600) / dayCycleSeconds)) : 0;
+  const nightCycles = inactiveWindowHours > 0 && nightCycleSeconds > 0 ? Math.max(0, Math.floor((inactiveWindowHours * 3600) / nightCycleSeconds)) : 0;
   const totalCycles = dayCycles + nightCycles;
   const litresEstimate = (((dayCycles * dayRunSeconds) + (nightCycles * nightRunSeconds)) / 60) * 2;
 
@@ -73,7 +86,7 @@ export function ScheduleEditor() {
       <div className="mb-4">
         <h3 className="text-lg font-semibold">Watering plan</h3>
         <p className="text-sm text-muted-foreground">
-          Set pump timing in plain language. Daytime rest is capped at 7 minutes for safety, even if a longer value is entered.
+          Set pump timing in plain language for day and night windows.
         </p>
       </div>
 
@@ -81,7 +94,7 @@ export function ScheduleEditor() {
         <div className="font-semibold">How the plan works</div>
         <ul className="mt-2 space-y-1">
           <li>Pump ON duration = how long the motor runs each cycle.</li>
-          <li>Pump OFF interval = how long the controller waits before the next cycle.</li>
+          <li>Pump OFF interval = how long the controller waits before the next cycle (in seconds).</li>
           <li>Active from / until = the daylight window for the plan.</li>
           <li>Use the Light tab for the grow-light window and presets.</li>
           <li>Custom plan name = the label you want to remember for this setup.</li>
@@ -128,20 +141,21 @@ export function ScheduleEditor() {
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="interval">Pump rest time during the day (OFF interval, minutes)</Label>
+          <Label htmlFor="interval">Pump rest time during the day (OFF interval, seconds)</Label>
           <Input
             id="interval"
             type="number"
             min={5}
-            max={240}
-            value={s.dayIntervalMinutes ?? s.intervalMinutes}
+            max={14400}
+            value={Math.round((s.dayIntervalMinutes ?? s.intervalMinutes) * 60)}
             onChange={(e) => {
-              const value = Number(e.target.value);
-              update("dayIntervalMinutes", value);
-              update("intervalMinutes", value);
+              const seconds = Number(e.target.value);
+              const valueMinutes = seconds / 60;
+              update("dayIntervalMinutes", valueMinutes);
+              update("intervalMinutes", valueMinutes);
             }}
           />
-          <div className="text-xs text-muted-foreground">Example: set 7 if you want the pump to stay off for 7 minutes.</div>
+          <div className="text-xs text-muted-foreground">Example: set 420 if you want the pump to stay off for 7 minutes.</div>
         </div>
         <div className="space-y-2">
           <Label htmlFor="duration">Pump run time during the day (ON duration, seconds)</Label>
@@ -211,14 +225,14 @@ export function ScheduleEditor() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="dayInterval">Pump rest time (OFF interval)</Label>
+              <Label htmlFor="dayInterval">Pump rest time (OFF interval, seconds)</Label>
               <Input
                 id="dayInterval"
                 type="number"
                 min={5}
-                max={240}
-                value={s.dayIntervalMinutes ?? s.intervalMinutes}
-                onChange={(e) => update("dayIntervalMinutes", Number(e.target.value))}
+                max={14400}
+                value={Math.round((s.dayIntervalMinutes ?? s.intervalMinutes) * 60)}
+                onChange={(e) => update("dayIntervalMinutes", Number(e.target.value) / 60)}
               />
             </div>
           </div>
@@ -242,14 +256,14 @@ export function ScheduleEditor() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="nightInterval">Pump rest time (OFF interval)</Label>
+              <Label htmlFor="nightInterval">Pump rest time (OFF interval, seconds)</Label>
               <Input
                 id="nightInterval"
                 type="number"
                 min={5}
-                max={240}
-                value={s.nightIntervalMinutes ?? Math.max(s.intervalMinutes, 15)}
-                onChange={(e) => update("nightIntervalMinutes", Number(e.target.value))}
+                max={14400}
+                value={Math.round((s.nightIntervalMinutes ?? Math.max(s.intervalMinutes, 15)) * 60)}
+                onChange={(e) => update("nightIntervalMinutes", Number(e.target.value) / 60)}
               />
             </div>
           </div>
@@ -294,11 +308,11 @@ export function ScheduleEditor() {
           </div>
           <div className="rounded-md bg-background p-3">
             <div className="text-xs text-muted-foreground">Day pump cycle</div>
-            <div className="font-semibold">Every {dayCycleMinutes} min: ON {Math.round(dayRunSeconds / 60)} min, OFF {dayRestMinutes} min</div>
+            <div className="font-semibold">Every {dayCycleSeconds} sec: ON {dayRunSeconds} sec, OFF {dayRestSeconds} sec</div>
           </div>
           <div className="rounded-md bg-background p-3">
             <div className="text-xs text-muted-foreground">Night pump cycle</div>
-            <div className="font-semibold">Every {nightCycleMinutes} min: ON {Math.round(nightRunSeconds / 60)} min, OFF {nightRestMinutes} min</div>
+            <div className="font-semibold">Every {nightCycleSeconds} sec: ON {nightRunSeconds} sec, OFF {nightRestSeconds} sec</div>
           </div>
           <div className="rounded-md bg-background p-3">
             <div className="text-xs text-muted-foreground">Light schedule</div>
@@ -319,7 +333,7 @@ export function ScheduleEditor() {
           ≈ <strong>{litresEstimate.toFixed(1)} L</strong> water moved / day (assuming 2 L/min pump)
         </div>
         <div>
-          For a 10-minute plan, use about 3 minutes ON and 7 minutes OFF.
+          Current day cycle: ON {dayRunSeconds} sec + OFF {dayRestSeconds} sec = {dayCycleSeconds} sec total.
         </div>
         <div>
           If backend is offline, the ESP32 keeps using the last saved plan from its own memory.
