@@ -98,10 +98,12 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
           <div>
             <div className="font-semibold text-amber-900">AI Insights Not Available</div>
             <div className="text-sm text-amber-800 mt-1">
-              To enable AI-powered sensor analysis, add your Google AI Studio key to the <code className="bg-amber-100 px-1 py-0.5 rounded">.env.local</code> file:
+              To enable AI-powered sensor analysis, add either Google AI Studio key to the <code className="bg-amber-100 px-1 py-0.5 rounded">.env.local</code> file:
             </div>
             <div className="mt-2 bg-white rounded p-2 text-xs font-mono text-amber-900">
-              GOOGLE_AI_API_KEY=your_key_from_aistudio.google.com/app/apikeys
+              GOOGLE_AI_API_KEY=your_key_from_aistudio.google.com/app/apikeys<br />
+              or<br />
+              GEMINI_API_KEY=your_key_from_aistudio.google.com/app/apikeys
             </div>
           </div>
         </div>
