@@ -735,6 +735,52 @@ export function ManualControlPanel({
           </Button>
         </div>
 
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Battery charger</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                {!controlsEnabled
+                  ? "Offline mode: charger actions are disabled until telemetry returns"
+                  : batteryModeIsManual
+                    ? "Manual mode is active. Turn the charger on or off directly."
+                    : "Auto mode is active. Switch to manual to expose charger on/off buttons."}
+              </div>
+            </div>
+            <Button
+              onClick={handleBatteryModeToggle}
+              disabled={!controlsEnabled || batteryLoading}
+              variant={batteryModeIsManual ? "secondary" : "default"}
+              className="w-full sm:w-auto"
+            >
+              {batteryModeIsManual ? "Switch Battery to AUTO" : "Switch Battery to MANUAL"}
+            </Button>
+          </div>
+
+          {batteryModeIsManual && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                onClick={() => handleBatteryToggle("on")}
+                disabled={!controlsEnabled || batteryLoading}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                variant="default"
+              >
+                <BatteryCharging className="mr-2 h-4 w-4" />
+                Turn Charger On
+              </Button>
+              <Button
+                onClick={() => handleBatteryToggle("off")}
+                disabled={!controlsEnabled || batteryLoading}
+                className="flex-1 bg-slate-600 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                variant="default"
+              >
+                <Square className="mr-2 h-4 w-4" />
+                Turn Charger Off
+              </Button>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={handleStart}
@@ -827,52 +873,6 @@ function RelayStateCard({
     >
       {/* Header row */}
       <div className="flex items-center justify-between gap-2">
-
-        <div className="flex flex-col gap-3 rounded-lg border border-border bg-secondary/30 p-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Battery charger</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                {!controlsEnabled
-                  ? "Offline mode: charger actions are disabled until telemetry returns"
-                  : batteryModeIsManual
-                    ? "Manual mode is active. Turn the charger on or off directly."
-                    : "Auto mode is active. Switch to manual to expose charger on/off buttons."}
-              </div>
-            </div>
-            <Button
-              onClick={handleBatteryModeToggle}
-              disabled={!controlsEnabled || batteryLoading}
-              variant={batteryModeIsManual ? "secondary" : "default"}
-              className="w-full sm:w-auto"
-            >
-              {batteryModeIsManual ? "Switch Battery to AUTO" : "Switch Battery to MANUAL"}
-            </Button>
-          </div>
-
-          {batteryModeIsManual && (
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button
-                onClick={() => handleBatteryToggle("on")}
-                disabled={!controlsEnabled || batteryLoading}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                variant="default"
-              >
-                <BatteryCharging className="mr-2 h-4 w-4" />
-                Turn Charger On
-              </Button>
-              <Button
-                onClick={() => handleBatteryToggle("off")}
-                disabled={!controlsEnabled || batteryLoading}
-                className="flex-1 bg-slate-600 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                variant="default"
-              >
-                <Square className="mr-2 h-4 w-4" />
-                Turn Charger Off
-              </Button>
-            </div>
-          )}
-        </div>
         <div className="flex items-center gap-2">
           <div
             className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
