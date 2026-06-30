@@ -4,6 +4,7 @@
 #include <DHT.h>
 #include <Preferences.h>
 #include <time.h>
+#include <sys/time.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>   // [FIX-6] Watchdog
 
@@ -13,6 +14,7 @@
 bool postLogEntryToAPI(const struct LogEntry& entry);
 int  extractJsonInt(const String& json, const char* key);
 String extractJsonString(const String& json, const char* key);
+String extractJsonNumber(const String& json, const char* key);
 void enterFault(unsigned long now, const char* code);
 time_t getCurrentEpoch();
 void readSensors();
@@ -94,7 +96,7 @@ const unsigned long API_TIMEOUT_MS   = 8000UL;
 
 // Loop intervals (milliseconds)
 const unsigned long IV_SENSOR        = 30000UL;  // Read sensors every 30 s
-const unsigned long IV_SCHEDULE      = 60000UL;  // Fetch schedule + remote modes every 60 s
+const unsigned long IV_SCHEDULE      = 5000UL;   // Fetch schedule + remote modes every 5 s
 const unsigned long IV_STATUS_POST   = 10000UL;  // Post status to backend every 10 s
 const unsigned long IV_WIFI_CHECK    = 10000UL;  // WiFi health check every 10 s
 const unsigned long IV_WDT_FEED      = 2000UL;   // Feed watchdog every 2 s [FIX-6]
@@ -215,6 +217,8 @@ SystemStatus status;
 time_t       lastAutoRunEpoch = 0;
 String       lastPostedStatusSignature = "";
 unsigned long lastStatusPostMs = 0;
+bool         lastPumpOnState = false;
+bool         lastLightOnState = false;
 
 // Pump timing
 unsigned long pumpStartMs        = 0;
@@ -331,6 +335,20 @@ String extractJsonString(const String& json, const char* key) {
     out += json[idx++];
   }
   return out;
+}
+
+String extractJsonNumber(const String& json, const char* key) {
+  String search = String("\"") + key + "\"";
+  int idx = json.indexOf(search);
+  if (idx < 0) return "";
+  idx += search.length();
+  // Skip whitespace + colon
+  while (idx < (int)json.length() && (json[idx] == ' ' || json[idx] == ':')) idx++;
+  String numStr = "";
+  while (idx < (int)json.length() && (isDigit(json[idx]) || json[idx] == '-' || json[idx] == '.')) {
+    numStr += json[idx++];
+  }
+  return numStr;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -799,7 +817,7 @@ void handleManualButtons(unsigned long now) {
 void checkSafety(unsigned long now) {
   if (!sensors.valid) return;
 
-  if (motorManualMode == MANUAL_AUTO && status.pumpOn) {
+  if (motorManualMode == MANUAL_AUTO && status.pumpOn && curState != STATE_MANUAL_MODE) {
     if (pumpStartMs == 0 || pumpScheduledEndMs == 0) {
       Serial.println("[SAFETY] Pump state out of sync — forcing stop");
       stopPumpCycle();
@@ -1066,6 +1084,7 @@ int httpRequest(const char* method, const char* path,
   String finalDeviceID = (deviceMacAddress.length() > 0) ? deviceMacAddress : String(DEVICE_ID);
   http.addHeader("X-Device-ID",  finalDeviceID);
   http.addHeader("X-API-Key",    DEVICE_SECRET);
+  http.addHeader("Connection",   "close");
   int code = -1;
   if (strcmp(method, "GET")  == 0) code = http.GET();
   if (strcmp(method, "POST") == 0) code = http.POST(body);
@@ -1088,6 +1107,7 @@ bool fetchHandshakeAndSync() {
   String finalDeviceID = (deviceMacAddress.length() > 0) ? deviceMacAddress : String(DEVICE_ID);
   http.addHeader("X-Device-ID", finalDeviceID);
   http.addHeader("X-API-Key",   DEVICE_SECRET);
+  http.addHeader("Connection",  "close");
 
   int code = http.GET();
   if (code != 200) {
@@ -1099,6 +1119,24 @@ bool fetchHandshakeAndSync() {
   String resp = http.getString();
   Serial.printf("[API] Handshake OK (%u bytes)\n", (unsigned)resp.length());
   http.end();
+
+  // Extract and sync serverTime to ESP32 system clock
+  String stStr = extractJsonNumber(resp, "serverTime");
+  if (stStr.length() > 0) {
+    long long serverTimeMs = atoll(stStr.c_str());
+    time_t serverTimeSec = (time_t)(serverTimeMs / 1000LL);
+    if (serverTimeSec > 1700000000UL) {
+      struct timeval tv;
+      tv.tv_sec = serverTimeSec;
+      tv.tv_usec = 0;
+      settimeofday(&tv, NULL);
+      if (!ntpSynced) {
+        ntpSynced = true;
+        saveNTPValidToNVS(true);
+        Serial.printf("[Time] Synced system clock from serverTime: %lu\n", (unsigned long)serverTimeSec);
+      }
+    }
+  }
 
   int ni = extractJsonInt(resp, "intervalMinutes");
   int nd = extractJsonInt(resp, "durationSeconds");
@@ -1226,7 +1264,7 @@ void fetchScheduleAndSync() {
 void postStatus() {
   if (!wifiConnected) return;
 
-  const unsigned long STATUS_HEARTBEAT_MS = 12000UL;
+  const unsigned long STATUS_HEARTBEAT_MS = 60000UL;
 
   String signature = "";
   signature += String(status.pumpOn ? "1" : "0");
@@ -1287,7 +1325,6 @@ void postStatus() {
   body += ",\"sensorDataOk\":" + String(status.sensorDataOk ? "true" : "false");
   body += "}";
 
-  Serial.println("[API] PUT /api/status");
   int code = httpRequest("PUT", "/api/status", body);
   if (code != 200 && code != 204) {
     Serial.printf("[API] Status POST failed (HTTP %d)\n", code);
@@ -1396,6 +1433,9 @@ void setup() {
   curState  = STATE_IDLE;
   prevState = STATE_IDLE;
 
+  lastPumpOnState = status.pumpOn;
+  lastLightOnState = status.lightOn;
+
   Serial.println("[BOOT] System ready\n");
 }
 
@@ -1446,10 +1486,13 @@ void loop() {
   runStateMachine(now);
 
   // ── 10. Status post to backend ────────────────────────────────────
-  unsigned long statusPostInterval = status.pumpOn ? 3000UL : IV_STATUS_POST;
-  if (now - tsLastStatusPost >= statusPostInterval) {
+  bool stateChanged = (status.pumpOn != lastPumpOnState) || (status.lightOn != lastLightOnState);
+  unsigned long statusPostInterval = status.pumpOn ? 3000UL : 60000UL;
+  if (stateChanged || (now - tsLastStatusPost >= statusPostInterval)) {
     postStatus();
     tsLastStatusPost = now;
+    lastPumpOnState = status.pumpOn;
+    lastLightOnState = status.lightOn;
   }
 
   // ── 11. Offline log queue flush ───────────────────────────────────

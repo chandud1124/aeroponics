@@ -269,7 +269,8 @@ let autoPumpLogId: string | null = null;
 
 loadStateFromDisk();
 
-const TELEMETRY_STALE_MS = 15000;
+// Keep the device online long enough to cover the ESP32's idle heartbeat cadence.
+const TELEMETRY_STALE_MS = 90000;
 const IST_OFFSET_MS = 19800 * 1000;
 
 function isFresh(timestamp: number | null | undefined, staleMs = TELEMETRY_STALE_MS): boolean {

@@ -573,8 +573,10 @@ export function ManualControlPanel({
   const [pumpLoading, setPumpLoading] = useState(false);
   const [pumpModeLoading, setPumpModeLoading] = useState(false);
   const [lightLoading, setLightLoading] = useState(false);
+  const [batteryLoading, setBatteryLoading] = useState(false);
   const [optimisticLightOn, setOptimisticLightOn] = useState<boolean | null>(null);
   const pumpModeIsManual = status?.motorManualMode !== "AUTO";
+  const batteryModeIsManual = status?.batteryManualMode !== "AUTO";
   const controlsEnabled = online && controlsAllowed && Boolean(status);
 
   const handleStart = async () => {
@@ -663,6 +665,43 @@ export function ManualControlPanel({
     }
   };
 
+  const handleBatteryModeToggle = async () => {
+    if (!controlsEnabled) return;
+
+    setBatteryLoading(true);
+    try {
+      await fetch("/api/manual-battery", {
+        method: "POST",
+        ...withDeviceHeaders({ headers: { "Content-Type": "application/json" } }, deviceId),
+        body: JSON.stringify({
+          action: batteryModeIsManual ? "auto" : "manual",
+          desiredOn: Boolean(status?.batteryChargeOn),
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to switch battery mode:", error);
+    } finally {
+      setBatteryLoading(false);
+    }
+  };
+
+  const handleBatteryToggle = async (action: "on" | "off") => {
+    if (!controlsEnabled || !batteryModeIsManual) return;
+
+    setBatteryLoading(true);
+    try {
+      await fetch("/api/manual-battery", {
+        method: "POST",
+        ...withDeviceHeaders({ headers: { "Content-Type": "application/json" } }, deviceId),
+        body: JSON.stringify({ action }),
+      });
+    } catch (error) {
+      console.error(`Failed to turn battery charger ${action}:`, error);
+    } finally {
+      setBatteryLoading(false);
+    }
+  };
+
   return (
     <Card className="p-6">
       <div className="space-y-4">
@@ -740,7 +779,7 @@ export function ManualControlPanel({
           <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-600" />
           <div className="text-xs text-yellow-900">
             {controlsEnabled
-              ? "Manual controls override automatic scheduling. Remember to disable when done."
+              ? "Manual controls override automatic scheduling. Battery on/off buttons appear only in manual mode."
               : "Reconnect the controller to change relays or pump mode."}
           </div>
         </div>
@@ -788,6 +827,52 @@ function RelayStateCard({
     >
       {/* Header row */}
       <div className="flex items-center justify-between gap-2">
+
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-secondary/30 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Battery charger</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                {!controlsEnabled
+                  ? "Offline mode: charger actions are disabled until telemetry returns"
+                  : batteryModeIsManual
+                    ? "Manual mode is active. Turn the charger on or off directly."
+                    : "Auto mode is active. Switch to manual to expose charger on/off buttons."}
+              </div>
+            </div>
+            <Button
+              onClick={handleBatteryModeToggle}
+              disabled={!controlsEnabled || batteryLoading}
+              variant={batteryModeIsManual ? "secondary" : "default"}
+              className="w-full sm:w-auto"
+            >
+              {batteryModeIsManual ? "Switch Battery to AUTO" : "Switch Battery to MANUAL"}
+            </Button>
+          </div>
+
+          {batteryModeIsManual && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                onClick={() => handleBatteryToggle("on")}
+                disabled={!controlsEnabled || batteryLoading}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                variant="default"
+              >
+                <BatteryCharging className="mr-2 h-4 w-4" />
+                Turn Charger On
+              </Button>
+              <Button
+                onClick={() => handleBatteryToggle("off")}
+                disabled={!controlsEnabled || batteryLoading}
+                className="flex-1 bg-slate-600 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                variant="default"
+              >
+                <Square className="mr-2 h-4 w-4" />
+                Turn Charger Off
+              </Button>
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <div
             className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${

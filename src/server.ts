@@ -322,10 +322,6 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (request.method === "PATCH" || request.method === "PUT") {
-      console.info("[api/status] device update", {
-        method: request.method,
-        deviceId: request.headers.get("x-device-id") ?? "",
-      });
       // Require device authentication for status updates
       const deviceIdHeader = request.headers.get("x-device-id");
       const deviceKeyHeader = request.headers.get("x-api-key");
@@ -333,6 +329,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         return jsonResponse({ error: "Unauthorized (device)" }, 401);
       }
       const resolvedDeviceId = resolveDeviceId(deviceIdHeader);
+      const previousStatus = getStatus(resolvedDeviceId);
       const payload = (await request.json()) as {
         pumpOn?: boolean;
         flowing?: boolean;
@@ -394,6 +391,13 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         appliedPlanName: (payload as any).planName ?? undefined,
       }, { source: "esp32", deviceId: resolvedDeviceId });
 
+      if (!previousStatus || previousStatus.isOnline !== updated?.isOnline) {
+        console.info("[api/status] device connectivity changed", {
+          deviceId: resolvedDeviceId,
+          online: updated?.isOnline ?? false,
+        });
+      }
+
       // If device reported a lastRunAt and indicates pump is ON, create a start pump-log entry
       let createdPumpLog: any = null;
       try {
@@ -437,7 +441,6 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     const deviceIdHeader = request.headers.get("x-device-id")?.trim() ?? "";
     const deviceKeyHeader = request.headers.get("x-api-key")?.trim() ?? "";
-    console.info("[api/device/handshake] request", { deviceId: deviceIdHeader, hasKey: Boolean(deviceKeyHeader) });
     if (!deviceIdHeader) {
       return jsonResponse({ error: "Missing device id" }, 400);
     }
