@@ -55,7 +55,7 @@ function Index() {
   const liveStatus = mounted ? status : null;
   const backendReachable = mounted ? status !== null : false;
   const telemetryFresh = mounted ? Boolean(status?.isOnline) : false;
-  const controlsAllowed = mounted ? telemetryFresh && hasRegisteredDevice : false;
+  const controlsAllowed = mounted ? backendReachable && hasRegisteredDevice : false;
   const selectedDeviceKnown = selectedDeviceId.trim()
     ? devices.some((device) => device.deviceId === selectedDeviceId.trim())
     : false;
@@ -271,7 +271,7 @@ function Index() {
                     <ManualControlPanel
                       status={currentStatus}
                       deviceId={activeDeviceId}
-                      online={telemetryFresh}
+                      online={backendReachable}
                       controlsAllowed={controlsAllowed}
                     />
 
