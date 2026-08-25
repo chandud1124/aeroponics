@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { EnhancedStatusCards } from "@/components/tower/EnhancedStatusCards";
 import { ScheduleEditor } from "@/components/tower/ScheduleEditor";
@@ -9,6 +10,7 @@ import { DashboardCharts } from "@/components/tower/DashboardCharts";
 import { NutritionTab } from "@/components/tower/NutritionTab";
 import { NftChannelsTab } from "@/components/tower/NftChannelsTab";
 import { DeviceRegistryTab } from "@/components/tower/DeviceRegistryTab";
+import { CameraQrScanner } from "@/components/tower/CameraQrScanner";
 import { ManualReadings } from "@/components/tower/ManualReadings";
 import { Documentation } from "@/components/tower/Documentation";
 import { PumpStats } from "@/components/tower/PumpStats";
@@ -21,6 +23,8 @@ import {
   fetchStatusEnvelope,
   fetchNftChannels,
   fetchHarvestHistory,
+  saveNftChannels,
+  harvestCropRemote,
   type LiveStatus,
   type Schedule,
   type DeviceListEntry,
@@ -37,6 +41,18 @@ import {
   RelayStatesCard,
 } from "@/components/tower/PumpOperational";
 import { HistoryAnalyticsTab } from "@/components/tower/HistoryAnalytics";
+import { CropOperationsDashboard } from "@/components/tower/CropOperationsDashboard";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  Cell,
+} from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -80,6 +96,20 @@ type NurseryTray = {
   status: "empty" | "growing" | "ready";
 };
 
+type NurseryHistoryEntry = {
+  id: string;
+  trayId: string;
+  trayName: string;
+  crop: string;
+  plantedOn: string;
+  transplantedOn: string;
+  plugs: number;
+  germinated: number;
+  notes: string;
+  channelId?: string;
+  channelName?: string;
+};
+
 const DEFAULT_NURSERY_TRAYS: NurseryTray[] = [
   { id: "tray-1", name: "Tray 1", crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
   { id: "tray-2", name: "Tray 2", crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
@@ -108,19 +138,42 @@ function Index() {
   const [harvestHistory, setHarvestHistory] = useState<HarvestHistoryEntry[]>([]);
   const [loadingCrops, setLoadingCrops] = useState(true);
   const [nurseryTrays, setNurseryTrays] = useState<NurseryTray[]>(DEFAULT_NURSERY_TRAYS);
+  const [nurseryHistory, setNurseryHistory] = useState<NurseryHistoryEntry[]>([]);
+
+  // Nursery-to-NFT Transplant Modal States
+  const [activeTrayId, setActiveTrayId] = useState<string | null>(null);
+  const [transplantDialogOpen, setTransplantDialogOpen] = useState(false);
+  const [targetChannelId, setTargetChannelId] = useState("");
+  const [transplantCount, setTransplantCount] = useState<number>(0);
+  const [transplantNotes, setTransplantNotes] = useState("");
+  const [scanQrInput, setScanQrInput] = useState("");
+  const [selectedTrayLogs, setSelectedTrayLogs] = useState<NurseryTray | null>(null);
+  const [trayLogsDialogOpen, setTrayLogsDialogOpen] = useState(false);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("polyhouse-nursery-trays");
       if (saved) setNurseryTrays(JSON.parse(saved) as NurseryTray[]);
+      
+      const savedHistory = localStorage.getItem("polyhouse-nursery-history");
+      if (savedHistory) setNurseryHistory(JSON.parse(savedHistory) as NurseryHistoryEntry[]);
     } catch {
       // Keep the default trays when local storage is unavailable or invalid.
     }
   }, []);
 
   useEffect(() => {
-    if (mounted) localStorage.setItem("polyhouse-nursery-trays", JSON.stringify(nurseryTrays));
+    if (mounted) {
+      localStorage.setItem("polyhouse-nursery-trays", JSON.stringify(nurseryTrays));
+    }
   }, [mounted, nurseryTrays]);
+
+  useEffect(() => {
+    if (mounted) {
+      localStorage.setItem("polyhouse-nursery-history", JSON.stringify(nurseryHistory));
+    }
+  }, [mounted, nurseryHistory]);
 
   const updateNurseryTray = (id: string, patch: Partial<NurseryTray>) => {
     setNurseryTrays((trays) => trays.map((tray) => (tray.id === id ? { ...tray, ...patch } : tray)));
@@ -132,6 +185,110 @@ function Index() {
       ...trays,
       { id: `tray-${Date.now()}`, name: `Tray ${nextNumber}`, crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
     ]);
+  };
+
+  const handleTransplantConfirm = async () => {
+    if (!activeTrayId || !targetChannelId) {
+      toast.error("Tray and target NFT channel are required");
+      return;
+    }
+    const tray = nurseryTrays.find((t) => t.id === activeTrayId);
+    if (!tray) return;
+
+    if (transplantCount <= 0 || transplantCount > tray.germinated) {
+      toast.error(`Invalid transplant quantity. Max germinated plugs available: ${tray.germinated}`);
+      return;
+    }
+
+    try {
+      // 1. Update the NFT channel on the server
+      const targetChan = nftChannels.find((c) => c.id === targetChannelId);
+      if (!targetChan) {
+        toast.error("Target channel not found");
+        return;
+      }
+
+      const existingTargetCrops = targetChan.crops?.length
+        ? targetChan.crops
+        : targetChan.cropName
+          ? [{ cropName: targetChan.cropName, count: targetChan.currentCount ?? 0 }]
+          : [];
+      const hasDifferentCrop = targetChan.status === "growing" && existingTargetCrops.some(
+        (crop) => crop.cropName.trim().toLowerCase() !== tray.crop.trim().toLowerCase()
+      );
+      if (hasDifferentCrop) {
+        toast.error("Harvest or clear the target channel before transplanting a different crop");
+        return;
+      }
+      if (transplantCount + (targetChan.currentCount ?? 0) > (targetChan.capacity ?? 0)) {
+        toast.error(`Destination capacity exceeded. Available space: ${Math.max(0, (targetChan.capacity ?? 0) - (targetChan.currentCount ?? 0))} plants.`);
+        return;
+      }
+
+      // Add to NFT Channel
+      const currentCrops = [...existingTargetCrops];
+      const cropIndex = currentCrops.findIndex((c) => c.cropName.toLowerCase() === tray.crop.toLowerCase());
+      if (cropIndex > -1) {
+        currentCrops[cropIndex].count += transplantCount;
+      } else {
+        currentCrops.push({ cropName: tray.crop, count: transplantCount });
+      }
+
+      const totalCount = currentCrops.reduce((sum, c) => sum + c.count, 0);
+      const firstCropName = currentCrops[0]?.cropName || "";
+      const combinedCropName = currentCrops.length > 1
+        ? currentCrops.map((c) => `${c.cropName} (${c.count})`).join(", ")
+        : firstCropName;
+
+      const updatedChan: NftChannel = {
+        ...targetChan,
+        status: "growing",
+        crops: currentCrops,
+        cropName: combinedCropName,
+        currentCount: totalCount,
+        plantedAt: targetChan.plantedAt || new Date().toISOString(),
+        notes: targetChan.notes ? `${targetChan.notes}\nTransplanted ${transplantCount}x ${tray.crop} from ${tray.name}` : `Transplanted ${transplantCount}x ${tray.crop} from ${tray.name}`,
+      };
+
+      // Call API to save NFT channels
+      const allUpdatedChans = nftChannels.map((c) => c.id === targetChannelId ? updatedChan : c);
+      await saveNftChannels(allUpdatedChans);
+
+      // 2. Log in Nursery history
+      const newEntry: NurseryHistoryEntry = {
+        id: `nurs-harv-${Date.now()}`,
+        trayId: tray.id,
+        trayName: tray.name,
+        crop: tray.crop,
+        plantedOn: tray.plantedOn,
+        transplantedOn: new Date().toISOString().split("T")[0],
+        plugs: tray.plugs,
+        germinated: transplantCount,
+        notes: transplantNotes || `Shifted to NFT Channel: ${targetChan.name}`,
+        channelId: targetChan.id,
+        channelName: targetChan.name,
+      };
+      setNurseryHistory((prev) => [newEntry, ...prev]);
+
+      // 3. Update the Nursery tray counts
+      const nextGerminated = Math.max(0, tray.germinated - transplantCount);
+      const nextStatus = nextGerminated === 0 ? "empty" : tray.status;
+      const nextCrop = nextGerminated === 0 ? "" : tray.crop;
+      const nextPlantedOn = nextGerminated === 0 ? "" : tray.plantedOn;
+
+      updateNurseryTray(tray.id, {
+        germinated: nextGerminated,
+        status: nextStatus,
+        crop: nextCrop,
+        plantedOn: nextPlantedOn,
+      });
+
+      toast.success(`Successfully transplanted ${transplantCount}x ${tray.crop} to ${targetChan.name}!`);
+      setTransplantDialogOpen(false);
+      loadCropsData(); // Refresh list from server
+    } catch (e: any) {
+      toast.error(e.message || "Failed to transplant plants");
+    }
   };
 
   const loadCropsData = () => {
@@ -148,7 +305,7 @@ function Index() {
   };
 
   useEffect(() => {
-    if (activeTab === "crops") {
+    if (activeTab === "crops" || activeTab === "history" || activeTab === "nursery" || activeTab === "nft") {
       loadCropsData();
     }
   }, [activeTab]);
@@ -211,7 +368,9 @@ function Index() {
     { id: "controls", label: "Controls", icon: Settings },
     { id: "crops", label: "Crops Manager", icon: Sprout, badge: "3 Active" },
     { id: "nft", label: "NFT Channels", icon: Grid },
+    { id: "history", label: "Channels History", icon: History },
     { id: "nursery", label: "Nursery Trays", icon: Warehouse },
+    { id: "harvested", label: "Harvested", icon: TrendingUp },
     { id: "water", label: "Reservoir & Water", icon: Droplet },
     { id: "nutrition", label: "Nutrition Dosing", icon: FlaskConical },
     { id: "devices", label: "Hardware Remapper", icon: Cpu, badge: String(devices.length) },
@@ -407,161 +566,288 @@ function Index() {
             )}
 
             {/* High-Fidelity Crops Tab */}
-            {activeTab === "crops" && (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                      <Sprout className="h-5 w-5 text-primary" />
-                      Crops Management Console
-                    </h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">Track growth logs, varieties seeding, and crop yields.</p>
+            {activeTab === "crops" && (() => {
+              // 1. Calculate active variety counts growing in NFT + Nursery
+              const activeCropsCountMap: { [name: string]: { nft: number; nursery: number } } = {};
+              nftChannels.forEach((chan) => {
+                if (chan.status === "growing") {
+                  if (chan.crops && chan.crops.length > 0) {
+                    chan.crops.forEach((cr) => {
+                      const key = cr.cropName.trim() || "Unknown";
+                      activeCropsCountMap[key] = activeCropsCountMap[key] || { nft: 0, nursery: 0 };
+                      activeCropsCountMap[key].nft += cr.count;
+                    });
+                  } else if (chan.cropName) {
+                    const key = chan.cropName.trim() || "Unknown";
+                    activeCropsCountMap[key] = activeCropsCountMap[key] || { nft: 0, nursery: 0 };
+                    activeCropsCountMap[key].nft += chan.currentCount ?? 0;
+                  }
+                }
+              });
+              nurseryTrays.forEach((tr) => {
+                if (tr.crop && tr.germinated > 0) {
+                  const key = tr.crop.trim() || "Unknown";
+                  activeCropsCountMap[key] = activeCropsCountMap[key] || { nft: 0, nursery: 0 };
+                  activeCropsCountMap[key].nursery += tr.germinated;
+                }
+              });
+
+              const activeCropsData = Object.entries(activeCropsCountMap).map(([name, value]) => ({
+                name,
+                NFT: value.nft,
+                Nursery: value.nursery,
+              })).sort((a, b) => (b.NFT + b.Nursery) - (a.NFT + a.Nursery));
+              const activeNftPlants = nftChannels
+                .filter((channel) => channel.status === "growing")
+                .reduce((sum, channel) => sum + (channel.currentCount || 0), 0);
+              const activeNurseryPlugs = nurseryTrays
+                .filter((tray) => tray.status !== "empty")
+                .reduce((sum, tray) => sum + tray.germinated, 0);
+
+              // 2. Calculate completed harvest yields usable vs waste
+              const historicalYieldMap: { [name: string]: { yield: number; waste: number } } = {};
+              harvestHistory.forEach((item) => {
+                const key = item.cropName.split("(")[0].trim() || "Unknown";
+                if (!historicalYieldMap[key]) {
+                  historicalYieldMap[key] = { yield: 0, waste: 0 };
+                }
+                historicalYieldMap[key].yield += item.yieldQty ?? item.currentCount ?? 0;
+                historicalYieldMap[key].waste += item.wasteQty ?? 0;
+              });
+
+              const historicalYieldData = Object.entries(historicalYieldMap).map(([name, stats]) => ({
+                name,
+                "Usable Yield": stats.yield,
+                "Waste / Defect": stats.waste,
+              })).sort((a, b) => (b["Usable Yield"] + b["Waste / Defect"]) - (a["Usable Yield"] + a["Waste / Defect"]));
+
+              return (
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                        <Sprout className="h-5 w-5 text-primary" />
+                        Crops Management Console
+                      </h2>
+                      <p className="text-xs text-muted-foreground mt-0.5">Track growth logs, varieties seeding, and crop yields.</p>
+                    </div>
+                    <Button onClick={loadCropsData} variant="outline" size="sm" className="text-xs font-semibold">
+                      Refresh Records
+                    </Button>
                   </div>
-                  <Button onClick={loadCropsData} variant="outline" size="sm" className="text-xs font-semibold">
-                    Refresh Records
-                  </Button>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <Card className="p-4 flex items-center justify-between border-border/80">
-                    <div>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold block">Active NFT Crops</span>
-                      <span className="text-2xl font-extrabold block text-foreground">
-                        {nftChannels.filter((c) => c.status === "growing").length} Batches
-                      </span>
-                    </div>
-                    <Sprout className="h-8 w-8 text-green-500 opacity-80" />
-                  </Card>
-                  <Card className="p-4 flex items-center justify-between border-border/80">
-                    <div>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold block">Total Mapped Plants</span>
-                      <span className="text-2xl font-extrabold block text-foreground">
-                        {nftChannels.reduce((sum, c) => sum + (c.currentCount || 0), 0)} Plants
-                      </span>
-                    </div>
-                    <Grid className="h-8 w-8 text-primary opacity-80" />
-                  </Card>
-                  <Card className="p-4 flex items-center justify-between border-border/80">
-                    <div>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold block">Completed Harvests</span>
-                      <span className="text-2xl font-extrabold block text-foreground">
-                        {harvestHistory.length} Batches
-                      </span>
-                    </div>
-                    <TrendingUp className="h-8 w-8 text-yellow-500 opacity-80" />
-                  </Card>
-                </div>
-
-                {/* Active Growing Channels */}
-                <Card className="p-5 border-border/80">
-                  <div className="border-b pb-3 mb-4">
-                    <h3 className="text-sm font-bold flex items-center gap-2">
-                      <Sprout className="h-4 w-4 text-emerald-500 animate-pulse" />
-                      Active NFT Channels Crops
-                    </h3>
-                    <p className="text-[11px] text-muted-foreground">Detailed layout of currently growing hydroponic channels.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Card className="p-4 flex items-center justify-between border-border/80 bg-card">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Active NFT Crops</span>
+                        <span className="text-2xl font-extrabold block text-foreground">
+                          {nftChannels.filter((c) => c.status === "growing").length} Batches
+                        </span>
+                      </div>
+                      <Sprout className="h-8 w-8 text-green-500 opacity-80" />
+                    </Card>
+                    <Card className="p-4 flex items-center justify-between border-border/80 bg-card">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Total Mapped Plants</span>
+                        <span className="text-2xl font-extrabold block text-foreground">
+                          {activeNftPlants} Plants
+                        </span>
+                      </div>
+                      <Grid className="h-8 w-8 text-primary opacity-80" />
+                    </Card>
+                    <Card className="p-4 flex items-center justify-between border-border/80 bg-card">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Active Nursery Plugs</span>
+                        <span className="text-2xl font-extrabold block text-foreground">
+                          {activeNurseryPlugs} Plugs
+                        </span>
+                      </div>
+                      <Warehouse className="h-8 w-8 text-amber-500 opacity-80" />
+                    </Card>
+                    <Card className="p-4 flex items-center justify-between border-border/80 bg-card">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold block">Completed Harvests</span>
+                        <span className="text-2xl font-extrabold block text-foreground">
+                          {harvestHistory.length} Batches
+                        </span>
+                      </div>
+                      <TrendingUp className="h-8 w-8 text-yellow-500 opacity-80" />
+                    </Card>
                   </div>
-                  
-                  {loadingCrops ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground">Loading channels data...</div>
-                  ) : nftChannels.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground">No channels found. Plant a crop in the NFT Channels tab.</div>
-                  ) : (
-                    <div className="space-y-4">
-                      {nftChannels.map((channel) => {
-                        const isGrowing = channel.status === "growing";
-                        const progress = isGrowing && channel.plantedAt 
-                          ? Math.min(100, Math.round(((Date.now() - new Date(channel.plantedAt).getTime()) / (30 * 24 * 60 * 60 * 1000)) * 100))
-                          : 0;
 
-                        return (
-                          <div key={channel.id} className="p-4 rounded-xl border bg-muted/20 space-y-3">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                              <div>
-                                <span className="font-bold text-xs text-foreground block">{channel.name}</span>
-                                <span className="text-[10px] text-muted-foreground block font-mono">QR: {channel.qrCode}</span>
-                              </div>
-                              <Badge variant={isGrowing ? "default" : "secondary"} className="text-[10px]">
-                                {isGrowing ? `Growing: ${channel.cropName}` : "Vacant Channel"}
-                              </Badge>
-                            </div>
+                  {/* Analytics Charts Panel */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Active Crops Bar Chart */}
+                    <Card className="p-5 border-border/80 bg-card shadow-sm space-y-4">
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                          <Sprout className="h-4 w-4 text-emerald-500" />
+                          Current Cultivated Varieties: NFT vs Nursery
+                        </span>
+                        <p className="text-[10px] text-muted-foreground">Separate counts show established NFT plants and nursery plugs awaiting transplant.</p>
+                      </div>
+                      {activeCropsData.length === 0 ? (
+                        <div className="h-64 flex items-center justify-center text-xs text-muted-foreground italic">No crops currently in system.</div>
+                      ) : (
+                        <div className="h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={activeCropsData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                              <XAxis type="number" />
+                              <YAxis dataKey="name" type="category" width={80} style={{ fontSize: 10 }} />
+                              <Tooltip />
+                              <Bar dataKey="NFT" fill="#10b981" radius={[0, 4, 4, 0]} />
+                              <Bar dataKey="Nursery" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </Card>
 
-                            {isGrowing ? (
-                              <div className="space-y-2 text-xs">
-                                <div className="flex justify-between text-muted-foreground text-[11px]">
-                                  <span>Planted: {channel.plantedAt ? new Date(channel.plantedAt).toLocaleDateString() : "—"}</span>
-                                  <span>Expected Harvest: {channel.expectedHarvestISO ? new Date(channel.expectedHarvestISO).toLocaleDateString() : "—"}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-[11px]">
-                                  <span className="font-bold text-foreground">Capacity Load: {channel.currentCount || 0} / {channel.capacity || 50} Plants</span>
-                                  <span className="font-semibold text-muted-foreground">Growth cycle est: {progress}%</span>
-                                </div>
-                                <Progress value={progress} className="h-1.5" />
-                                {channel.notes && (
-                                  <div className="text-[10px] text-muted-foreground bg-background p-2 rounded border border-border/40 font-mono">
-                                    Notes: {channel.notes}
+                    {/* Historical Yield Chart */}
+                    <Card className="p-5 border-border/80 bg-card shadow-sm space-y-4">
+                      <div className="space-y-1">
+                        <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                          <TrendingUp className="h-4 w-4 text-amber-500" />
+                          Yield Output vs. Waste by Variety
+                        </span>
+                        <p className="text-[10px] text-muted-foreground">Cumulative totals of usable yields and wasted plants across history.</p>
+                      </div>
+                      {historicalYieldData.length === 0 ? (
+                        <div className="h-64 flex items-center justify-center text-xs text-muted-foreground italic">No historical harvest data yet.</div>
+                      ) : (
+                        <div className="h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={historicalYieldData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                              <XAxis dataKey="name" style={{ fontSize: 10 }} />
+                              <YAxis />
+                              <Tooltip />
+                              <Legend style={{ fontSize: 10 }} />
+                              <Bar dataKey="Usable Yield" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
+                              <Bar dataKey="Waste / Defect" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </Card>
+                  </div>
+
+                  {/* Harvest History Log */}
+                  <Card className="p-5 border-border/80 bg-card">
+                    <div className="border-b pb-3 mb-4">
+                      <h3 className="text-sm font-bold flex items-center gap-2">
+                        <History className="h-4 w-4 text-amber-500" />
+                        Completed Harvest History Database
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground">Audit logs of completed crop batches and yields.</p>
+                    </div>
+
+                    {loadingCrops ? (
+                      <div className="text-center py-6 text-xs text-muted-foreground">Loading harvest log...</div>
+                    ) : harvestHistory.length === 0 ? (
+                      <div className="text-center py-6 text-xs text-muted-foreground italic">No historical crops harvested yet.</div>
+                    ) : (
+                      <div className="space-y-3 font-mono text-xs">
+                        {harvestHistory.map((item) => {
+                          const ageDays = item.plantedAt 
+                            ? Math.max(1, Math.round((new Date(item.harvestedAt).getTime() - new Date(item.plantedAt).getTime()) / (24 * 60 * 60 * 1000)))
+                            : null;
+                          
+                          return (
+                            <div key={item.id} className="p-3.5 rounded-lg border bg-muted/30 flex flex-col sm:flex-row justify-between gap-3">
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-foreground text-xs">{item.cropName}</span>
+                                  <div className="flex gap-1 flex-wrap">
+                                    <Badge variant="outline" className="text-[9px] font-bold bg-green-500/5 text-green-600 border-green-500/20">
+                                      Yield: {item.yieldQty ?? item.currentCount ?? 0}
+                                    </Badge>
+                                    {item.wasteQty !== undefined && item.wasteQty > 0 && (
+                                      <Badge variant="outline" className="text-[9px] font-bold bg-red-500/5 text-red-600 border-red-500/20">
+                                        Waste: {item.wasteQty}
+                                      </Badge>
+                                    )}
+                                    {item.avgWeightGrams !== undefined && item.avgWeightGrams > 0 && (
+                                      <Badge variant="outline" className="text-[9px] font-bold bg-blue-500/5 text-blue-600 border-blue-500/20">
+                                        Avg: {item.avgWeightGrams}g
+                                      </Badge>
+                                    )}
                                   </div>
-                                )}
+                                </div>
+                                <span className="text-[10px] text-muted-foreground block">Origin: {item.channelName} (Cap {item.capacity || 50})</span>
+                                {item.notes && <p className="text-[10px] text-slate-500 italic mt-1 bg-background p-1.5 rounded">Notes: {item.notes}</p>}
                               </div>
-                            ) : (
-                              <div className="text-[11px] text-muted-foreground italic font-mono">
-                                Channel is ready for planting. Set details in the NFT Channels remapper.
+                              <div className="text-left sm:text-right text-[10px] space-y-1 self-start sm:self-center">
+                                <div className="text-foreground">Harvested: {new Date(item.harvestedAt).toLocaleDateString()}</div>
+                                {ageDays && <div className="text-muted-foreground font-semibold">Total Age: {ageDays} days</div>}
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </Card>
-
-                {/* Harvest History Log */}
-                <Card className="p-5 border-border/80">
-                  <div className="border-b pb-3 mb-4">
-                    <h3 className="text-sm font-bold flex items-center gap-2">
-                      <History className="h-4 w-4 text-amber-500" />
-                      Completed Harvest History Database
-                    </h3>
-                    <p className="text-[11px] text-muted-foreground">Audit logs of completed crop batches and yields.</p>
-                  </div>
-
-                  {loadingCrops ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground">Loading harvest log...</div>
-                  ) : harvestHistory.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground italic">No historical crops harvested yet.</div>
-                  ) : (
-                    <div className="space-y-3 font-mono text-xs">
-                      {harvestHistory.map((item) => {
-                        const ageDays = item.plantedAt 
-                          ? Math.max(1, Math.round((new Date(item.harvestedAt).getTime() - new Date(item.plantedAt).getTime()) / (24 * 60 * 60 * 1000)))
-                          : null;
-                        
-                        return (
-                          <div key={item.id} className="p-3.5 rounded-lg border bg-muted/30 flex flex-col sm:flex-row justify-between gap-3">
-                            <div className="space-y-1.5">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-foreground text-xs">{item.cropName}</span>
-                                <Badge variant="outline" className="text-[9px] font-bold bg-green-500/5 text-green-600 border-green-500/20">
-                                  Yield: {item.currentCount || 0} Plants
-                                </Badge>
-                              </div>
-                              <span className="text-[10px] text-muted-foreground block">Origin: {item.channelName} (Cap {item.capacity || 50})</span>
-                              {item.notes && <p className="text-[10px] text-slate-500 italic mt-1 bg-background p-1.5 rounded">Notes: {item.notes}</p>}
                             </div>
-                            <div className="text-left sm:text-right text-[10px] space-y-1 self-start sm:self-center">
-                              <div className="text-foreground">Harvested: {new Date(item.harvestedAt).toLocaleDateString()}</div>
-                              {ageDays && <div className="text-muted-foreground font-semibold">Total Age: {ageDays} days</div>}
-                            </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* Nursery History Log */}
+                  <Card className="p-5 border-border/80 bg-card">
+                    <div className="border-b pb-3 mb-4">
+                      <h3 className="text-sm font-bold flex items-center gap-2">
+                        <Grid className="h-4 w-4 text-green-500" />
+                        Nursery Seedling Transplant Logs
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground">Historical records of propagated trays and transplanted plugs.</p>
                     </div>
-                  )}
-                </Card>
+
+                    {nurseryHistory.length === 0 ? (
+                      <div className="text-center py-6 text-xs text-muted-foreground italic">No nursery trays transplanted yet.</div>
+                    ) : (
+                      <div className="space-y-3 font-mono text-xs">
+                        {nurseryHistory.map((item) => {
+                          const ageDays = item.plantedOn
+                            ? Math.max(1, Math.round((new Date(item.transplantedOn).getTime() - new Date(item.plantedOn).getTime()) / (24 * 60 * 60 * 1000)))
+                            : null;
+
+                          return (
+                            <div key={item.id} className="p-3.5 rounded-lg border bg-muted/30 flex flex-col sm:flex-row justify-between gap-3">
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-foreground text-xs">{item.crop}</span>
+                                  <Badge variant="outline" className="text-[9px] font-bold bg-primary/5 text-primary border-primary/20">
+                                    Transplanted: {item.germinated} / {item.plugs} Plugs
+                                  </Badge>
+                                </div>
+                                <span className="text-[10px] text-muted-foreground block">Origin: {item.trayName}</span>
+                                {item.notes && <p className="text-[10px] text-slate-500 italic mt-1 bg-background p-1.5 rounded">Notes: {item.notes}</p>}
+                              </div>
+                              <div className="text-left sm:text-right text-[10px] space-y-1 self-start sm:self-center">
+                                <div className="text-foreground">Transplanted: {new Date(item.transplantedOn).toLocaleDateString()}</div>
+                                {ageDays && <div className="text-muted-foreground font-semibold">Propagated Age: {ageDays} days</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              );
+            })()}
+
+            {/* NFT channels */}
+            {activeTab === "history" && (
+              <div className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                    <History className="h-5 w-5 text-primary" />
+                    Channels History & Production
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Review current production by stand and row, with crop populations and upcoming harvests.</p>
+                </div>
+                <CropOperationsDashboard mode="channels" channels={nftChannels} harvestHistory={harvestHistory} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} />
               </div>
             )}
 
-            {/* NFT channels */}
             {activeTab === "nft" && <NftChannelsTab />}
 
             {/* High-Fidelity Nursery Trays */}
@@ -585,6 +871,8 @@ function Index() {
                   </Button>
                 </div>
 
+                <CropOperationsDashboard mode="nursery" channels={nftChannels} harvestHistory={harvestHistory} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} />
+
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {nurseryTrays.map((tray) => {
                     const germination = tray.plugs > 0 ? Math.min(100, Math.round((tray.germinated / tray.plugs) * 100)) : 0;
@@ -595,9 +883,17 @@ function Index() {
                             <Input aria-label="Tray name" value={tray.name} onChange={(e) => updateNurseryTray(tray.id, { name: e.target.value })} className="h-8 text-sm font-bold" />
                             <p className="mt-1 text-[11px] text-muted-foreground">{tray.crop || "No crop assigned yet"}</p>
                           </div>
-                          <Button variant="ghost" size="icon" title="Remove tray" onClick={() => setNurseryTrays((trays) => trays.filter((item) => item.id !== tray.id))}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" title="View tray seeding & transplant history" onClick={() => {
+                              setSelectedTrayLogs(tray);
+                              setTrayLogsDialogOpen(true);
+                            }}>
+                              <History className="h-4 w-4 text-blue-500" />
+                            </Button>
+                            <Button variant="ghost" size="icon" title="Remove tray" onClick={() => setNurseryTrays((trays) => trays.filter((item) => item.id !== tray.id))}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -636,11 +932,244 @@ function Index() {
                               </SelectContent>
                             </Select>
                           </div>
+                          {tray.crop && tray.germinated > 0 && (
+                            <Button
+                              onClick={() => {
+                                setActiveTrayId(tray.id);
+                                setTransplantCount(tray.germinated);
+                                setTargetChannelId(nftChannels[0]?.id || "");
+                                setTransplantNotes("");
+                                setScanQrInput("");
+                                setTransplantDialogOpen(true);
+                              }}
+                              className="w-full bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1.5 h-8 mt-2 flex items-center gap-1.5 shadow-sm"
+                            >
+                              <Sprout className="h-4 w-4" /> Shift to NFT Channel
+                            </Button>
+                          )}
                         </div>
                       </Card>
                     );
                   })}
                 </div>
+
+                {/* Nursery-to-NFT Transplant Dialog */}
+                {transplantDialogOpen && activeTrayId && (
+                  <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <Card className="p-6 max-w-sm w-full border-border/80 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto">
+                      <div>
+                        <span className="font-bold text-base text-foreground block">Transplant to NFT Channel</span>
+                        <span className="text-xs text-muted-foreground block mt-0.5">
+                          Shift propagated plugs directly to your vertical gullies.
+                        </span>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <Label htmlFor="scan-target-qr" className="text-xs font-semibold">Scan / Enter Target Channel QR</Label>
+                            <Button
+                              type="button"
+                              onClick={() => setShowCameraScanner(!showCameraScanner)}
+                              variant="outline"
+                              className="h-6 text-[10px] font-bold px-2 py-0 border-primary/45 text-primary hover:bg-primary/5 flex items-center gap-1"
+                            >
+                              📷 {showCameraScanner ? "Close Camera" : "Scan via Camera"}
+                            </Button>
+                          </div>
+                          {showCameraScanner && (
+                            <div className="py-2">
+                              <CameraQrScanner
+                                onScanSuccess={(val) => {
+                                  setScanQrInput(val);
+                                  const matched = nftChannels.find((c) => 
+                                    c.id.toLowerCase() === val.trim().toLowerCase() ||
+                                    (c.qrCode && c.qrCode.toLowerCase() === val.trim().toLowerCase()) ||
+                                    c.name.toLowerCase() === val.trim().toLowerCase() ||
+                                    (c.stand && c.level && `${c.stand}-${c.level}-Ch ${c.channelIndex}`.toLowerCase() === val.trim().toLowerCase())
+                                  );
+                                  if (matched) {
+                                    setTargetChannelId(matched.id);
+                                    toast.success(`Matched Target Channel: ${matched.name}!`);
+                                  } else {
+                                    toast.warning(`Scanned: "${val}", but no matching channel found.`);
+                                  }
+                                  setShowCameraScanner(false);
+                                }}
+                                onClose={() => setShowCameraScanner(false)}
+                              />
+                            </div>
+                          )}
+                          <Input
+                            id="scan-target-qr"
+                            placeholder="Scan QR or type Stand A-Level 1-Ch 2"
+                            value={scanQrInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setScanQrInput(val);
+                              // Match logic
+                              const matched = nftChannels.find((c) => 
+                                c.id.toLowerCase() === val.trim().toLowerCase() ||
+                                (c.qrCode && c.qrCode.toLowerCase() === val.trim().toLowerCase()) ||
+                                c.name.toLowerCase() === val.trim().toLowerCase() ||
+                                (c.stand && c.level && `${c.stand}-${c.level}-Ch ${c.channelIndex}`.toLowerCase() === val.trim().toLowerCase())
+                              );
+                              if (matched) {
+                                setTargetChannelId(matched.id);
+                                toast.success(`Auto-matched target channel: ${matched.name}!`);
+                              }
+                            }}
+                            className="text-xs font-mono"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="trans-channel" className="text-xs font-semibold">Target NFT Channel</Label>
+                          <Select value={targetChannelId} onValueChange={(val) => setTargetChannelId(val)}>
+                            <SelectTrigger id="trans-channel" className="h-9 text-xs"><SelectValue placeholder="Select target gully..." /></SelectTrigger>
+                            <SelectContent>
+                              {nftChannels.map((chan) => (
+                                <SelectItem key={chan.id} value={chan.id}>
+                                  {chan.name} {chan.stand ? `(📍 ${chan.stand}-${chan.level})` : ""} - {chan.status === "growing" ? `Active: ${chan.cropName}` : "Empty"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="trans-count" className="text-xs font-semibold">Quantity of Plugs to Transplant</Label>
+                          <Input
+                            id="trans-count"
+                            type="number"
+                            min={1}
+                            max={nurseryTrays.find((t) => t.id === activeTrayId)?.germinated || 100}
+                            value={transplantCount}
+                            onChange={(e) => { const v = e.target.value; setTransplantCount(v === "" ? "" as any : Number(v)); }}
+                            className="text-xs"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label htmlFor="trans-notes" className="text-xs font-semibold">Transplant Notes (optional)</Label>
+                          <Input
+                            id="trans-notes"
+                            placeholder="e.g. Transplanted row 3-4 plugs"
+                            value={transplantNotes}
+                            onChange={(e) => setTransplantNotes(e.target.value)}
+                            className="text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
+                        <Button onClick={() => setTransplantDialogOpen(false)} variant="outline" className="text-xs font-semibold px-4 h-9">
+                          Cancel
+                        </Button>
+                        <Button onClick={handleTransplantConfirm} className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs px-4 h-9">
+                          Confirm Transplant
+                        </Button>
+                      </div>
+                    </Card>
+                  </div>
+                )}
+
+                {/* Nursery Tray Batch History Modal */}
+                {trayLogsDialogOpen && selectedTrayLogs && (() => {
+                  const filteredHistory = nurseryHistory.filter((h) => h.trayId === selectedTrayLogs.id);
+                  return (
+                    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                      <Card className="p-6 max-w-sm w-full border-border/80 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto">
+                        <div>
+                          <span className="font-bold text-base text-foreground flex items-center gap-2">
+                            <History className="h-5 w-5 text-primary" />
+                            Tray: {selectedTrayLogs.name}
+                          </span>
+                          <span className="text-xs text-muted-foreground block mt-0.5">
+                            Propagation age timeline and transplant tracking log.
+                          </span>
+                        </div>
+
+                        <div className="space-y-4 font-sans text-xs">
+                          {/* Current Status */}
+                          <div className="p-3 rounded-lg border bg-muted/20 space-y-2">
+                            <span className="font-bold text-foreground block border-b pb-1">Current Propagation State</span>
+                            {selectedTrayLogs.crop ? (
+                              <div className="space-y-1">
+                                <div className="flex justify-between font-semibold">
+                                  <span>Cultivar:</span>
+                                  <span>{selectedTrayLogs.crop}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Seeded On:</span>
+                                  <span>{selectedTrayLogs.plantedOn ? new Date(selectedTrayLogs.plantedOn).toLocaleDateString() : "—"}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Germination:</span>
+                                  <span>{selectedTrayLogs.germinated} / {selectedTrayLogs.plugs} Plugs ({selectedTrayLogs.plugs > 0 ? Math.round((selectedTrayLogs.germinated / selectedTrayLogs.plugs) * 100) : 0}%)</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Tray Status:</span>
+                                  <Badge className="text-[9px] px-1 py-0 h-4 capitalize">{selectedTrayLogs.status}</Badge>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground italic block">Tray is currently unseeded.</span>
+                            )}
+                          </div>
+
+                          {/* Historical Transplants */}
+                          <div className="space-y-2">
+                            <span className="font-bold text-foreground block border-b pb-1">Historical Shifting Logs</span>
+                            {filteredHistory.length > 0 ? (
+                              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                {filteredHistory.map((item) => {
+                                  const ageDays = item.plantedOn
+                                    ? Math.max(1, Math.round((new Date(item.transplantedOn).getTime() - new Date(item.plantedOn).getTime()) / (24 * 60 * 60 * 1000)))
+                                    : null;
+                                  return (
+                                    <div key={item.id} className="pl-3 border-l-2 border-primary py-0.5 space-y-1">
+                                      <div className="flex justify-between items-center text-[10px] font-bold text-foreground">
+                                        <span>Shifted to Gully: {item.channelName || "Unknown Channel"}</span>
+                                        <span className="text-primary font-bold">Qty: {item.germinated}</span>
+                                      </div>
+                                      <div className="text-[9px] text-muted-foreground flex justify-between">
+                                        <span>On: {new Date(item.transplantedOn).toLocaleDateString()}</span>
+                                        {ageDays && <span>Propagated age: {ageDays} days</span>}
+                                      </div>
+                                      {item.notes && <p className="text-[9px] text-slate-500 italic">Notes: {item.notes}</p>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground italic text-[11px] block">No historical transplant events logged.</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end pt-2 border-t border-border/60">
+                          <Button onClick={() => setTrayLogsDialogOpen(false)} variant="outline" className="text-xs font-semibold px-4 h-9">
+                            Close
+                          </Button>
+                        </div>
+                      </Card>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {activeTab === "harvested" && (
+              <div className="space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    Harvested Crops & Yield
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Track harvested status, yield performance, waste, and cultivated crop mix.</p>
+                </div>
+                <CropOperationsDashboard mode="harvested" channels={nftChannels} harvestHistory={harvestHistory} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} />
               </div>
             )}
 

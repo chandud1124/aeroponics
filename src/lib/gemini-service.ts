@@ -227,7 +227,10 @@ export async function analyzeSensorDataWithGemini(
     if (!response.ok) {
       const error = await response.text();
       logError("Gemini API error", new Error(error), { status: response.status });
-      return null;
+      return {
+        ...getLocalHeuristicInsights(currentStatus),
+        isHeuristic: true,
+      };
     }
 
     const data = (await response.json()) as {
@@ -241,14 +244,20 @@ export async function analyzeSensorDataWithGemini(
     const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!responseText) {
       logError("No response text from Gemini API", undefined, { dataKeys: Object.keys(data) });
-      return null;
+      return {
+        ...getLocalHeuristicInsights(currentStatus),
+        isHeuristic: true,
+      };
     }
 
     // Extract JSON from response (may be wrapped in markdown code blocks)
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       logError("Could not find JSON in Gemini response", undefined, { responseLength: responseText.length });
-      return null;
+      return {
+        ...getLocalHeuristicInsights(currentStatus),
+        isHeuristic: true,
+      };
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as {
@@ -277,6 +286,9 @@ export async function analyzeSensorDataWithGemini(
     return result;
   } catch (err) {
     logError("Error calling Gemini API", err instanceof Error ? err : new Error(String(err)));
-    return null;
+    return {
+      ...getLocalHeuristicInsights(currentStatus),
+      isHeuristic: true,
+    };
   }
 }

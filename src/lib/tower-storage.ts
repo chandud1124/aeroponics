@@ -15,6 +15,7 @@ import type {
   NftChannel,
   GpioMapping,
   HarvestHistoryEntry,
+  NftCropEntry,
 } from "./tower-shared";
 
 export {
@@ -34,6 +35,7 @@ export type {
   NftChannel,
   GpioMapping,
   HarvestHistoryEntry,
+  NftCropEntry,
 };
 
 export type StatusEnvelope = {
@@ -254,10 +256,16 @@ export async function plantCropRemote(channelId: string, cropName: string, notes
   });
 }
 
-export async function harvestCropRemote(channelId: string, notes: string): Promise<NftChannel> {
+export async function harvestCropRemote(
+  channelId: string,
+  yieldQty: number,
+  wasteQty: number,
+  avgWeightGrams: number,
+  notes: string,
+): Promise<NftChannel> {
   return requestJson<NftChannel>(`/api/nft-channels/${encodeURIComponent(channelId)}/harvest`, {
     method: "POST",
-    body: JSON.stringify({ notes }),
+    body: JSON.stringify({ yieldQty, wasteQty, avgWeightGrams, notes }),
   });
 }
 

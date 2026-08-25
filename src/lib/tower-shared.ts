@@ -109,6 +109,8 @@ export type LiveStatus = {
   heartbeatUpdatedAt?: number | null;
   isOnline: boolean;
   vpd?: number | null;
+  lightOn?: boolean | null;
+  lightLux?: number | null;
 };
 
 export type SensorSnapshot = {
@@ -124,6 +126,7 @@ export type SensorSnapshot = {
   pumpState: PumpState;
   fault: string | null;
   vpd?: number | null;
+  lightLux?: number | null;
 };
 
 export type ManualReading = {
@@ -206,6 +209,14 @@ export type NftCropEntry = {
   count: number;
 };
 
+export type NftIncidentLog = {
+  timestamp: string;
+  type: "incident" | "removal";
+  description: string;
+  qtyRemoved?: number;
+  cultivar?: string;
+};
+
 export type NftChannel = {
   id: string;
   name: string;
@@ -219,6 +230,10 @@ export type NftChannel = {
   capacity?: number;
   currentCount?: number;
   expectedHarvestISO?: string | null;
+  stand?: string;
+  level?: string;
+  channelIndex?: number;
+  incidents?: NftIncidentLog[];
 };
 
 export type GpioMapping = {
@@ -273,6 +288,10 @@ export type HarvestHistoryEntry = {
   notes: string;
   capacity?: number;
   currentCount?: number;
+  yieldQty?: number;
+  wasteQty?: number;
+  avgWeightGrams?: number;
+  incidents?: NftIncidentLog[];
 };
 
 export function calculateVpd(tempC: number | null | undefined, humidityPct: number | null | undefined): number | null {

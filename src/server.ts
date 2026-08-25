@@ -48,7 +48,7 @@ import {
   getDevicePins,
 } from "./lib/device-registry.server";
 import { analyzeSensorDataWithGemini } from "./lib/gemini-service";
-import type { CameraSnapshot, CameraSettings } from "./lib/tower-shared";
+import type { CameraSnapshot, CameraSettings, GpioMapping } from "./lib/tower-shared";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -640,8 +640,18 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     if (request.method === "POST") {
       const parts = url.pathname.split("/");
       const id = parts[3];
-      const payload = (await request.json()) as { notes: string };
-      const updated = harvestCrop(id, payload.notes || "");
+      const payload = (await request.json()) as { notes: string; yieldQty?: number; wasteQty?: number; avgWeightGrams?: number };
+      const measurements = [payload.yieldQty ?? 0, payload.wasteQty ?? 0, payload.avgWeightGrams ?? 0];
+      if (measurements.some((value) => !Number.isFinite(value) || value < 0)) {
+        return jsonResponse({ error: "Harvest yield, waste, and average weight must be non-negative numbers" }, 400);
+      }
+      const updated = harvestCrop(
+        id,
+        payload.yieldQty ?? 0,
+        payload.wasteQty ?? 0,
+        payload.avgWeightGrams ?? 0,
+        payload.notes || ""
+      );
       if (!updated) {
         return jsonResponse({ error: "Channel not found" }, 404);
       }

@@ -12,9 +12,12 @@
 //  FORWARD DECLARATIONS  [FIX-1]
 // ─────────────────────────────────────────────────────────────────────
 bool postLogEntryToAPI(const struct LogEntry& entry);
+int findJsonKey(const String& json, const char* key);
+String extractJsonValue(const String& json, const char* key);
 int  extractJsonInt(const String& json, const char* key);
 String extractJsonString(const String& json, const char* key);
 String extractJsonNumber(const String& json, const char* key);
+bool extractJsonBool(const String& json, const char* key, bool defaultVal);
 void enterFault(unsigned long now, const char* code);
 time_t getCurrentEpoch();
 void readSensors();
@@ -308,9 +311,34 @@ bool lastNutritionADosingOnState = false;
 //  HELPER FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────
 
+unsigned long tsLastPumpRelaySwitch = 0;
+unsigned long tsLastNutrARelaySwitch = 0;
+unsigned long tsLastNutrBRelaySwitch = 0;
+unsigned long tsLastPhDownRelaySwitch = 0;
+
 void setRelayState(int pin, bool on) {
-  // RELAY_ACTIVE_HIGH=false → LOW turns relay ON (most opto-isolated boards)
-  digitalWrite(pin, RELAY_ACTIVE_HIGH ? (on ? HIGH : LOW) : (on ? LOW : HIGH));
+  unsigned long now = millis();
+  unsigned long* lastSwitchMs = nullptr;
+  
+  if (pin == PIN_PUMP_RELAY) lastSwitchMs = &tsLastPumpRelaySwitch;
+  else if (pin == PIN_NUTRITION_A_RELAY) lastSwitchMs = &tsLastNutrARelaySwitch;
+  else if (pin == PIN_NUTRITION_B_RELAY) lastSwitchMs = &tsLastNutrBRelaySwitch;
+  else if (pin == PIN_PH_DOWN_RELAY) lastSwitchMs = &tsLastPhDownRelaySwitch;
+  
+  // RELAY_ACTIVE_HIGH=false means LOW turns relay ON (standard opto-isolated board logic)
+  bool currentState = (digitalRead(pin) == (RELAY_ACTIVE_HIGH ? HIGH : LOW));
+  
+  if (on != currentState) {
+    // Enforce 5-second cooldown on ON transitions to protect contacts against rapid switching
+    if (on && lastSwitchMs && (now - *lastSwitchMs < 5000UL)) {
+      Serial.printf("[RELAY SAFETY] Cooldown active for pin %d. Blocking ON transition.\n", pin);
+      return;
+    }
+    digitalWrite(pin, RELAY_ACTIVE_HIGH ? (on ? HIGH : LOW) : (on ? LOW : HIGH));
+    if (lastSwitchMs) {
+      *lastSwitchMs = now;
+    }
+  }
 }
 
 void setupPinModes() {
@@ -399,48 +427,118 @@ const char* resetReasonToString(esp_reset_reason_t reason) {
 //  FORWARD DECLARATION IMPLEMENTATIONS (JSON helpers) [FIX-1]
 // ─────────────────────────────────────────────────────────────────────
 
-int extractJsonInt(const String& json, const char* key) {
-  String search = String("\"") + key + "\"";
-  int idx = json.indexOf(search);
-  if (idx < 0) return -1;
-  idx += search.length();
-  // Skip whitespace + colon
-  while (idx < (int)json.length() && (json[idx] == ' ' || json[idx] == ':')) idx++;
-  String numStr = "";
-  while (idx < (int)json.length() && (isDigit(json[idx]) || json[idx] == '-')) {
-    numStr += json[idx++];
+int findJsonKey(const String& json, const char* key) {
+  int keyLen = strlen(key);
+  int idx = 0;
+  while (true) {
+    idx = json.indexOf(key, idx);
+    if (idx < 0) return -1;
+    // Check if it is a whole word key inside quotes or boundaries
+    bool validStart = false;
+    if (idx > 0) {
+      char prev = json[idx - 1];
+      if (prev == '"' || prev == '\'' || (!isalnum(prev) && prev != '_')) {
+        validStart = true;
+      }
+    } else {
+      validStart = true;
+    }
+    bool validEnd = false;
+    int endIdx = idx + keyLen;
+    if (endIdx < (int)json.length()) {
+      char next = json[endIdx];
+      if (next == '"' || next == '\'' || (!isalnum(next) && next != '_')) {
+        validEnd = true;
+      }
+    } else {
+      validEnd = true;
+    }
+    
+    // Now verify there's a colon after this key
+    if (validStart && validEnd) {
+      int colonIdx = endIdx;
+      // Skip quote if it was in quotes
+      if (idx > 0 && json[idx - 1] == '"' && json[endIdx] == '"') {
+        colonIdx++;
+      } else if (idx > 0 && json[idx - 1] == '\'' && json[endIdx] == '\'') {
+        colonIdx++;
+      }
+      while (colonIdx < (int)json.length() && isspace((unsigned char)json[colonIdx])) {
+        colonIdx++;
+      }
+      if (colonIdx < (int)json.length() && json[colonIdx] == ':') {
+        return colonIdx + 1; // Return index after the colon
+      }
+    }
+    idx += keyLen; // Move past this match to search again
   }
-  return numStr.length() > 0 ? numStr.toInt() : -1;
+}
+
+String extractJsonValue(const String& json, const char* key) {
+  int idx = findJsonKey(json, key);
+  if (idx < 0) return "";
+  
+  // Skip leading whitespace
+  while (idx < (int)json.length() && isspace((unsigned char)json[idx])) {
+    idx++;
+  }
+  if (idx >= (int)json.length()) return "";
+  
+  // Check if string value (starts with " or ')
+  char quote = 0;
+  if (json[idx] == '"' || json[idx] == '\'') {
+    quote = json[idx];
+    idx++; // Skip opening quote
+  }
+  
+  String val = "";
+  if (quote != 0) {
+    // Read until closing quote, handling escaped characters
+    while (idx < (int)json.length()) {
+      if (json[idx] == '\\' && idx + 1 < (int)json.length()) {
+        val += json[idx + 1];
+        idx += 2;
+      } else if (json[idx] == quote) {
+        break; // Found closing quote
+      } else {
+        val += json[idx++];
+      }
+    }
+  } else {
+    // Read until comma, closing brace, closing bracket, or whitespace
+    while (idx < (int)json.length()) {
+      char c = json[idx];
+      if (c == ',' || c == '}' || c == ']' || isspace((unsigned char)c)) {
+        break;
+      }
+      val += c;
+      idx++;
+    }
+  }
+  return val;
+}
+
+int extractJsonInt(const String& json, const char* key) {
+  String val = extractJsonValue(json, key);
+  if (val.length() == 0) return -1;
+  if (val == "true") return 1;
+  if (val == "false") return 0;
+  return val.toInt();
 }
 
 String extractJsonString(const String& json, const char* key) {
-  String search = String("\"") + key + "\"";
-  int idx = json.indexOf(search);
-  if (idx < 0) return "";
-  idx += search.length();
-  while (idx < (int)json.length() && (json[idx] == ' ' || json[idx] == ':')) idx++;
-  if (idx >= (int)json.length() || json[idx] != '"') return "";
-  idx++;
-  String out = "";
-  while (idx < (int)json.length() && json[idx] != '"') {
-    if (json[idx] == '\\' && idx + 1 < (int)json.length()) idx++;
-    out += json[idx++];
-  }
-  return out;
+  return extractJsonValue(json, key);
 }
 
 String extractJsonNumber(const String& json, const char* key) {
-  String search = String("\"") + key + "\"";
-  int idx = json.indexOf(search);
-  if (idx < 0) return "";
-  idx += search.length();
-  // Skip whitespace + colon
-  while (idx < (int)json.length() && (json[idx] == ' ' || json[idx] == ':')) idx++;
-  String numStr = "";
-  while (idx < (int)json.length() && (isDigit(json[idx]) || json[idx] == '-' || json[idx] == '.')) {
-    numStr += json[idx++];
-  }
-  return numStr;
+  return extractJsonValue(json, key);
+}
+
+bool extractJsonBool(const String& json, const char* key, bool defaultVal) {
+  String val = extractJsonValue(json, key);
+  if (val == "true") return true;
+  if (val == "false") return false;
+  return defaultVal;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -774,6 +872,31 @@ time_t getCurrentEpoch() {
 //  SENSORS — DHT22 (humidity) + LDR (light)
 // ─────────────────────────────────────────────────────────────────────
 
+int readAnalogFiltered(int pin) {
+  const int NUM_SAMPLES = 5;
+  int samples[NUM_SAMPLES];
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    samples[i] = analogRead(pin);
+    delay(10); // 10ms stabilization delay
+  }
+  // Simple bubble sort
+  for (int i = 0; i < NUM_SAMPLES - 1; i++) {
+    for (int j = 0; j < NUM_SAMPLES - i - 1; j++) {
+      if (samples[j] > samples[j + 1]) {
+        int temp = samples[j];
+        samples[j] = samples[j + 1];
+        samples[j + 1] = temp;
+      }
+    }
+  }
+  // Drop high/low, average middle 3 samples
+  int sum = 0;
+  for (int i = 1; i < NUM_SAMPLES - 1; i++) {
+    sum += samples[i];
+  }
+  return sum / (NUM_SAMPLES - 2);
+}
+
 void readSensors() {
   // ── DHT22 (Humidity and Temperature fallbacks) ─────────────────────
   float hum  = dht.readHumidity();
@@ -793,7 +916,7 @@ void readSensors() {
   }
 
   // ── pH Probe (Analog) ──────────────────────────────────────────────
-  int phRaw = analogRead(PIN_PH_SENSOR);
+  int phRaw = readAnalogFiltered(PIN_PH_SENSOR);
   // Simulating sensor reading if disconnected/floating, else calculate
   float ph = 6.0f;
   if (phRaw < 100) {
@@ -801,24 +924,30 @@ void readSensors() {
     ph = 5.8f + 0.3f * sin(millis() / 60000.0f);
     sensors.phValid = true;
   } else {
-    ph = 7.0f + ((float)(phRaw - 2048) * 3.3f / 4095.0f * 3.5f);
+    // Standard scale at 25C
+    float phUncompensated = 7.0f + ((float)(phRaw - 2048) * 3.3f / 4095.0f * 3.5f);
+    // Nernst Equation temperature compensation
+    float tempCompFactor = 298.15f / (273.15f + sensors.waterTempC);
+    ph = 7.0f + (phUncompensated - 7.0f) * tempCompFactor;
     sensors.phValid = true;
   }
   sensors.phValue = ph;
-  Serial.printf("[pH Probe] Raw ADC: %d -> %.2f pH\n", phRaw, ph);
+  Serial.printf("[pH Probe] Raw ADC: %d -> %.2f pH (temp compensated @ %.1fC)\n", phRaw, ph, sensors.waterTempC);
 
   // ── EC Probe (Analog) ──────────────────────────────────────────────
-  int ecRaw = analogRead(PIN_EC_SENSOR);
+  int ecRaw = readAnalogFiltered(PIN_EC_SENSOR);
   float ec = 1.2f;
   if (ecRaw < 100) {
     ec = 1.15f + 0.1f * cos(millis() / 60000.0f);
     sensors.ecValid = true;
   } else {
-    ec = (float)ecRaw * 3.3f / 4095.0f * 2.0f;
+    float ecUncompensated = (float)ecRaw * 3.3f / 4095.0f * 2.0f;
+    // Temperature compensation (approx 1.9% per degree C relative to 25C)
+    ec = ecUncompensated / (1.0f + 0.019f * (sensors.waterTempC - 25.0f));
     sensors.ecValid = true;
   }
   sensors.ecValue = ec;
-  Serial.printf("[EC Probe] Raw ADC: %d -> %.2f mS/cm\n", ecRaw, ec);
+  Serial.printf("[EC Probe] Raw ADC: %d -> %.2f mS/cm (temp compensated @ %.1fC)\n", ecRaw, ec, sensors.waterTempC);
 
   // ── Water Level Sensor (A02YYUW UART ultrasonic) ─────────────────
   float distanceCm = -1.0f;
@@ -1350,21 +1479,21 @@ bool fetchHandshakeAndSync() {
   float serverTankLength = extractJsonNumber(resp, "tankLengthCm").toFloat();
   float serverTankHeight = extractJsonNumber(resp, "tankHeightCm").toFloat();
   float serverTankCapacity = extractJsonNumber(resp, "tankCapacityLiters").toFloat();
-  bool hasLightEnabled = (resp.indexOf("\"lightEnabled\":") >= 0);
-  bool lightEnabled = (resp.indexOf("\"lightEnabled\":true") >= 0);
+  bool hasLightEnabled = (findJsonKey(resp, "lightEnabled") >= 0);
+  bool lightEnabled = extractJsonBool(resp, "lightEnabled", true);
   int lightStartHour = extractJsonInt(resp, "lightStartHour");
   int lightEndHour = extractJsonInt(resp, "lightEndHour");
-  bool hasNightEnabled = (resp.indexOf("\"nightEnabled\":") >= 0);
-  bool nightEnabled = (resp.indexOf("\"nightEnabled\":true") >= 0);
-  bool hasNutriEnabled = (resp.indexOf("\"nutritionEnabled\":") >= 0);
-  bool nutriEnabled = (resp.indexOf("\"nutritionEnabled\":true") >= 0);
+  bool hasNightEnabled = (findJsonKey(resp, "nightEnabled") >= 0);
+  bool nightEnabled = extractJsonBool(resp, "nightEnabled", true);
+  bool hasNutriEnabled = (findJsonKey(resp, "nutritionEnabled") >= 0);
+  bool nutriEnabled = extractJsonBool(resp, "nutritionEnabled", true);
   String targetPhStr = extractJsonNumber(resp, "targetPh");
   String targetEcStr = extractJsonNumber(resp, "targetEc");
   int phDoseSec = extractJsonInt(resp, "phDoseSeconds");
   int phDoseCool = extractJsonInt(resp, "phDoseIntervalMinutes");
   int ecDoseSec = extractJsonInt(resp, "ecDoseSeconds");
   int ecDoseCool = extractJsonInt(resp, "ecDoseIntervalMinutes");
-  bool nen = (resp.indexOf("\"enabled\":true") >= 0);
+  bool nen = extractJsonBool(resp, "enabled", true);
 
     if (ni > 0 && ni <= 1440 &&
         nd > 0 && nd <= 600  &&

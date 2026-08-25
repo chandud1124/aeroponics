@@ -58,10 +58,10 @@ let nftChannels: NftChannel[] = [];
 let gpioMappings: GpioMapping[] = [];
 
 const DEFAULT_NFT_CHANNELS: NftChannel[] = [
-  { id: "channel-1", name: "NFT Channel 1", qrCode: "channel-1", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" },
-  { id: "channel-2", name: "NFT Channel 2", qrCode: "channel-2", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" },
-  { id: "channel-3", name: "NFT Channel 3", qrCode: "channel-3", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" },
-  { id: "channel-4", name: "NFT Channel 4", qrCode: "channel-4", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" }
+  { id: "channel-1", name: "NFT Channel 1", qrCode: "Stand A-Level 1-Ch 1", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 1", channelIndex: 1 },
+  { id: "channel-2", name: "NFT Channel 2", qrCode: "Stand A-Level 1-Ch 2", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 1", channelIndex: 2 },
+  { id: "channel-3", name: "NFT Channel 3", qrCode: "Stand A-Level 2-Ch 1", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 2", channelIndex: 1 },
+  { id: "channel-4", name: "NFT Channel 4", qrCode: "Stand A-Level 2-Ch 2", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 2", channelIndex: 2 }
 ];
 
 function loadNftChannelsFromDisk(): NftChannel[] {
@@ -1196,7 +1196,13 @@ export function saveHarvestHistory(history: HarvestHistoryEntry[]) {
   }
 }
 
-export function harvestCrop(channelId: string, notes: string): NftChannel | null {
+export function harvestCrop(
+  channelId: string,
+  yieldQty: number,
+  wasteQty: number,
+  avgWeightGrams: number,
+  notes: string,
+): NftChannel | null {
   const channel = nftChannels.find((c) => c.id === channelId);
   if (!channel) return null;
 
@@ -1214,6 +1220,10 @@ export function harvestCrop(channelId: string, notes: string): NftChannel | null
       notes: notes || channel.notes || "Completed harvest cycle.",
       capacity: channel.capacity,
       currentCount: channel.currentCount,
+      yieldQty,
+      wasteQty,
+      avgWeightGrams,
+      incidents: channel.incidents,
     };
     history.push(newEntry);
     saveHarvestHistory(history);
@@ -1226,6 +1236,7 @@ export function harvestCrop(channelId: string, notes: string): NftChannel | null
   channel.notes = notes;
   channel.status = "empty";
   channel.currentCount = 0;
+  channel.incidents = []; // Clear incidents on harvest reset
   saveNftChannelsToDisk(nftChannels);
   return channel;
 }

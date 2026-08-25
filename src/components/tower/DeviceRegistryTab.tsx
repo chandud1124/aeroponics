@@ -112,7 +112,7 @@ export function DeviceRegistryTab() {
     try {
       const formattedMac = macAddress.trim().toUpperCase();
       const res = await createAdminDevice(adminPasskey, deviceName, formattedMac);
-      if (res.error) {
+      if ('error' in res) {
         toast.error(res.error);
         return;
       }
