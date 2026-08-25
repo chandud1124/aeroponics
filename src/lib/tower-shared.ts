@@ -41,10 +41,10 @@ export type Schedule = {
   startHour: number;
   endHour: number;
   enabled: boolean;
-  nightEnabled?: boolean;
   lightEnabled?: boolean;
   lightStartHour?: number;
   lightEndHour?: number;
+  nightEnabled?: boolean;
   dayIntervalMinutes?: number;
   dayDurationSeconds?: number;
   nightIntervalMinutes?: number;
@@ -53,6 +53,13 @@ export type Schedule = {
   rainPause?: boolean;
   heatBoost?: boolean;
   lowWaterAutoLock?: boolean;
+  nutritionEnabled?: boolean;
+  targetPh?: number;
+  targetEc?: number;
+  phDoseSeconds?: number;
+  phDoseIntervalMinutes?: number;
+  ecDoseSeconds?: number;
+  ecDoseIntervalMinutes?: number;
 };
 
 export type LiveStatus = {
@@ -61,15 +68,21 @@ export type LiveStatus = {
   flowing: boolean;
   pumpState: PumpState;
   motorManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  lightManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
-  batteryChargeOn?: boolean;
-  batteryManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
+  phManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
+  nutritionManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
+  phDosingOn: boolean;
+  nutritionADosingOn: boolean;
+  nutritionBDosingOn: boolean;
+  ph: number | null;
+  ec: number | null;
+  waterLevel: "LOW" | "MEDIUM" | "FULL" | null;
+  waterDistanceCm?: number | null;
+  waterLevelPercent?: number | null;
+  waterVolumeLiters?: number | null;
   reservoirTempC: number | null;
   humidityPct?: number | null;
-  lightLux?: number | null;
   towerTempC: number | null;
   flowRateLpm?: number | null;
-  lightOn?: boolean;
   lastRunISO: string | null;
   scheduleAppliedAt?: number | null;
   appliedPlanName?: string | null;
@@ -95,6 +108,7 @@ export type LiveStatus = {
   telemetryUpdatedAt: number | null;
   heartbeatUpdatedAt?: number | null;
   isOnline: boolean;
+  vpd?: number | null;
 };
 
 export type SensorSnapshot = {
@@ -102,11 +116,14 @@ export type SensorSnapshot = {
   deviceId?: string;
   timestamp: number;
   reservoirTempC: number | null;
+  ph: number | null;
+  ec: number | null;
+  waterLevel: "LOW" | "MEDIUM" | "FULL" | null;
   humidityPct?: number | null;
-  lightLux?: number | null;
   towerTempC: number | null;
   pumpState: PumpState;
   fault: string | null;
+  vpd?: number | null;
 };
 
 export type ManualReading = {
@@ -163,10 +180,10 @@ export const defaultSchedule: Schedule = {
   startHour: 0,
   endHour: 24,
   enabled: true,
-  nightEnabled: true,
   lightEnabled: true,
   lightStartHour: 5,
   lightEndHour: 21,
+  nightEnabled: true,
   dayIntervalMinutes: 7,
   dayDurationSeconds: 180,
   nightIntervalMinutes: 10,
@@ -175,4 +192,113 @@ export const defaultSchedule: Schedule = {
   rainPause: false,
   heatBoost: true,
   lowWaterAutoLock: true,
+  nutritionEnabled: true,
+  targetPh: 6.0,
+  targetEc: 1.2,
+  phDoseSeconds: 5,
+  phDoseIntervalMinutes: 30,
+  ecDoseSeconds: 10,
+  ecDoseIntervalMinutes: 30,
+};
+
+export type NftCropEntry = {
+  cropName: string;
+  count: number;
+};
+
+export type NftChannel = {
+  id: string;
+  name: string;
+  qrCode: string;
+  cropName: string;
+  crops?: NftCropEntry[];
+  plantedAt: string | null;
+  harvestedAt: string | null;
+  notes: string;
+  status: "empty" | "growing" | "harvested";
+  capacity?: number;
+  currentCount?: number;
+  expectedHarvestISO?: string | null;
+};
+
+export type GpioMapping = {
+  id: string;
+  name: string;
+  type:
+    | "pH Sensor"
+    | "EC Sensor"
+    | "Water Level Sensor"
+    | "Water Level - Float Switch"
+    | "Water Level - Ultrasonic"
+    | "Water Level - Analog Sensor"
+    | "Humidity Sensor"
+    | "Water Temperature Sensor"
+    | "Relay - Water Pump"
+    | "Relay - Nutrition A"
+    | "Relay - Nutrition B"
+    | "Relay - Nutrition C"
+    | "Relay - pH Down"
+    | "Other Sensor"
+    | "Other Actuator";
+  direction: "INPUT" | "OUTPUT";
+  pin: number;
+  txPin?: number;
+  emptyDistanceCm?: number;
+  fullDistanceCm?: number;
+  tankWidthCm?: number;
+  tankLengthCm?: number;
+  tankHeightCm?: number;
+  tankCapacityLiters?: number;
+};
+
+export const defaultGpioMappings: GpioMapping[] = [
+  { id: "map-1", name: "Water Pump", type: "Relay - Water Pump", direction: "OUTPUT", pin: 27 },
+  { id: "map-2", name: "Nutrient Pump A", type: "Relay - Nutrition A", direction: "OUTPUT", pin: 33 },
+  { id: "map-3", name: "Nutrient Pump B", type: "Relay - Nutrition B", direction: "OUTPUT", pin: 26 },
+  { id: "map-4", name: "pH Down Pump", type: "Relay - pH Down", direction: "OUTPUT", pin: 25 },
+  { id: "map-5", name: "pH Probe", type: "pH Sensor", direction: "INPUT", pin: 35 },
+  { id: "map-6", name: "EC Probe", type: "EC Sensor", direction: "INPUT", pin: 34 },
+  { id: "map-7", name: "Water Level Switch", type: "Water Level Sensor", direction: "INPUT", pin: 32 },
+  { id: "map-8", name: "DHT22 Temp/Hum Sensor", type: "Humidity Sensor", direction: "INPUT", pin: 16 }
+];
+
+export type HarvestHistoryEntry = {
+  id: string;
+  channelId: string;
+  channelName: string;
+  cropName: string;
+  crops?: NftCropEntry[];
+  plantedAt: string | null;
+  harvestedAt: string;
+  notes: string;
+  capacity?: number;
+  currentCount?: number;
+};
+
+export function calculateVpd(tempC: number | null | undefined, humidityPct: number | null | undefined): number | null {
+  if (tempC == null || humidityPct == null) return null;
+  const vpsat = 0.61078 * Math.exp((17.27 * tempC) / (tempC + 237.3));
+  const vpd = vpsat * (1 - humidityPct / 100);
+  return Number(vpd.toFixed(2));
+}
+
+export function compensateEc(ec: number | null | undefined, tempC: number | null | undefined): number | null {
+  if (ec == null || tempC == null) return ec ?? null;
+  const compensated = ec / (1 + 0.0191 * (tempC - 25));
+  return Number(compensated.toFixed(2));
+}
+
+export type CameraSettings = {
+  rtspUrl: string;
+  ezvizAppKey: string;
+  ezvizAppSecret: string;
+  autoCapture: boolean;
+};
+
+export type CameraSnapshot = {
+  id: string;
+  timestamp: number;
+  imageUrl: string;
+  analysis: string;
+  healthStatus: "healthy" | "warning" | "alert";
 };

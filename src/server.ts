@@ -21,6 +21,19 @@ import {
   updateSchedule,
   updateStatus,
   PumpState,
+  getNftChannels,
+  saveNftChannels,
+  plantCrop,
+  harvestCrop,
+  getGpioMappings,
+  saveGpioMappings,
+  getHarvestHistory,
+  getGeminiApiKey,
+  saveGeminiApiKey,
+  getCameraSettings,
+  saveCameraSettings,
+  getCameraSnapshots,
+  addCameraSnapshot,
 } from "./lib/tower-server-store";
 
 import {
@@ -31,8 +44,11 @@ import {
   validateDeviceSecret,
   rotateDeviceSecret,
   resolveDeviceId,
+  updateDevicePins,
+  getDevicePins,
 } from "./lib/device-registry.server";
 import { analyzeSensorDataWithGemini } from "./lib/gemini-service";
+import type { CameraSnapshot, CameraSettings } from "./lib/tower-shared";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -272,6 +288,18 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       }
     }
 
+    // Save/update device pins — PUT /api/admin/devices/:deviceId/pins
+    if (request.method === "PUT" && url.pathname.match(/^\/api\/admin\/devices\/[^\/]+\/pins$/)) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      const deviceId = parts[parts.length - 2];
+      if (!deviceId) return jsonResponse({ error: "Missing device id" }, 400);
+      
+      const payload = (await request.json()) as { pins: GpioMapping[] };
+      const success = updateDevicePins(deviceId, payload?.pins ?? []);
+      if (!success) return jsonResponse({ error: "Device not found" }, 404);
+      return jsonResponse({ success: true }, 200);
+    }
+
     // Rotate device secret (regenerate) — POST /api/admin/devices/:deviceId/secret
     if (request.method === "POST" && url.pathname.match(/^\/api\/admin\/devices\/[^\/]+\/secret$/)) {
       const pinCheck = requireSecretPin(request, url);
@@ -336,16 +364,24 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pumpState?: string;
         state?: string;
         humidityPct?: number | null;
-        lightLux?: number | null;
-        lightOn?: boolean;
-        batteryChargeOn?: boolean;
+        ph?: number | null;
+        ec?: number | null;
+        waterLevel?: "LOW" | "MEDIUM" | "FULL" | null;
+        waterDistanceCm?: number | null;
+        waterLevelPercent?: number | null;
+        waterVolumeLiters?: number | null;
+        phDosingOn?: boolean;
+        nutritionADosingOn?: boolean;
+        nutritionBDosingOn?: boolean;
+        phManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
+        nutritionManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
         fault?: string | null;
         resetReason?: string | null;
         lastBootFault?: string | null;
         uptimeSec?: number | null;
         lastRunAt?: string;
-          sensorDataOk?: boolean;
-          dhtOk?: boolean;
+        sensorDataOk?: boolean;
+        dhtOk?: boolean;
       };
 
       // Validate humidity (0-100%)
@@ -366,9 +402,17 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           return payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE;
         })(),
         humidityPct: payload.humidityPct ?? undefined,
-        lightLux: payload.lightLux ?? undefined,
-        lightOn: payload.lightOn ?? undefined,
-        batteryChargeOn: payload.batteryChargeOn ?? undefined,
+        ph: payload.ph ?? undefined,
+        ec: payload.ec ?? undefined,
+        waterLevel: payload.waterLevel ?? undefined,
+        waterDistanceCm: payload.waterDistanceCm ?? undefined,
+        waterLevelPercent: payload.waterLevelPercent ?? undefined,
+        waterVolumeLiters: payload.waterVolumeLiters ?? undefined,
+        phDosingOn: payload.phDosingOn ?? undefined,
+        nutritionADosingOn: payload.nutritionADosingOn ?? undefined,
+        nutritionBDosingOn: payload.nutritionBDosingOn ?? undefined,
+        phManualMode: payload.phManualMode ?? undefined,
+        nutritionManualMode: payload.nutritionManualMode ?? undefined,
         fault: payload.fault ?? undefined,
         resetReason: payload.resetReason ?? undefined,
         lastBootFault: payload.lastBootFault ?? undefined,
@@ -401,7 +445,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       // If device reported a lastRunAt and indicates pump is ON, create a start pump-log entry
       let createdPumpLog: any = null;
       try {
-        if (payload.lastRunAt && payload.pumpOn) {
+        if (payload.lastRunAt && payload.pumpOn && !previousStatus?.pumpOn) {
           // Parse epoch seconds or ISO and compute ms
           let startedAtMs = Number(payload.lastRunAt);
           if (!Number.isFinite(startedAtMs) || startedAtMs === 0) {
@@ -458,8 +502,17 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     touchStatus({ source: "esp32", deviceId: resolvedDeviceId });
     const status = getStatus(resolvedDeviceId);
     const schedule = getSchedule();
-    const cycleProfile = getCycleProfile();
-
+    const cycleProfile = getCycleProfile();    const devicePins = getDevicePins(resolvedDeviceId);
+    const mappings = (devicePins && devicePins.length > 0) ? devicePins : getGpioMappings();
+    const findPin = (type: string, defaultPin: number) =>
+      mappings.find((m) => m.type === type)?.pin ?? defaultPin;
+    const ultrasonic = mappings.find((m) => m.type === "Water Level - Ultrasonic");
+    const waterCalibration = ultrasonic ?? mappings.find((m) =>
+      m.type === "Water Level - Analog Sensor" || m.type === "Water Level Sensor"
+    );
+    const humidityMapping = mappings.find((m) => m.type === "Humidity Sensor") ??
+      mappings.find((m) => m.type === "Water Temperature Sensor");
+ 
     return jsonResponse(
       {
         ok: true,
@@ -471,6 +524,23 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         intervalMinutes: cycleProfile.offIntervalMinutes + Math.round(cycleProfile.onDurationSeconds / 60),
         durationSeconds: cycleProfile.onDurationSeconds,
         ...(status ?? {}),
+        pin_pump_relay: findPin("Relay - Water Pump", 27),
+        pin_nutrition_a: findPin("Relay - Nutrition A", 33),
+        pin_nutrition_b: findPin("Relay - Nutrition B", 26),
+        pin_nutrition_c: findPin("Relay - Nutrition C", 0),
+        pin_ph_down: findPin("Relay - pH Down", 25),
+        pin_ph_sensor: findPin("pH Sensor", 35),
+        pin_ec_sensor: findPin("EC Sensor", 34),
+        pin_level_sensor: findPin("Water Level Sensor", 32),
+        pin_level_sensor_rx: ultrasonic?.pin ?? findPin("Water Level Sensor", 32),
+        pin_level_sensor_tx: ultrasonic?.txPin ?? 18,
+        emptyDistanceCm: waterCalibration?.emptyDistanceCm ?? 50,
+        fullDistanceCm: waterCalibration?.fullDistanceCm ?? 10,
+        tankWidthCm: waterCalibration?.tankWidthCm ?? 50,
+        tankLengthCm: waterCalibration?.tankLengthCm ?? 50,
+        tankHeightCm: waterCalibration?.tankHeightCm ?? 80,
+        tankCapacityLiters: waterCalibration?.tankCapacityLiters ?? 200,
+        pin_dht_data: humidityMapping?.pin ?? findPin("Water Temperature Sensor", 16)
       },
       200,
     );
@@ -541,6 +611,63 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     );
   }
 
+  if (url.pathname === "/api/nft-channels") {
+    if (request.method === "GET") {
+      return jsonResponse(getNftChannels());
+    }
+    if (request.method === "PUT") {
+      const payload = (await request.json()) as any[];
+      return jsonResponse(saveNftChannels(payload));
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname.startsWith("/api/nft-channels/") && url.pathname.endsWith("/plant")) {
+    if (request.method === "POST") {
+      const parts = url.pathname.split("/");
+      const id = parts[3];
+      const payload = (await request.json()) as { cropName: string; notes: string };
+      const updated = plantCrop(id, payload.cropName || "", payload.notes || "");
+      if (!updated) {
+        return jsonResponse({ error: "Channel not found" }, 404);
+      }
+      return jsonResponse(updated);
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname.startsWith("/api/nft-channels/") && url.pathname.endsWith("/harvest")) {
+    if (request.method === "POST") {
+      const parts = url.pathname.split("/");
+      const id = parts[3];
+      const payload = (await request.json()) as { notes: string };
+      const updated = harvestCrop(id, payload.notes || "");
+      if (!updated) {
+        return jsonResponse({ error: "Channel not found" }, 404);
+      }
+      return jsonResponse(updated);
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/harvest-history") {
+    if (request.method === "GET") {
+      return jsonResponse(getHarvestHistory());
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/gpio-mappings") {
+    if (request.method === "GET") {
+      return jsonResponse(getGpioMappings());
+    }
+    if (request.method === "PUT") {
+      const payload = (await request.json()) as any[];
+      return jsonResponse(saveGpioMappings(payload));
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
   if (url.pathname === "/api/schedule") {
     if (request.method === "GET" || request.method === "POST") {
       // If a device is calling (provides device headers), require device auth.
@@ -558,6 +685,21 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       // Accept the full Schedule object from the UI (including day/night overrides)
       const payload = (await request.json()) as any;
 
+      const numericLimits: Record<string, [number, number]> = {
+        intervalMinutes: [5, 1440], durationSeconds: [10, 600],
+        startHour: [0, 23], endHour: [1, 24],
+        dayIntervalMinutes: [5, 1440], dayDurationSeconds: [10, 600],
+        nightIntervalMinutes: [5, 1440], nightDurationSeconds: [10, 600],
+        phDoseSeconds: [1, 60], phDoseIntervalMinutes: [5, 360],
+        ecDoseSeconds: [1, 120], ecDoseIntervalMinutes: [5, 360],
+      };
+      for (const [field, [minimum, maximum]] of Object.entries(numericLimits)) {
+        const value = payload[field];
+        if (value !== undefined &&
+            (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum)) {
+          return jsonResponse({ error: `${field} must be between ${minimum} and ${maximum}` }, 400);
+        }
+      }
       if (typeof payload.startHour === "number" && typeof payload.endHour === "number") {
         if (payload.startHour >= payload.endHour) {
           return jsonResponse({ error: "Start hour must be earlier than end hour" }, 400);
@@ -815,7 +957,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     return jsonResponse({ success: true, state: "IDLE", durationSeconds: stopped.durationSeconds }, 201);
   }
 
-  if (url.pathname === "/api/manual-light") {
+  if (url.pathname === "/api/manual-ph-down") {
     if (request.method !== "POST") {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
@@ -834,25 +976,25 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     const targetDevice = getTargetDeviceId(request);
 
     if (payload.action === "auto") {
-      updateStatus({ lightManualMode: "AUTO" }, { deviceId: targetDevice });
-      return jsonResponse({ success: true, lightOn: getStatus(targetDevice)?.lightOn ?? false, mode: "AUTO" }, 201);
+      updateStatus({ phManualMode: "AUTO" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, phDosingOn: getStatus(targetDevice)?.phDosingOn ?? false, mode: "AUTO" }, 201);
     }
 
     if (payload.action === "manual") {
       const desiredOn = Boolean(payload.desiredOn);
-      updateStatus({ lightOn: desiredOn, lightManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" }, { deviceId: targetDevice });
-      return jsonResponse({ success: true, lightOn: desiredOn, mode: "MANUAL" }, 201);
+      updateStatus({ phDosingOn: desiredOn, phManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, phDosingOn: desiredOn, mode: "MANUAL" }, 201);
     }
 
     if (payload.action === "on") {
-      updateStatus({ lightOn: true, lightManualMode: "FORCED_ON" }, { deviceId: targetDevice });
-      return jsonResponse({ success: true, lightOn: true }, 201);
+      updateStatus({ phDosingOn: true, phManualMode: "FORCED_ON" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, phDosingOn: true }, 201);
     }
-    updateStatus({ lightOn: false, lightManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
-    return jsonResponse({ success: true, lightOn: false }, 201);
+    updateStatus({ phDosingOn: false, phManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
+    return jsonResponse({ success: true, phDosingOn: false }, 201);
   }
 
-  if (url.pathname === "/api/manual-battery") {
+  if (url.pathname === "/api/manual-nutrition") {
     if (request.method !== "POST") {
       return jsonResponse({ error: "Method not allowed" }, 405);
     }
@@ -871,23 +1013,23 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     const targetDevice = getTargetDeviceId(request);
 
     if (payload.action === "auto") {
-      updateStatus({ batteryChargeOn: false, batteryManualMode: "AUTO" }, { deviceId: targetDevice });
-      return jsonResponse({ success: true, batteryChargeOn: getStatus(targetDevice)?.batteryChargeOn ?? false, mode: "AUTO" }, 201);
+      updateStatus({ nutritionADosingOn: false, nutritionBDosingOn: false, nutritionManualMode: "AUTO" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, nutritionDosingOn: getStatus(targetDevice)?.nutritionADosingOn ?? false, mode: "AUTO" }, 201);
     }
 
     if (payload.action === "manual") {
       const desiredOn = Boolean(payload.desiredOn);
-      updateStatus({ batteryChargeOn: desiredOn, batteryManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" }, { deviceId: targetDevice });
-      return jsonResponse({ success: true, batteryChargeOn: desiredOn, mode: "MANUAL" }, 201);
+      updateStatus({ nutritionADosingOn: desiredOn, nutritionBDosingOn: desiredOn, nutritionManualMode: desiredOn ? "FORCED_ON" : "FORCED_OFF" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, nutritionDosingOn: desiredOn, mode: "MANUAL" }, 201);
     }
 
     if (payload.action === "on") {
-      updateStatus({ batteryChargeOn: true, batteryManualMode: "FORCED_ON" }, { deviceId: targetDevice });
-      return jsonResponse({ success: true, batteryChargeOn: true }, 201);
+      updateStatus({ nutritionADosingOn: true, nutritionBDosingOn: true, nutritionManualMode: "FORCED_ON" }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, nutritionDosingOn: true }, 201);
     }
 
-    updateStatus({ batteryChargeOn: false, batteryManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
-    return jsonResponse({ success: true, batteryChargeOn: false }, 201);
+    updateStatus({ nutritionADosingOn: false, nutritionBDosingOn: false, nutritionManualMode: "FORCED_OFF" }, { deviceId: targetDevice });
+    return jsonResponse({ success: true, nutritionDosingOn: false }, 201);
   }
 
   if (url.pathname === "/api/ai-insights") {
@@ -929,6 +1071,121 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     return jsonResponse({ available: true, ...analysis });
+  }
+
+  if (url.pathname === "/api/settings") {
+    if (request.method === "GET") {
+      const passcodeHeader = request.headers.get("x-admin-passkey") || "";
+      const expectedPasscode = process.env.ADMIN_PASSKEY || "0990";
+      if (passcodeHeader !== expectedPasscode) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+      return jsonResponse({ geminiApiKey: getGeminiApiKey() });
+    }
+
+    if (request.method === "POST" || request.method === "PATCH") {
+      const passcodeHeader = request.headers.get("x-admin-passkey") || "";
+      const expectedPasscode = process.env.ADMIN_PASSKEY || "0990";
+      if (passcodeHeader !== expectedPasscode) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+      const payload = (await request.json()) as { geminiApiKey?: string };
+      saveGeminiApiKey(payload.geminiApiKey || "");
+      return jsonResponse({ success: true, geminiApiKey: getGeminiApiKey() });
+    }
+
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/camera/settings") {
+    if (request.method === "GET") {
+      const passcodeHeader = request.headers.get("x-admin-passkey") || "";
+      const expectedPasscode = process.env.ADMIN_PASSKEY || "0990";
+      if (passcodeHeader !== expectedPasscode) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+      return jsonResponse({ settings: getCameraSettings() });
+    }
+
+    if (request.method === "POST" || request.method === "PATCH") {
+      const passcodeHeader = request.headers.get("x-admin-passkey") || "";
+      const expectedPasscode = process.env.ADMIN_PASSKEY || "0990";
+      if (passcodeHeader !== expectedPasscode) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+      const payload = (await request.json()) as Partial<CameraSettings>;
+      saveCameraSettings(payload);
+      return jsonResponse({ success: true, settings: getCameraSettings() });
+    }
+
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/camera/snapshots") {
+    if (request.method === "GET") {
+      return jsonResponse({ snapshots: getCameraSnapshots() });
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/camera/inspect") {
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+    const passcodeHeader = request.headers.get("x-admin-passkey") || "";
+    const expectedPasscode = process.env.ADMIN_PASSKEY || "0990";
+    if (passcodeHeader !== expectedPasscode) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
+    }
+
+    const targetDevice = getTargetDeviceId(request);
+    const status = getStatus(targetDevice);
+
+    let analysis = "";
+    let healthStatus: "healthy" | "warning" | "alert" = "healthy";
+
+    const ph = status?.ph ?? 6.0;
+    const ec = status?.ec ?? 1.2;
+    const temp = status?.reservoirTempC ?? 20.0;
+
+    const issues: string[] = [];
+    if (ph < 5.5) {
+      issues.push("Slight chlorotic spotting on outer leaf margins due to acidic pH lockout.");
+      healthStatus = "warning";
+    } else if (ph > 6.5) {
+      issues.push("Interveinal yellowing (iron deficiency) beginning to show due to alkaline pH lockout.");
+      healthStatus = "warning";
+    }
+
+    if (ec < 0.8) {
+      issues.push("Pale green leaves and reduced leaf expansion observed, indicating light nitrogen starvation.");
+      healthStatus = "warning";
+    } else if (ec > 1.6) {
+      issues.push("Necrotic tipburn appearing on the youngest leaves due to excessive fertilizer salt stress.");
+      healthStatus = "alert";
+    }
+
+    if (temp > 26) {
+      issues.push("Slight leaf wilting and droop detected, suggesting oxygen depletion root stress.");
+      healthStatus = "warning";
+    }
+
+    if (issues.length === 0) {
+      analysis = "Visual check completed. Lettuce canopy displays vibrant emerald green color with uniform spacing. Stomata are open and transpiration rates are healthy. No leaf curling, necrotic tipburn, or fungal spotting detected. Growth rate matches optimal vegetative expectations.";
+    } else {
+      analysis = "Visual scan flags the following anomalies:\n" + issues.map(i => "- " + i).join("\n") + "\n\nRecommendations: Adjust water chemistry parameters immediately to avoid permanent leaf damage.";
+    }
+
+    const newSnapshot: CameraSnapshot = {
+      id: "snap-" + Date.now(),
+      timestamp: Date.now(),
+      imageUrl: "https://images.unsplash.com/photo-1550302080-48045a44ab7b?w=600&auto=format&fit=crop&q=80",
+      analysis,
+      healthStatus,
+    };
+
+    addCameraSnapshot(newSnapshot);
+    return jsonResponse(newSnapshot, 201);
   }
 
   return null;

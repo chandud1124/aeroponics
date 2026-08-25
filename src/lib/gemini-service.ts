@@ -1,6 +1,6 @@
 import type { LiveStatus, SensorSnapshot } from "./tower-storage";
 import { error as logError, warn as logWarn, info as logInfo } from "./logger";
-import { getReadings, initializeTowerStore } from "./tower-server-store";
+import { getReadings, initializeTowerStore, getGeminiApiKey } from "./tower-server-store";
 import { luxToPar, DEFAULT_PAR_FACTOR } from "./light-utils";
 
 interface GeminiAnalysisResponse {
@@ -8,6 +8,7 @@ interface GeminiAnalysisResponse {
   recommendations: string[];
   healthScore: number;
   riskFactors: string[];
+  isHeuristic?: boolean;
 }
 
 interface CachedAnalysis {
@@ -19,6 +20,88 @@ interface CachedAnalysis {
 // Cache with 45-minute TTL
 const CACHE_TTL_MS = 45 * 60 * 1000;
 let cachedAnalysis: CachedAnalysis | null = null;
+
+function getLocalHeuristicInsights(currentStatus: LiveStatus): GeminiAnalysisResponse {
+  const recommendations: string[] = [];
+  const riskFactors: string[] = [];
+  let healthScore = 100;
+
+  // pH checks
+  const ph = currentStatus.ph;
+  if (ph != null) {
+    if (ph < 5.5) {
+      recommendations.push("pH is too acidic (" + ph.toFixed(1) + "). Add pH Up solution to raise it to 5.8-6.0.");
+      riskFactors.push("Low pH can cause nutrient lockout and root cell damage.");
+      healthScore -= 15;
+    } else if (ph > 6.5) {
+      recommendations.push("pH is alkaline (" + ph.toFixed(1) + "). Add pH Down solution to lower it to 5.8-6.0.");
+      riskFactors.push("High pH blocks uptake of iron, manganese, and phosphorus.");
+      healthScore -= 15;
+    } else {
+      recommendations.push("pH is stable in the optimal range (5.5-6.5). Maintain current buffer levels.");
+    }
+  } else {
+    recommendations.push("Connect a pH probe to start automatic chemical balancing.");
+    healthScore -= 5;
+  }
+
+  // EC checks
+  const ec = currentStatus.ec;
+  if (ec != null) {
+    if (ec < 0.8) {
+      recommendations.push("Electrical Conductivity (EC) is low (" + ec.toFixed(1) + " mS/cm). Dose Nutrients A & B to reach 1.2 mS/cm.");
+      riskFactors.push("Nutrient starvation will slow leaf expansion and growth rate.");
+      healthScore -= 15;
+    } else if (ec > 1.6) {
+      recommendations.push("EC concentration is high (" + ec.toFixed(1) + " mS/cm). Dilute reservoir with fresh RO water to prevent nutrient burn.");
+      riskFactors.push("Excess salts can cause leaf tip burn and root tip necrosis.");
+      healthScore -= 15;
+    } else {
+      recommendations.push("EC nutrient levels are optimal for lettuce vegetative growth.");
+    }
+  } else {
+    recommendations.push("Map an EC probe input to monitor solution concentration.");
+    healthScore -= 5;
+  }
+
+  // Reservoir Temp
+  const temp = currentStatus.reservoirTempC;
+  if (temp != null) {
+    if (temp > 26) {
+      recommendations.push("Water temp is high (" + temp.toFixed(1) + "°C). Add frozen water bottles or install inline chiller.");
+      riskFactors.push("Reservoir above 25°C depletes dissolved oxygen, leading to Pythium root rot.");
+      healthScore -= 20;
+    } else if (temp < 15) {
+      recommendations.push("Water temp is cold (" + temp.toFixed(1) + "°C). Consider adding aquarium heating element.");
+      healthScore -= 10;
+    }
+  }
+
+  // Vapor Pressure Deficit (VPD)
+  const vpd = currentStatus.vpd;
+  if (vpd != null) {
+    if (vpd < 0.8) {
+      recommendations.push("Low VPD detected (" + vpd.toFixed(2) + " kPa). Increase ventilation or turn on exhaust fans.");
+      riskFactors.push("Humid air limits plant transpiration, causing calcium deficiency (tipburn).");
+      healthScore -= 10;
+    } else if (vpd > 1.2) {
+      recommendations.push("High VPD detected (" + vpd.toFixed(2) + " kPa). Increase humidity or lower temperatures.");
+      riskFactors.push("Arid air triggers stomata closure, halting growth and photosynthesis.");
+      healthScore -= 10;
+    }
+  }
+
+  if (recommendations.length === 0) {
+    recommendations.push("System parameters look healthy. Keep monitoring!");
+  }
+
+  return {
+    insights: `Local Heuristic Engine: Analysis generated locally. Configure Gemini API key to enable advanced machine learning insights.`,
+    recommendations,
+    healthScore: Math.max(30, healthScore),
+    riskFactors,
+  };
+}
 
 /**
  * Computes a hash of sensor data to detect significant changes
@@ -51,12 +134,16 @@ export async function analyzeSensorDataWithGemini(
   await initializeTowerStore();
 
   const googleAiApiKey = process.env.GOOGLE_AI_API_KEY?.trim();
-  const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
-  const apiKey = googleAiApiKey || geminiApiKey;
+  const envApiKey = process.env.GEMINI_API_KEY?.trim();
+  const dbApiKey = getGeminiApiKey();
+  const apiKey = dbApiKey || googleAiApiKey || envApiKey;
 
   if (!apiKey) {
-    logWarn("Google AI API key not configured");
-    return null;
+    logWarn("Google AI API key not configured. Using local heuristic insights fallback.");
+    return {
+      ...getLocalHeuristicInsights(currentStatus),
+      isHeuristic: true,
+    };
   }
 
   // Check cache: if TTL valid and data hasn't changed significantly, return cached result

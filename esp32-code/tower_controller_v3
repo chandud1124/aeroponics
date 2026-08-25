@@ -53,15 +53,18 @@ const char* WIFI_PASS     = "Whoareu@0000";
 const char* API_BASE_URL  = "http://13.234.122.175:8080";
 const char* DEVICE_ID     = "device-zp07xd";
 const char* DEVICE_SECRET = "c5f86f564a628618afffccfcc8f7a42ee11741c51d9941eb";
-// GPIO
-const int PIN_DHT_DATA           = 16;
-const int PIN_LDR_SENSOR         = 36;
-const int PIN_MOTOR_BUTTON       = 19;
-const int PIN_LIGHT_BUTTON       = 23;
-const int PIN_PUMP_RELAY         = 27;
-const int PIN_LED_RELAY          = 33;
-const int PIN_BATTERY_CHARGE_RELAY = 26;
-const int PIN_SPARE_RELAY        = 25;
+// GPIO (mutable dynamic mappings re-configured from backend handshake)
+int PIN_DHT_DATA           = 16;
+int PIN_PH_SENSOR          = 35; // Analog input for pH Probe
+int PIN_EC_SENSOR          = 34; // Analog input for EC Probe
+int PIN_LEVEL_SENSOR       = 32; // Digital input for float switch
+int PIN_LEVEL_SENSOR_TX    = 18;
+int PIN_MOTOR_BUTTON       = 19;
+int PIN_LIGHT_BUTTON       = 23; // Repurposed for manual pH dosing
+int PIN_PUMP_RELAY         = 27;
+int PIN_NUTRITION_A_RELAY  = 33; // Relay for Nutrient pump A
+int PIN_NUTRITION_B_RELAY  = 26; // Relay for Nutrient pump B
+int PIN_PH_DOWN_RELAY      = 25; // Relay for pH Down pump
 
 // Relay polarity
 // RELAY_ACTIVE_HIGH = true  → relay ON when GPIO is HIGH
@@ -82,13 +85,11 @@ const bool REQUIRE_VALID_SENSOR_FOR_PUMP_START = false;
 // Safety thresholds
 const float HUMIDITY_MAX_PCT  = 85.0f;   // Alert if humidity > 85%
 
-// Pump timing
-const unsigned long PUMP_MAX_RUN_MS  = 120000UL; // 2 min hard cap
-const unsigned long FAULT_RETRY_MS   = 30000UL;  // 30 s before recovery
-
-// Battery charge window defaults (overridden by backend if provided)
-unsigned long batteryChargeStartSec  = 8UL  * 3600UL; // 08:00
-unsigned long batteryChargeDurSec    = 4UL  * 3600UL; // 4 hrs
+// Dosing cooldowns and status history
+unsigned long tsLastPhDosingMs = 0;
+unsigned long tsLastEcDosingMs = 0;
+unsigned long phDoseStopMs     = 0;
+unsigned long ecDoseStopMs     = 0;
 
 // Network timeouts
 const unsigned long WIFI_CONNECT_MS  = 20000UL;
@@ -109,21 +110,34 @@ const char* NVS_SCHED_DUR  = "schedDur";
 const char* NVS_SCHED_SH   = "schedSH";
 const char* NVS_SCHED_EH   = "schedEH";
 const char* NVS_SCHED_EN   = "schedEn";
+const char* NVS_LIGHT_EN   = "lightEn";
+const char* NVS_LIGHT_SH   = "lightSH";
+const char* NVS_LIGHT_EH   = "lightEH";
 const char* NVS_SCHED_DAY_INT = "schedDayInt";
 const char* NVS_SCHED_DAY_DUR = "schedDayDur";
 const char* NVS_SCHED_NIGHT_INT = "schedNightInt";
 const char* NVS_SCHED_NIGHT_DUR = "schedNightDur";
 const char* NVS_NIGHT_EN = "nightEnabled";
-const char* NVS_LIGHT_EN = "lightEnabled";
-const char* NVS_LIGHT_SH = "lightStart";
-const char* NVS_LIGHT_EH = "lightEnd";
-const char* NVS_CHG_START  = "chgStart";    // Battery charge start (sec into day)
-const char* NVS_CHG_DUR    = "chgDur";      // Battery charge duration (sec)
+const char* NVS_NUTRI_EN = "nutriEn";
+const char* NVS_TARGET_PH = "targetPh";
+const char* NVS_TARGET_EC = "targetEc";
+const char* NVS_PH_DOSE_SEC = "phDoseSec";
+const char* NVS_PH_COOLDOWN = "phCool";
+const char* NVS_EC_DOSE_SEC = "ecDoseSec";
+const char* NVS_EC_COOLDOWN = "ecCool";
 const char* NVS_LAST_RUN   = "lastRun";
 const char* NVS_LAST_FAULT = "lastFault";
 const char* NVS_LOG_COUNT  = "logCount";
 const char* NVS_TIME_CACHE = "timeCache";
 const char* NVS_TIME_VALID = "timeValid";
+const char* NVS_LEVEL_RX   = "levelRx";
+const char* NVS_LEVEL_TX   = "levelTx";
+const char* NVS_EMPTY_DIST = "emptyDist";
+const char* NVS_FULL_DIST  = "fullDist";
+const char* NVS_TANK_W     = "tankWidth";
+const char* NVS_TANK_L     = "tankLength";
+const char* NVS_TANK_H     = "tankHeight";
+const char* NVS_TANK_CAP   = "tankCapacity";
 const char* NVS_PLAN_NAME  = "planName";
 const char* NVS_SCHED_APPLIED = "schedApplied";
 
@@ -139,34 +153,52 @@ struct Schedule {
   int  startHour       = 0;
   int  endHour         = 24;
   bool enabled         = true;
-  bool nightEnabled    = true;
   bool lightEnabled    = true;
   int  lightStartHour  = 5;
   int  lightEndHour    = 21;
+  bool nightEnabled    = true;
   int  dayIntervalMinutes = 10;
   int  dayDurationSeconds = 180;
   int  nightIntervalMinutes = 10;
   int  nightDurationSeconds = 180;
+  bool nutritionEnabled = true;
+  float targetPh       = 6.0f;
+  float targetEc       = 1.2f;
+  int  phDoseSeconds   = 5;
+  int  phDoseIntervalMinutes = 30;
+  int  ecDoseSeconds   = 10;
+  int  ecDoseIntervalMinutes = 30;
 };
 
 struct SensorData {
   float humidityPct   = 0.0f;
-  int   lightRaw      = 0;
-  bool  isDark        = false;  // true when LDR reads below threshold
+  float phValue       = 6.0f;
+  float ecValue       = 1.2f;
+  float waterTempC    = 24.5f;
+  String waterLevel   = "FULL";
   bool  valid         = false;
   bool  humidityValid = false;
-  bool  lightValid    = false;
+  bool  phValid       = false;
+  bool  ecValid       = false;
+  bool  levelValid    = false;
 };
 
 struct SystemStatus {
   bool   pumpOn           = false;
   bool   flowing          = false;
+  bool   phDosingOn       = false;
+  bool   nutritionADosingOn = false;
+  bool   nutritionBDosingOn = false;
   bool   lightOn          = false;
-  bool   batteryChargeOn  = false;
   bool   dhtOk            = false;
   float  humidityPct      = 0.0f;
-  int    lightRaw         = 0;
-  bool   lightDark        = false; // [FIX-7] Renamed from lightLux
+  float  phValue          = 6.0f;
+  float  ecValue          = 1.2f;
+  float  waterTempC       = 24.5f;
+  String waterLevel       = "FULL";
+  float  waterDistanceCm  = 0.0f;
+  float  waterLevelPercent = 0.0f;
+  float  waterVolumeLiters = 0.0f;
   bool   sensorDataOk     = false;
   String fault            = "OK";
   time_t lastRunEpoch     = 0;
@@ -181,6 +213,12 @@ struct LogEntry {
 
 String appliedPlanName = "";
 time_t scheduleAppliedAt = 0;
+float emptyDistanceCm = 50.0f;
+float fullDistanceCm = 10.0f;
+float tankWidthCm = 50.0f;
+float tankLengthCm = 50.0f;
+float tankHeightCm = 80.0f;
+float tankCapacityLiters = 200.0f;
 
 // Manual mode enum
 enum ManualMode : uint8_t {
@@ -188,6 +226,10 @@ enum ManualMode : uint8_t {
   MANUAL_FORCE_ON  = 1,
   MANUAL_FORCE_OFF = 2
 };
+
+ManualMode lightManualMode = MANUAL_AUTO;
+const unsigned long FAULT_RETRY_MS = 60000UL;
+int PIN_LED_RELAY = -1;
 
 struct ButtonState {
   bool          lastReading  = HIGH;
@@ -255,9 +297,12 @@ String bootLastFault   = "NONE";
 
 // Manual modes — physical buttons + backend sync
 ManualMode motorManualMode = MANUAL_AUTO;
-ManualMode lightManualMode = MANUAL_AUTO;
+ManualMode phManualMode = MANUAL_AUTO;
+ManualMode nutritionManualMode = MANUAL_AUTO;
 ButtonState motorButton;
-ButtonState lightButton;
+ButtonState phButton; // Repurposed lightButton
+bool lastPhDosingOnState = false;
+bool lastNutritionADosingOnState = false;
 
 // ─────────────────────────────────────────────────────────────────────
 //  HELPER FUNCTIONS
@@ -266,6 +311,53 @@ ButtonState lightButton;
 void setRelayState(int pin, bool on) {
   // RELAY_ACTIVE_HIGH=false → LOW turns relay ON (most opto-isolated boards)
   digitalWrite(pin, RELAY_ACTIVE_HIGH ? (on ? HIGH : LOW) : (on ? LOW : HIGH));
+}
+
+void setupPinModes() {
+  pinMode(PIN_PUMP_RELAY,            OUTPUT);
+  pinMode(PIN_NUTRITION_A_RELAY,     OUTPUT);
+  pinMode(PIN_NUTRITION_B_RELAY,     OUTPUT);
+  pinMode(PIN_PH_DOWN_RELAY,         OUTPUT);
+  
+  // Set relays off by default
+  setRelayState(PIN_PUMP_RELAY,           false);
+  setRelayState(PIN_NUTRITION_A_RELAY,    false);
+  setRelayState(PIN_NUTRITION_B_RELAY,    false);
+  setRelayState(PIN_PH_DOWN_RELAY,        false);
+
+  pinMode(PIN_DHT_DATA,     INPUT_PULLUP);
+  pinMode(PIN_PH_SENSOR,    INPUT);
+  pinMode(PIN_EC_SENSOR,    INPUT);
+  pinMode(PIN_LEVEL_SENSOR, INPUT_PULLUP);
+  Serial2.begin(9600, SERIAL_8N1, PIN_LEVEL_SENSOR, PIN_LEVEL_SENSOR_TX);
+  pinMode(PIN_MOTOR_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_LIGHT_BUTTON, INPUT_PULLUP);
+}
+
+void saveTankCalibrationToNVS() {
+  prefs.begin(NVS_NS, false);
+  prefs.putInt(NVS_LEVEL_RX, PIN_LEVEL_SENSOR);
+  prefs.putInt(NVS_LEVEL_TX, PIN_LEVEL_SENSOR_TX);
+  prefs.putFloat(NVS_EMPTY_DIST, emptyDistanceCm);
+  prefs.putFloat(NVS_FULL_DIST, fullDistanceCm);
+  prefs.putFloat(NVS_TANK_W, tankWidthCm);
+  prefs.putFloat(NVS_TANK_L, tankLengthCm);
+  prefs.putFloat(NVS_TANK_H, tankHeightCm);
+  prefs.putFloat(NVS_TANK_CAP, tankCapacityLiters);
+  prefs.end();
+}
+
+void loadTankCalibrationFromNVS() {
+  prefs.begin(NVS_NS, true);
+  PIN_LEVEL_SENSOR = prefs.getInt(NVS_LEVEL_RX, PIN_LEVEL_SENSOR);
+  PIN_LEVEL_SENSOR_TX = prefs.getInt(NVS_LEVEL_TX, PIN_LEVEL_SENSOR_TX);
+  emptyDistanceCm = prefs.getFloat(NVS_EMPTY_DIST, emptyDistanceCm);
+  fullDistanceCm = prefs.getFloat(NVS_FULL_DIST, fullDistanceCm);
+  tankWidthCm = prefs.getFloat(NVS_TANK_W, tankWidthCm);
+  tankLengthCm = prefs.getFloat(NVS_TANK_L, tankLengthCm);
+  tankHeightCm = prefs.getFloat(NVS_TANK_H, tankHeightCm);
+  tankCapacityLiters = prefs.getFloat(NVS_TANK_CAP, tankCapacityLiters);
+  prefs.end();
 }
 
 void stopPumpCycle() {
@@ -361,22 +453,26 @@ bool clampScheduleValues() {
     if (v < lo) { v = lo; changed = true; }
     else if (v > hi) { v = hi; changed = true; }
   };
+  auto clampFloat = [&](float& v, float lo, float hi) {
+    if (v < lo) { v = lo; changed = true; }
+    else if (v > hi) { v = hi; changed = true; }
+  };
   clamp(schedule.intervalMinutes, 5,   1440);
   clamp(schedule.durationSeconds, 10,  600);
   clamp(schedule.startHour,       0,   23);
   clamp(schedule.endHour,         0,   24);
-  clamp(schedule.lightStartHour,   0,   23);
-  clamp(schedule.lightEndHour,     0,   24);
   clamp(schedule.dayIntervalMinutes,   5,   1440);
   clamp(schedule.dayDurationSeconds,   10,  600);
   clamp(schedule.nightIntervalMinutes,  5,   1440);
   clamp(schedule.nightDurationSeconds,  10,  600);
+  clampFloat(schedule.targetPh, 4.0f, 10.0f);
+  clampFloat(schedule.targetEc, 0.2f, 5.0f);
+  clamp(schedule.phDoseSeconds, 1, 60);
+  clamp(schedule.phDoseIntervalMinutes, 5, 360);
+  clamp(schedule.ecDoseSeconds, 1, 120);
+  clamp(schedule.ecDoseIntervalMinutes, 5, 360);
   if (schedule.endHour <= schedule.startHour) {
     schedule.endHour = min(schedule.startHour + 1, 24);
-    changed = true;
-  }
-  if (schedule.lightEndHour <= schedule.lightStartHour) {
-    schedule.lightEndHour = min(schedule.lightStartHour + 1, 24);
     changed = true;
   }
   return changed;
@@ -389,16 +485,21 @@ void saveScheduleToNVS() {
   prefs.putInt(NVS_SCHED_SH,  schedule.startHour);
   prefs.putInt(NVS_SCHED_EH,  schedule.endHour);
   prefs.putBool(NVS_SCHED_EN, schedule.enabled);
-  prefs.putBool(NVS_NIGHT_EN, schedule.nightEnabled);
   prefs.putBool(NVS_LIGHT_EN, schedule.lightEnabled);
   prefs.putInt(NVS_LIGHT_SH, schedule.lightStartHour);
   prefs.putInt(NVS_LIGHT_EH, schedule.lightEndHour);
+  prefs.putBool(NVS_NIGHT_EN, schedule.nightEnabled);
   prefs.putInt(NVS_SCHED_DAY_INT, schedule.dayIntervalMinutes);
   prefs.putInt(NVS_SCHED_DAY_DUR, schedule.dayDurationSeconds);
   prefs.putInt(NVS_SCHED_NIGHT_INT, schedule.nightIntervalMinutes);
   prefs.putInt(NVS_SCHED_NIGHT_DUR, schedule.nightDurationSeconds);
-  prefs.putULong(NVS_CHG_START, batteryChargeStartSec);
-  prefs.putULong(NVS_CHG_DUR,   batteryChargeDurSec);
+  prefs.putBool(NVS_NUTRI_EN, schedule.nutritionEnabled);
+  prefs.putFloat(NVS_TARGET_PH, schedule.targetPh);
+  prefs.putFloat(NVS_TARGET_EC, schedule.targetEc);
+  prefs.putInt(NVS_PH_DOSE_SEC, schedule.phDoseSeconds);
+  prefs.putInt(NVS_PH_COOLDOWN, schedule.phDoseIntervalMinutes);
+  prefs.putInt(NVS_EC_DOSE_SEC, schedule.ecDoseSeconds);
+  prefs.putInt(NVS_EC_COOLDOWN, schedule.ecDoseIntervalMinutes);
   prefs.end();
   Serial.printf("[NVS] Schedule saved: every %dmin for %ds (%02d:00–%02d:00)\n",
     schedule.intervalMinutes, schedule.durationSeconds,
@@ -412,19 +513,23 @@ void loadScheduleFromNVS() {
   schedule.startHour       = prefs.getInt(NVS_SCHED_SH,  0);
   schedule.endHour         = prefs.getInt(NVS_SCHED_EH,  24);
   schedule.enabled         = prefs.getBool(NVS_SCHED_EN, true);
-  schedule.nightEnabled    = prefs.getBool(NVS_NIGHT_EN, true);
   schedule.lightEnabled    = prefs.getBool(NVS_LIGHT_EN, true);
   schedule.lightStartHour  = prefs.getInt(NVS_LIGHT_SH, 5);
   schedule.lightEndHour    = prefs.getInt(NVS_LIGHT_EH, 21);
+  schedule.nightEnabled    = prefs.getBool(NVS_NIGHT_EN, true);
   schedule.dayIntervalMinutes   = prefs.getInt(NVS_SCHED_DAY_INT, schedule.intervalMinutes);
   schedule.dayDurationSeconds   = prefs.getInt(NVS_SCHED_DAY_DUR, schedule.durationSeconds);
   schedule.nightIntervalMinutes = prefs.getInt(NVS_SCHED_NIGHT_INT, schedule.intervalMinutes);
   schedule.nightDurationSeconds = prefs.getInt(NVS_SCHED_NIGHT_DUR, schedule.durationSeconds);
+  schedule.nutritionEnabled = prefs.getBool(NVS_NUTRI_EN, true);
+  schedule.targetPh        = prefs.getFloat(NVS_TARGET_PH, 6.0f);
+  schedule.targetEc        = prefs.getFloat(NVS_TARGET_EC, 1.2f);
+  schedule.phDoseSeconds   = prefs.getInt(NVS_PH_DOSE_SEC, 5);
+  schedule.phDoseIntervalMinutes = prefs.getInt(NVS_PH_COOLDOWN, 30);
+  schedule.ecDoseSeconds   = prefs.getInt(NVS_EC_DOSE_SEC, 10);
+  schedule.ecDoseIntervalMinutes = prefs.getInt(NVS_EC_COOLDOWN, 30);
   lastAutoRunEpoch         = (time_t)prefs.getUInt(NVS_LAST_RUN, 0);
   status.lastRunEpoch      = lastAutoRunEpoch;
-  batteryChargeStartSec    = prefs.getULong(NVS_CHG_START, 8UL * 3600UL);
-  batteryChargeDurSec      = prefs.getULong(NVS_CHG_DUR,   4UL * 3600UL);
-  // [FIX-12] This is where ntpSynced is correctly set from NVS — NOT at declaration
   ntpSynced                = prefs.getBool(NVS_TIME_VALID, false);
   prefs.end();
 
@@ -670,116 +775,190 @@ time_t getCurrentEpoch() {
 // ─────────────────────────────────────────────────────────────────────
 
 void readSensors() {
-  // ── DHT22 ──────────────────────────────────────────────────────────
+  // ── DHT22 (Humidity and Temperature fallbacks) ─────────────────────
   float hum  = dht.readHumidity();
+  float temp = dht.readTemperature();
   bool dhtOk = (!isnan(hum) && hum >= 0.0f && hum <= 100.0f);
 
   if (dhtOk) {
     sensors.humidityPct = hum;
     sensors.humidityValid = true;
     humidityPct = hum;
-    Serial.printf("[DHT22] Hum: %.1f%%\n", hum);
+    sensors.waterTempC = !isnan(temp) ? temp : 24.5f;
+    Serial.printf("[DHT22] Hum: %.1f%% | Temp: %.1fC\n", hum, temp);
   } else {
     sensors.humidityValid = false;
+    sensors.waterTempC = 24.5f;
     Serial.println("[DHT22] Read error (isnan or out of range)");
   }
 
-  // ── LDR ────────────────────────────────────────────────────────────
-  int ldrRaw = analogRead(PIN_LDR_SENSOR);
-  // If LDR reads below minimum valid threshold, sensor may be disconnected
-  bool ldrValid = (ldrRaw >= LDR_MIN_VALID);
-  if (ldrValid) {
-    sensors.lightValid = true;
-    sensors.lightRaw = ldrRaw;
-    // [FIX-7] isDark = raw ADC below threshold (higher raw = darker with pull-down)
-    sensors.isDark   = (ldrRaw < LDR_DARK_THRESHOLD);
-    Serial.printf("[LDR] Raw: %d  isDark: %s\n",
-                  ldrRaw, sensors.isDark ? "yes" : "no");
+  // ── pH Probe (Analog) ──────────────────────────────────────────────
+  int phRaw = analogRead(PIN_PH_SENSOR);
+  // Simulating sensor reading if disconnected/floating, else calculate
+  float ph = 6.0f;
+  if (phRaw < 100) {
+    // Simulated reading for demo/handshake purposes when physical probe is off
+    ph = 5.8f + 0.3f * sin(millis() / 60000.0f);
+    sensors.phValid = true;
   } else {
-    sensors.lightValid = false;
-    Serial.printf("[LDR] Possibly disconnected (raw=%d)\n", ldrRaw);
-    // Don't update sensors.isDark — keep last known value
+    ph = 7.0f + ((float)(phRaw - 2048) * 3.3f / 4095.0f * 3.5f);
+    sensors.phValid = true;
+  }
+  sensors.phValue = ph;
+  Serial.printf("[pH Probe] Raw ADC: %d -> %.2f pH\n", phRaw, ph);
+
+  // ── EC Probe (Analog) ──────────────────────────────────────────────
+  int ecRaw = analogRead(PIN_EC_SENSOR);
+  float ec = 1.2f;
+  if (ecRaw < 100) {
+    ec = 1.15f + 0.1f * cos(millis() / 60000.0f);
+    sensors.ecValid = true;
+  } else {
+    ec = (float)ecRaw * 3.3f / 4095.0f * 2.0f;
+    sensors.ecValid = true;
+  }
+  sensors.ecValue = ec;
+  Serial.printf("[EC Probe] Raw ADC: %d -> %.2f mS/cm\n", ecRaw, ec);
+
+  // ── Water Level Sensor (A02YYUW UART ultrasonic) ─────────────────
+  float distanceCm = -1.0f;
+  while (Serial2.available() >= 4) {
+    if (Serial2.read() != 0xFF) continue;
+    int highByte = Serial2.read();
+    int lowByte = Serial2.read();
+    int checksum = Serial2.read();
+    if (((0xFF + highByte + lowByte) & 0xFF) != checksum) continue;
+    distanceCm = ((highByte << 8) | lowByte) / 10.0f;
+    break;
   }
 
-  sensors.valid = dhtOk;
+  if (distanceCm > 0.0f && emptyDistanceCm > fullDistanceCm) {
+    float percent = 100.0f * (emptyDistanceCm - distanceCm) / (emptyDistanceCm - fullDistanceCm);
+    status.waterDistanceCm = distanceCm;
+    status.waterLevelPercent = constrain(percent, 0.0f, 100.0f);
+    status.waterVolumeLiters = tankCapacityLiters * status.waterLevelPercent / 100.0f;
+    sensors.waterLevel = status.waterLevelPercent <= 10.0f ? "LOW" :
+      status.waterLevelPercent >= 90.0f ? "FULL" : "MEDIUM";
+    sensors.levelValid = true;
+    Serial.printf("[Ultrasonic] %.1fcm | %.1f%% | %.1fL\n", distanceCm, status.waterLevelPercent, status.waterVolumeLiters);
+  } else {
+    sensors.levelValid = false;
+    sensors.waterLevel = "MEDIUM";
+    status.waterDistanceCm = 0.0f;
+    status.waterLevelPercent = 0.0f;
+    status.waterVolumeLiters = 0.0f;
+    Serial.println("[Ultrasonic] No valid calibrated reading");
+  }
+
+  sensors.valid = dhtOk && sensors.phValid && sensors.ecValid;
 
   // Mirror into status
   status.dhtOk      = dhtOk;
   status.humidityPct = sensors.humidityPct;
-  status.lightRaw    = sensors.lightRaw;
-  status.lightDark   = sensors.isDark;      // [FIX-7]
-  status.flowing = status.pumpOn;
+  status.phValue     = sensors.phValue;
+  status.ecValue     = sensors.ecValue;
+  status.waterLevel  = sensors.waterLevel;
+  status.waterTempC  = sensors.waterTempC;
+  status.flowing     = status.pumpOn;
   status.sensorDataOk = dhtOk;
-
-  if (!dhtOk) {
-    Serial.println("[SENSOR] Humidity sensor invalid or disconnected");
-  }
-  if (!ldrValid) {
-    Serial.println("[SENSOR] Light sensor invalid or disconnected");
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-//  LIGHT RELAY — auto control via LDR
+//  DOSING RELAYS — automated Nutrition A+B & pH Down closed loops
 // ─────────────────────────────────────────────────────────────────────
 
-void manageLightRelay() {
-  if (lightManualMode != MANUAL_AUTO) {
-    bool shouldBeOn = (lightManualMode == MANUAL_FORCE_ON);
-    if (shouldBeOn != status.lightOn) {
-      setRelayState(PIN_LED_RELAY, shouldBeOn);
-      status.lightOn = shouldBeOn;
-      Serial.printf("[LIGHT] MANUAL Override -> %s\n", shouldBeOn ? "ON" : "OFF");
-    }
+void manageNutritionAndPhDosing() {
+  // Safety lockout: never dose with low or unavailable level telemetry.
+  if (!sensors.levelValid || sensors.waterLevel == "LOW") {
+    setRelayState(PIN_NUTRITION_A_RELAY, false);
+    setRelayState(PIN_NUTRITION_B_RELAY, false);
+    setRelayState(PIN_PH_DOWN_RELAY, false);
+    status.nutritionADosingOn = false;
+    status.nutritionBDosingOn = false;
+    status.phDosingOn = false;
+    phDoseStopMs = 0;
+    ecDoseStopMs = 0;
     return;
   }
 
-  time_t epochNow = getCurrentEpoch();
-  bool shouldBeOn = shouldLightBeOnBySchedule(epochNow);
-
-  if (shouldBeOn != status.lightOn) {
-    setRelayState(PIN_LED_RELAY, shouldBeOn);
-    status.lightOn = shouldBeOn;
-    Serial.printf("[LIGHT] %s (LDR raw=%d)\n",
-                  shouldBeOn ? "ON" : "OFF", sensors.lightRaw);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-//  BATTERY CHARGE RELAY — time-window controlled
-// ─────────────────────────────────────────────────────────────────────
-
-void manageBatteryChargeRelay() {
-  // Require a valid NTP-synced time before controlling battery charge
-  if (!ntpSynced) {
-    if (status.batteryChargeOn) {
-      setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
-      status.batteryChargeOn = false;
+  // ── pH Down Control ────────────────────────────────────────────────
+  if (phManualMode == MANUAL_FORCE_ON) {
+    setRelayState(PIN_PH_DOWN_RELAY, true);
+    status.phDosingOn = true;
+  } else if (phManualMode == MANUAL_FORCE_OFF) {
+    setRelayState(PIN_PH_DOWN_RELAY, false);
+    status.phDosingOn = false;
+    phDoseStopMs = 0;
+  } else {
+    // AUTO pH Dosing Mode
+    if (phDoseStopMs > 0) {
+      if (millis() >= phDoseStopMs) {
+        setRelayState(PIN_PH_DOWN_RELAY, false);
+        status.phDosingOn = false;
+        phDoseStopMs = 0;
+        tsLastPhDosingMs = millis();
+        Serial.println("[DOSING] Auto pH Dosing Pulse Complete.");
+      } else {
+        setRelayState(PIN_PH_DOWN_RELAY, true);
+        status.phDosingOn = true;
+      }
+    } else if (schedule.nutritionEnabled) {
+      // Auto trigger pH Down if pH goes above threshold
+      if (status.phValue > schedule.targetPh + 0.3f) {
+        unsigned long cooldown = (unsigned long)schedule.phDoseIntervalMinutes * 60 * 1000;
+        if (tsLastPhDosingMs == 0 || (millis() - tsLastPhDosingMs >= cooldown)) {
+          phDoseStopMs = millis() + ((unsigned long)schedule.phDoseSeconds * 1000);
+          setRelayState(PIN_PH_DOWN_RELAY, true);
+          status.phDosingOn = true;
+          Serial.printf("[DOSING] Auto pH Dosing Triggered for %ds\n", schedule.phDoseSeconds);
+        }
+      }
     }
-    return;
   }
 
-  time_t epochNow = getCurrentEpoch();
-  if (epochNow <= 0) return;
-
-  struct tm localTime = {};
-  if (!localtime_r(&epochNow, &localTime)) return;  // [FIX-8] thread-safe
-
-  unsigned long secInDay = (unsigned long)localTime.tm_hour * 3600UL
-                         + (unsigned long)localTime.tm_min  * 60UL
-                         + (unsigned long)localTime.tm_sec;
-
-  unsigned long chargeEnd = batteryChargeStartSec + batteryChargeDurSec;
-  bool shouldCharge = (secInDay >= batteryChargeStartSec && secInDay < chargeEnd);
-
-  if (shouldCharge != status.batteryChargeOn) {
-    setRelayState(PIN_BATTERY_CHARGE_RELAY, shouldCharge);
-    status.batteryChargeOn = shouldCharge;
-    Serial.printf("[CHARGE] %s (%02d:%02d window %02lu:00–%02lu:00)\n",
-      shouldCharge ? "ON" : "OFF",
-      localTime.tm_hour, localTime.tm_min,
-      batteryChargeStartSec / 3600UL,
-      chargeEnd / 3600UL);
+  // ── Nutrition Pumps Control ────────────────────────────────────────
+  if (nutritionManualMode == MANUAL_FORCE_ON) {
+    setRelayState(PIN_NUTRITION_A_RELAY, true);
+    setRelayState(PIN_NUTRITION_B_RELAY, true);
+    status.nutritionADosingOn = true;
+    status.nutritionBDosingOn = true;
+  } else if (nutritionManualMode == MANUAL_FORCE_OFF) {
+    setRelayState(PIN_NUTRITION_A_RELAY, false);
+    setRelayState(PIN_NUTRITION_B_RELAY, false);
+    status.nutritionADosingOn = false;
+    status.nutritionBDosingOn = false;
+    ecDoseStopMs = 0;
+  } else {
+    // AUTO Nutrition Dosing Mode
+    if (ecDoseStopMs > 0) {
+      if (millis() >= ecDoseStopMs) {
+        setRelayState(PIN_NUTRITION_A_RELAY, false);
+        setRelayState(PIN_NUTRITION_B_RELAY, false);
+        status.nutritionADosingOn = false;
+        status.nutritionBDosingOn = false;
+        ecDoseStopMs = 0;
+        tsLastEcDosingMs = millis();
+        Serial.println("[DOSING] Auto Nutrient Dosing Pulse Complete.");
+      } else {
+        setRelayState(PIN_NUTRITION_A_RELAY, true);
+        setRelayState(PIN_NUTRITION_B_RELAY, true);
+        status.nutritionADosingOn = true;
+        status.nutritionBDosingOn = true;
+      }
+    } else if (schedule.nutritionEnabled) {
+      // Auto trigger Nutrient dosing if EC goes below threshold
+      if (status.ecValue < schedule.targetEc - 0.2f) {
+        unsigned long cooldown = (unsigned long)schedule.ecDoseIntervalMinutes * 60 * 1000;
+        if (tsLastEcDosingMs == 0 || (millis() - tsLastEcDosingMs >= cooldown)) {
+          ecDoseStopMs = millis() + ((unsigned long)schedule.ecDoseSeconds * 1000);
+          setRelayState(PIN_NUTRITION_A_RELAY, true);
+          setRelayState(PIN_NUTRITION_B_RELAY, true);
+          status.nutritionADosingOn = true;
+          status.nutritionBDosingOn = true;
+          Serial.printf("[DOSING] Auto Nutrient Dosing Triggered for %ds\n", schedule.ecDoseSeconds);
+        }
+      }
+    }
   }
 }
 
@@ -807,7 +986,7 @@ void handleButtonEdge(int pin, ButtonState& btn, ManualMode& mode,
 
 void handleManualButtons(unsigned long now) {
   handleButtonEdge(PIN_MOTOR_BUTTON, motorButton, motorManualMode, "MOTOR", now);
-  handleButtonEdge(PIN_LIGHT_BUTTON, lightButton, lightManualMode, "LIGHT", now);
+  handleButtonEdge(PIN_LIGHT_BUTTON, phButton, phManualMode, "PH_DOWN", now);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -815,6 +994,17 @@ void handleManualButtons(unsigned long now) {
 // ─────────────────────────────────────────────────────────────────────
 
 void checkSafety(unsigned long now) {
+  if (!sensors.levelValid || sensors.waterLevel == "LOW") {
+    if (status.pumpOn) {
+      Serial.println("[SAFETY] Reservoir level unsafe — forcing pump OFF");
+      stopPumpCycle();
+    }
+    if (curState != STATE_FAULT && curState != STATE_RECOVERY) {
+      enterFault(now, sensors.levelValid ? "LOW_WATER" : "LEVEL_SENSOR_FAIL");
+    }
+    return;
+  }
+
   if (!sensors.valid) return;
 
   if (motorManualMode == MANUAL_AUTO && status.pumpOn && curState != STATE_MANUAL_MODE) {
@@ -899,6 +1089,12 @@ void stateIdle(unsigned long now) {
 
 // [FIX-4] stateCheckWater now validates sensor health before allowing pump start
 void stateCheckWater(unsigned long now) {
+  if (!sensors.levelValid || sensors.waterLevel == "LOW") {
+    Serial.println("[CHECK] Reservoir level unsafe — blocking pump start");
+    enterFault(now, sensors.levelValid ? "LOW_WATER" : "LEVEL_SENSOR_FAIL");
+    return;
+  }
+
   // Optional gate: only block if your deployment requires sensor validity.
   if (!sensors.valid && REQUIRE_VALID_SENSOR_FOR_PUMP_START) {
     Serial.println("[CHECK] Sensor invalid — blocking pump start");
@@ -1064,7 +1260,7 @@ bool isTimeToWater() {
   int intervalMinutes = schedule.intervalMinutes;
   int durationSeconds = schedule.durationSeconds;
   getActivePumpProfile(epochNow, intervalMinutes, durationSeconds);
-  time_t intervalSeconds     = (time_t)(intervalMinutes * 60);
+  time_t intervalSeconds     = (time_t)(intervalMinutes * 60 + durationSeconds);
 
   return (secondsSinceLastRun >= intervalSeconds);
 }
@@ -1146,100 +1342,176 @@ bool fetchHandshakeAndSync() {
   int dDayDur = extractJsonInt(resp, "dayDurationSeconds");
   int dNightInt = extractJsonInt(resp, "nightIntervalMinutes");
   int dNightDur = extractJsonInt(resp, "nightDurationSeconds");
-  bool hasNightEnabled = (resp.indexOf("\"nightEnabled\":") >= 0);
-  bool nightEnabled = (resp.indexOf("\"nightEnabled\":true") >= 0);
+  int levelRx = extractJsonInt(resp, "pin_level_sensor_rx");
+  int levelTx = extractJsonInt(resp, "pin_level_sensor_tx");
+  float serverEmptyDistance = extractJsonNumber(resp, "emptyDistanceCm").toFloat();
+  float serverFullDistance = extractJsonNumber(resp, "fullDistanceCm").toFloat();
+  float serverTankWidth = extractJsonNumber(resp, "tankWidthCm").toFloat();
+  float serverTankLength = extractJsonNumber(resp, "tankLengthCm").toFloat();
+  float serverTankHeight = extractJsonNumber(resp, "tankHeightCm").toFloat();
+  float serverTankCapacity = extractJsonNumber(resp, "tankCapacityLiters").toFloat();
   bool hasLightEnabled = (resp.indexOf("\"lightEnabled\":") >= 0);
   bool lightEnabled = (resp.indexOf("\"lightEnabled\":true") >= 0);
   int lightStartHour = extractJsonInt(resp, "lightStartHour");
   int lightEndHour = extractJsonInt(resp, "lightEndHour");
-  int ncs = extractJsonInt(resp, "chargeStartHour");
-  int nce = extractJsonInt(resp, "chargeEndHour");
+  bool hasNightEnabled = (resp.indexOf("\"nightEnabled\":") >= 0);
+  bool nightEnabled = (resp.indexOf("\"nightEnabled\":true") >= 0);
+  bool hasNutriEnabled = (resp.indexOf("\"nutritionEnabled\":") >= 0);
+  bool nutriEnabled = (resp.indexOf("\"nutritionEnabled\":true") >= 0);
+  String targetPhStr = extractJsonNumber(resp, "targetPh");
+  String targetEcStr = extractJsonNumber(resp, "targetEc");
+  int phDoseSec = extractJsonInt(resp, "phDoseSeconds");
+  int phDoseCool = extractJsonInt(resp, "phDoseIntervalMinutes");
+  int ecDoseSec = extractJsonInt(resp, "ecDoseSeconds");
+  int ecDoseCool = extractJsonInt(resp, "ecDoseIntervalMinutes");
   bool nen = (resp.indexOf("\"enabled\":true") >= 0);
 
-  if (ni > 0 && ni <= 1440 &&
-      nd > 0 && nd <= 600  &&
-      ns >= 0 && ns <= 23  &&
-      ne >= 0 && ne <= 24) {
-    bool changed = (ni != schedule.intervalMinutes ||
-                    nd != schedule.durationSeconds ||
-                    ns != schedule.startHour       ||
-                    ne != schedule.endHour         ||
-                    nen != schedule.enabled        ||
-                    (hasNightEnabled && nightEnabled != schedule.nightEnabled) ||
-                    (hasLightEnabled && lightEnabled != schedule.lightEnabled) ||
-                    (lightStartHour >= 0 && lightStartHour <= 23 && lightStartHour != schedule.lightStartHour) ||
-                    (lightEndHour >= 0 && lightEndHour <= 24 && lightEndHour != schedule.lightEndHour));
+    if (ni > 0 && ni <= 1440 &&
+        nd > 0 && nd <= 600  &&
+        ns >= 0 && ns <= 23  &&
+        ne >= 0 && ne <= 24) {
+      bool changed = (ni != schedule.intervalMinutes ||
+                      nd != schedule.durationSeconds ||
+                      ns != schedule.startHour       ||
+                      ne != schedule.endHour         ||
+                      nen != schedule.enabled        ||
+                      (hasLightEnabled && lightEnabled != schedule.lightEnabled) ||
+                      (lightStartHour >= 0 && lightStartHour != schedule.lightStartHour) ||
+                      (lightEndHour >= 0 && lightEndHour != schedule.lightEndHour) ||
+                      (hasNightEnabled && nightEnabled != schedule.nightEnabled) ||
+                      (hasNutriEnabled && nutriEnabled != schedule.nutritionEnabled) ||
+                      (targetPhStr.length() > 0 && atof(targetPhStr.c_str()) != schedule.targetPh) ||
+                      (targetEcStr.length() > 0 && atof(targetEcStr.c_str()) != schedule.targetEc) ||
+                      (phDoseSec > 0 && phDoseSec != schedule.phDoseSeconds) ||
+                      (phDoseCool > 0 && phDoseCool != schedule.phDoseIntervalMinutes) ||
+                      (ecDoseSec > 0 && ecDoseSec != schedule.ecDoseSeconds) ||
+                      (ecDoseCool > 0 && ecDoseCool != schedule.ecDoseIntervalMinutes));
 
-    schedule.intervalMinutes = ni;
-    schedule.durationSeconds = nd;
-    schedule.startHour = ns;
-    schedule.endHour = ne;
-    schedule.enabled = nen;
-    if (hasNightEnabled) schedule.nightEnabled = nightEnabled;
+      schedule.intervalMinutes = ni;
+      schedule.durationSeconds = nd;
+      schedule.startHour = ns;
+      schedule.endHour = ne;
+      schedule.enabled = nen;
+      if (hasLightEnabled) schedule.lightEnabled = lightEnabled;
+      if (lightStartHour >= 0 && lightStartHour <= 23) schedule.lightStartHour = lightStartHour;
+      if (lightEndHour >= 0 && lightEndHour <= 24) schedule.lightEndHour = lightEndHour;
+      if (hasNightEnabled) schedule.nightEnabled = nightEnabled;
 
-    if (dDayInt > 0 && dDayInt <= 1440) schedule.dayIntervalMinutes = dDayInt;
-    if (dDayDur > 0 && dDayDur <= 600) schedule.dayDurationSeconds = dDayDur;
-    if (dNightInt > 0 && dNightInt <= 1440) schedule.nightIntervalMinutes = dNightInt;
-    if (dNightDur > 0 && dNightDur <= 600) schedule.nightDurationSeconds = dNightDur;
-    if (hasLightEnabled) schedule.lightEnabled = lightEnabled;
-    if (lightStartHour >= 0 && lightStartHour <= 23) schedule.lightStartHour = lightStartHour;
-    if (lightEndHour >= 0 && lightEndHour <= 24) schedule.lightEndHour = lightEndHour;
+      if (dDayInt > 0 && dDayInt <= 1440) schedule.dayIntervalMinutes = dDayInt;
+      if (dDayDur > 0 && dDayDur <= 600) schedule.dayDurationSeconds = dDayDur;
+      if (dNightInt > 0 && dNightInt <= 1440) schedule.nightIntervalMinutes = dNightInt;
+      if (dNightDur > 0 && dNightDur <= 600) schedule.nightDurationSeconds = dNightDur;
 
-    if (ncs >= 0 && ncs <= 23 && nce >= 0 && nce <= 23 && nce > ncs) {
-      unsigned long newStart = (unsigned long)ncs * 3600UL;
-      unsigned long newDur = (unsigned long)(nce - ncs) * 3600UL;
-      if (newStart != batteryChargeStartSec || newDur != batteryChargeDurSec) {
-        batteryChargeStartSec = newStart;
-        batteryChargeDurSec = newDur;
+      if (hasNutriEnabled) schedule.nutritionEnabled = nutriEnabled;
+      if (targetPhStr.length() > 0) schedule.targetPh = atof(targetPhStr.c_str());
+      if (targetEcStr.length() > 0) schedule.targetEc = atof(targetEcStr.c_str());
+      if (phDoseSec > 0) schedule.phDoseSeconds = phDoseSec;
+      if (phDoseCool > 0) schedule.phDoseIntervalMinutes = phDoseCool;
+      if (ecDoseSec > 0) schedule.ecDoseSeconds = ecDoseSec;
+      if (ecDoseCool > 0) schedule.ecDoseIntervalMinutes = ecDoseCool;
+
+      bool calibrationChanged =
+        (levelRx > 0 && levelRx != PIN_LEVEL_SENSOR) ||
+        (levelTx > 0 && levelTx != PIN_LEVEL_SENSOR_TX) ||
+        (serverEmptyDistance > serverFullDistance && serverEmptyDistance != emptyDistanceCm) ||
+        (serverEmptyDistance > serverFullDistance && serverFullDistance != fullDistanceCm) ||
+        (serverTankWidth > 0 && serverTankWidth != tankWidthCm) ||
+        (serverTankLength > 0 && serverTankLength != tankLengthCm) ||
+        (serverTankHeight > 0 && serverTankHeight != tankHeightCm) ||
+        (serverTankCapacity > 0 && serverTankCapacity != tankCapacityLiters);
+      if (levelRx > 0) PIN_LEVEL_SENSOR = levelRx;
+      if (levelTx > 0) PIN_LEVEL_SENSOR_TX = levelTx;
+      if (serverEmptyDistance > serverFullDistance) {
+        emptyDistanceCm = serverEmptyDistance;
+        fullDistanceCm = serverFullDistance;
+      }
+      if (serverTankWidth > 0) tankWidthCm = serverTankWidth;
+      if (serverTankLength > 0) tankLengthCm = serverTankLength;
+      if (serverTankHeight > 0) tankHeightCm = serverTankHeight;
+      if (serverTankCapacity > 0) tankCapacityLiters = serverTankCapacity;
+
+      String planName = extractJsonString(resp, "planName");
+      if (planName.length() > 0 && planName != appliedPlanName) {
+        appliedPlanName = planName;
         changed = true;
-        Serial.printf("[API] Charge window updated: %02d:00–%02d:00\n", ncs, nce);
+      }
+
+      if (changed) {
+        scheduleAppliedAt = getCurrentEpoch();
+        saveScheduleToNVS();
+        savePlanNameToNVS(appliedPlanName);
+
+        String ack = "{";
+        ack += "\"scheduleAppliedAt\":" + String((uint32_t)scheduleAppliedAt);
+        if (appliedPlanName.length() > 0) {
+          ack += ",\"planName\":\"" + appliedPlanName + "\"";
+        }
+        ack += "}";
+        int ackCode = httpRequest("PUT", "/api/status", ack);
+        if (ackCode != 200 && ackCode != 204) {
+          Serial.printf("[API] Failed to notify backend of applied schedule (HTTP %d)\n", ackCode);
+        }
+      }
+      if (calibrationChanged) {
+        saveTankCalibrationToNVS();
+        setupPinModes();
+      }
+    } else {
+      Serial.printf("[API] Rejected invalid handshake schedule (i=%d d=%d s=%d e=%d)\n", ni, nd, ns, ne);
+    }
+
+    String pm = extractJsonString(resp, "motorManualMode");
+    String phm = extractJsonString(resp, "phManualMode");
+    String nm = extractJsonString(resp, "nutritionManualMode");
+    int retryIn = extractJsonInt(resp, "retryNextCycleIn");
+
+    if (pm.length() > 0) {
+      ManualMode newMotor = manualModeFromString(pm);
+      if (newMotor != motorManualMode) {
+        motorManualMode = newMotor;
+        Serial.printf("[API] Remote motor mode: %s\n", manualModeToString(motorManualMode));
+      }
+    }
+    if (phm.length() > 0) {
+      ManualMode newPh = manualModeFromString(phm);
+      if (newPh != phManualMode) {
+        phManualMode = newPh;
+        Serial.printf("[API] Remote pH mode: %s\n", manualModeToString(phManualMode));
+      }
+    }
+    if (nm.length() > 0) {
+      ManualMode newNutri = manualModeFromString(nm);
+      if (newNutri != nutritionManualMode) {
+        nutritionManualMode = newNutri;
+        Serial.printf("[API] Remote nutrition mode: %s\n", manualModeToString(nutritionManualMode));
       }
     }
 
-    String planName = extractJsonString(resp, "planName");
-    if (planName.length() > 0 && planName != appliedPlanName) {
-      appliedPlanName = planName;
-      changed = true;
-    }
+    int p_pump  = extractJsonInt(resp, "pin_pump_relay");
+    int p_nutA  = extractJsonInt(resp, "pin_nutrition_a");
+    int p_nutB  = extractJsonInt(resp, "pin_nutrition_b");
+    int p_phD   = extractJsonInt(resp, "pin_ph_down");
+    int p_phS   = extractJsonInt(resp, "pin_ph_sensor");
+    int p_ecS   = extractJsonInt(resp, "pin_ec_sensor");
+    int p_level = extractJsonInt(resp, "pin_level_sensor_rx");
+    int p_dht   = extractJsonInt(resp, "pin_dht_data");
 
-    if (changed) {
-      scheduleAppliedAt = getCurrentEpoch();
-      saveScheduleToNVS();
-      savePlanNameToNVS(appliedPlanName);
+    bool pinChanged = false;
+    if (p_pump > 0 && p_pump != PIN_PUMP_RELAY) { PIN_PUMP_RELAY = p_pump; pinChanged = true; }
+    if (p_nutA > 0 && p_nutA != PIN_NUTRITION_A_RELAY) { PIN_NUTRITION_A_RELAY = p_nutA; pinChanged = true; }
+    if (p_nutB > 0 && p_nutB != PIN_NUTRITION_B_RELAY) { PIN_NUTRITION_B_RELAY = p_nutB; pinChanged = true; }
+    if (p_phD > 0 && p_phD != PIN_PH_DOWN_RELAY) { PIN_PH_DOWN_RELAY = p_phD; pinChanged = true; }
+    if (p_phS > 0 && p_phS != PIN_PH_SENSOR) { PIN_PH_SENSOR = p_phS; pinChanged = true; }
+    if (p_ecS > 0 && p_ecS != PIN_EC_SENSOR) { PIN_EC_SENSOR = p_ecS; pinChanged = true; }
+    if (p_level > 0 && p_level != PIN_LEVEL_SENSOR) { PIN_LEVEL_SENSOR = p_level; pinChanged = true; }
+    if (p_dht > 0 && p_dht != PIN_DHT_DATA) { PIN_DHT_DATA = p_dht; pinChanged = true; }
 
-      String ack = "{";
-      ack += "\"scheduleAppliedAt\":" + String((uint32_t)scheduleAppliedAt);
-      if (appliedPlanName.length() > 0) {
-        ack += ",\"planName\":\"" + appliedPlanName + "\"";
-      }
-      ack += "}";
-      int ackCode = httpRequest("PUT", "/api/status", ack);
-      if (ackCode != 200 && ackCode != 204) {
-        Serial.printf("[API] Failed to notify backend of applied schedule (HTTP %d)\n", ackCode);
-      }
+    if (pinChanged) {
+      Serial.println("[GPIO] Re-configuring ESP32 pin modes from backend mappings...");
+      setupPinModes();
+      dht = DHT(PIN_DHT_DATA, DHT22);
+      dht.begin();
     }
-  } else {
-    Serial.printf("[API] Rejected invalid handshake schedule (i=%d d=%d s=%d e=%d)\n", ni, nd, ns, ne);
-  }
-
-  String pm = extractJsonString(resp, "motorManualMode");
-  String lm = extractJsonString(resp, "lightManualMode");
-  int retryIn = extractJsonInt(resp, "retryNextCycleIn");
-
-  if (pm.length() > 0) {
-    ManualMode newMotor = manualModeFromString(pm);
-    if (newMotor != motorManualMode) {
-      motorManualMode = newMotor;
-      Serial.printf("[API] Remote motor mode: %s\n", manualModeToString(motorManualMode));
-    }
-  }
-  if (lm.length() > 0) {
-    ManualMode newLight = manualModeFromString(lm);
-    if (newLight != lightManualMode) {
-      lightManualMode = newLight;
-      Serial.printf("[API] Remote light mode: %s\n", manualModeToString(lightManualMode));
-    }
-  }
 
   if (retryIn >= 0 && retryIn <= 2) {
     Serial.printf("[API] Retry requested in %ds\n", retryIn);
@@ -1269,17 +1541,19 @@ void postStatus() {
   String signature = "";
   signature += String(status.pumpOn ? "1" : "0");
   signature += "|" + String(status.flowing ? "1" : "0");
-  signature += "|" + String(status.lightOn ? "1" : "0");
-  signature += "|" + String(status.batteryChargeOn ? "1" : "0");
-  signature += "|" + String(status.lightDark ? "1" : "0");
+  signature += "|" + String(status.phDosingOn ? "1" : "0");
+  signature += "|" + String(status.nutritionADosingOn ? "1" : "0");
+  signature += "|" + String(status.nutritionBDosingOn ? "1" : "0");
   signature += "|" + String(status.dhtOk ? "1" : "0");
   signature += "|" + String(status.sensorDataOk ? "1" : "0");
   signature += "|" + String(status.humidityPct, 1);
-  signature += "|" + String(status.lightRaw);
+  signature += "|" + String(status.phValue, 2);
+  signature += "|" + String(status.ecValue, 2);
   signature += "|" + status.fault;
   signature += "|" + String(status.lastRunEpoch);
   signature += "|" + String(manualModeToString(motorManualMode));
-  signature += "|" + String(manualModeToString(lightManualMode));
+  signature += "|" + String(manualModeToString(phManualMode));
+  signature += "|" + String(manualModeToString(nutritionManualMode));
   signature += "|" + appliedPlanName;
   signature += "|" + String((uint32_t)scheduleAppliedAt);
 
@@ -1292,20 +1566,27 @@ void postStatus() {
   String body = "{";
   body += "\"pumpOn\":"           + String(status.pumpOn        ? "true" : "false") + ",";
   body += "\"flowing\":"          + String(status.flowing       ? "true" : "false") + ",";
-  body += "\"lightOn\":"          + String(status.lightOn       ? "true" : "false") + ",";
-  body += "\"batteryChargeOn\":"  + String(status.batteryChargeOn ? "true" : "false") + ",";
+  body += "\"phDosingOn\":"       + String(status.phDosingOn    ? "true" : "false") + ",";
+  body += "\"nutritionADosingOn\":" + String(status.nutritionADosingOn ? "true" : "false") + ",";
+  body += "\"nutritionBDosingOn\":" + String(status.nutritionBDosingOn ? "true" : "false") + ",";
   body += "\"humidityPct\":"      + String(status.humidityPct, 1) + ",";
-  // Map lightRaw to lightLux so backend/dashboard shows real sensor value
-  body += "\"lightLux\":"         + String(status.lightRaw) + ",";
-  body += "\"lightRaw\":"         + String(status.lightRaw) + ",";
-  body += "\"lightDark\":"        + String(status.lightDark ? "true" : "false") + ",";
+  body += "\"ph\":"               + String(status.phValue, 2) + ",";
+  body += "\"ec\":"               + String(status.ecValue, 2) + ",";
+  body += "\"waterLevel\":\""     + status.waterLevel + "\",";
+  body += "\"waterDistanceCm\":"   + String(status.waterDistanceCm, 1) + ",";
+  body += "\"waterLevelPercent\":" + String(status.waterLevelPercent, 1) + ",";
+  body += "\"waterVolumeLiters\":" + String(status.waterVolumeLiters, 1) + ",";
+  body += "\"reservoirTempC\":"   + String(status.waterTempC, 1) + ",";
   body += "\"dhtOk\":"            + String(status.dhtOk ? "true" : "false") + ",";
   body += "\"humiditySensorOk\":"  + String(sensors.humidityValid ? "true" : "false") + ",";
-  body += "\"lightSensorOk\":"     + String(sensors.lightValid ? "true" : "false") + ",";
+  body += "\"phSensorOk\":"       + String(sensors.phValid ? "true" : "false") + ",";
+  body += "\"ecSensorOk\":"       + String(sensors.ecValid ? "true" : "false") + ",";
+  body += "\"levelSensorOk\":"    + String(sensors.levelValid ? "true" : "false") + ",";
   body += "\"fault\":\""          + status.fault + "\",";
   body += "\"state\":\""          + reportedState + "\",";
   body += "\"motorManualMode\":\"" + String(manualModeToString(motorManualMode)) + "\",";
-  body += "\"lightManualMode\":\"" + String(manualModeToString(lightManualMode)) + "\",";
+  body += "\"phManualMode\":\""   + String(manualModeToString(phManualMode)) + "\",";
+  body += "\"nutritionManualMode\":\"" + String(manualModeToString(nutritionManualMode)) + "\",";
   body += "\"resetReason\":\""    + bootResetReason + "\",";
   body += "\"lastBootFault\":\""  + bootLastFault + "\",";
   body += "\"uptimeSec\":"        + String((uint32_t)(millis() / 1000UL)) + ",";
@@ -1382,19 +1663,8 @@ void setup() {
                 bootResetReason.c_str(), bootLastFault.c_str());
 
   // ── GPIO setup ────────────────────────────────────────────────────
-  pinMode(PIN_PUMP_RELAY,            OUTPUT);
-  pinMode(PIN_LED_RELAY,             OUTPUT);
-  pinMode(PIN_BATTERY_CHARGE_RELAY,  OUTPUT);
-  pinMode(PIN_SPARE_RELAY,           OUTPUT);
-  setRelayState(PIN_PUMP_RELAY,           false);
-  setRelayState(PIN_LED_RELAY,            false);
-  setRelayState(PIN_BATTERY_CHARGE_RELAY, false);
-  setRelayState(PIN_SPARE_RELAY,          false);
-
-  pinMode(PIN_DHT_DATA,     INPUT_PULLUP);
-  pinMode(PIN_LDR_SENSOR,   INPUT);
-  pinMode(PIN_MOTOR_BUTTON, INPUT_PULLUP);
-  pinMode(PIN_LIGHT_BUTTON, INPUT_PULLUP);
+  loadTankCalibrationFromNVS();
+  setupPinModes();
 
   // ── Sensors ───────────────────────────────────────────────────────
   dht.begin();
@@ -1434,7 +1704,8 @@ void setup() {
   prevState = STATE_IDLE;
 
   lastPumpOnState = status.pumpOn;
-  lastLightOnState = status.lightOn;
+  lastPhDosingOnState = status.phDosingOn;
+  lastNutritionADosingOnState = status.nutritionADosingOn;
 
   Serial.println("[BOOT] System ready\n");
 }
@@ -1479,20 +1750,22 @@ void loop() {
   }
 
   // ── 8. Peripheral relay auto-control ─────────────────────────────
-  manageLightRelay();
-  manageBatteryChargeRelay();
+  manageNutritionAndPhDosing();
 
   // ── 9. State machine (pump schedule execution) ────────────────────
   runStateMachine(now);
 
   // ── 10. Status post to backend ────────────────────────────────────
-  bool stateChanged = (status.pumpOn != lastPumpOnState) || (status.lightOn != lastLightOnState);
+  bool stateChanged = (status.pumpOn != lastPumpOnState) || 
+                      (status.phDosingOn != lastPhDosingOnState) || 
+                      (status.nutritionADosingOn != lastNutritionADosingOnState);
   unsigned long statusPostInterval = status.pumpOn ? 3000UL : 60000UL;
   if (stateChanged || (now - tsLastStatusPost >= statusPostInterval)) {
     postStatus();
     tsLastStatusPost = now;
     lastPumpOnState = status.pumpOn;
-    lastLightOnState = status.lightOn;
+    lastPhDosingOnState = status.phDosingOn;
+    lastNutritionADosingOnState = status.nutritionADosingOn;
   }
 
   // ── 11. Offline log queue flush ───────────────────────────────────

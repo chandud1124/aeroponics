@@ -7,12 +7,21 @@ import {
   PUMP_STATE_LABELS,
   PUMP_STATE_COLORS,
   defaultSchedule,
+  defaultGpioMappings,
   type AnalyticsSummary,
   type LiveStatus,
   type ManualReading,
   type PumpLogEntry,
   type Schedule,
   type SensorSnapshot,
+  type NftChannel,
+  type GpioMapping,
+  type HarvestHistoryEntry,
+  type NftCropEntry,
+  calculateVpd,
+  compensateEc,
+  type CameraSettings,
+  type CameraSnapshot,
 } from "./tower-shared";
 import { supabaseAdmin } from "../integrations/supabase/client.server";
 
@@ -38,9 +47,70 @@ const DEFAULT_SCHEDULE: Schedule = defaultSchedule;
 const DATA_DIR = process.env.TOWER_DATA_DIR ?? path.join(os.homedir(), ".smart-tower-garden");
 const SCHEDULE_FILE = process.env.TOWER_SCHEDULE_FILE ?? path.join(DATA_DIR, "schedule.json");
 const STATE_FILE = process.env.TOWER_STATE_FILE ?? path.join(DATA_DIR, "tower-state.json");
+const NFT_CHANNELS_FILE = process.env.TOWER_NFT_CHANNELS_FILE ?? path.join(DATA_DIR, "nft-channels.json");
+const GPIO_MAPPINGS_FILE = process.env.TOWER_GPIO_MAPPINGS_FILE ?? path.join(DATA_DIR, "gpio-mappings.json");
+const HARVEST_HISTORY_FILE = process.env.TOWER_HARVEST_HISTORY_FILE ?? path.join(DATA_DIR, "harvest-history.json");
 const EVENTS_TABLE = "tower_events";
 
 const HAS_SUPABASE_EVENTS = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+let nftChannels: NftChannel[] = [];
+let gpioMappings: GpioMapping[] = [];
+
+const DEFAULT_NFT_CHANNELS: NftChannel[] = [
+  { id: "channel-1", name: "NFT Channel 1", qrCode: "channel-1", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" },
+  { id: "channel-2", name: "NFT Channel 2", qrCode: "channel-2", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" },
+  { id: "channel-3", name: "NFT Channel 3", qrCode: "channel-3", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" },
+  { id: "channel-4", name: "NFT Channel 4", qrCode: "channel-4", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty" }
+];
+
+function loadNftChannelsFromDisk(): NftChannel[] {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(NFT_CHANNELS_FILE)) {
+      const raw = fs.readFileSync(NFT_CHANNELS_FILE, "utf8");
+      return JSON.parse(raw) as NftChannel[];
+    }
+  } catch (error) {
+    console.error("Failed to load NFT channels from disk:", error);
+  }
+  return [...DEFAULT_NFT_CHANNELS];
+}
+
+function saveNftChannelsToDisk(channels: NftChannel[]) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(NFT_CHANNELS_FILE, JSON.stringify(channels, null, 2), "utf8");
+  } catch (error) {
+    console.error("Failed to save NFT channels to disk:", error);
+  }
+}
+
+function loadGpioMappingsFromDisk(): GpioMapping[] {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(GPIO_MAPPINGS_FILE)) {
+      const raw = fs.readFileSync(GPIO_MAPPINGS_FILE, "utf8");
+      return JSON.parse(raw) as GpioMapping[];
+    }
+  } catch (error) {
+    console.error("Failed to load GPIO mappings from disk:", error);
+  }
+  return [...defaultGpioMappings];
+}
+
+function saveGpioMappingsToDisk(mappings: GpioMapping[]) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(GPIO_MAPPINGS_FILE, JSON.stringify(mappings, null, 2), "utf8");
+  } catch (error) {
+    console.error("Failed to save GPIO mappings to disk:", error);
+  }
+}
+
+// Initial NVS load equivalent on backend boot
+nftChannels = loadNftChannelsFromDisk();
+gpioMappings = loadGpioMappingsFromDisk();
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -78,6 +148,9 @@ type PersistedTowerState = {
   readings?: ManualReading[];
   pumpLogs?: PumpLog[];
   faultHistory?: Array<{ timestamp: number; fault: string; resolved?: number }>;
+  geminiApiKey?: string;
+  cameraSettings?: CameraSettings;
+  cameraSnapshots?: CameraSnapshot[];
 };
 
 type TowerEventType =
@@ -126,11 +199,19 @@ function loadStateFromDisk() {
     if (Array.isArray(parsed.faultHistory)) {
       faultHistory = parsed.faultHistory;
     }
+    if (parsed.geminiApiKey) {
+      geminiApiKey = parsed.geminiApiKey;
+    }
+    if (parsed.cameraSettings) {
+      cameraSettings = { ...cameraSettings, ...parsed.cameraSettings };
+    }
+    if (Array.isArray(parsed.cameraSnapshots)) {
+      cameraSnapshots = parsed.cameraSnapshots;
+    }
   } catch (error) {
     console.error("Failed to load tower state from disk:", error);
   }
 }
-
 function saveStateToDisk() {
   try {
     ensureDataDir();
@@ -141,11 +222,46 @@ function saveStateToDisk() {
       readings,
       pumpLogs,
       faultHistory,
+      geminiApiKey,
+      cameraSettings,
+      cameraSnapshots,
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(nextState, null, 2), "utf8");
   } catch (error) {
     console.error("Failed to save tower state to disk:", error);
   }
+}
+
+let geminiApiKey: string = "";
+
+export function getGeminiApiKey(): string {
+  return geminiApiKey;
+}
+
+export function saveGeminiApiKey(key: string) {
+  geminiApiKey = key.trim();
+  saveStateToDisk();
+}
+
+let cameraSettings: CameraSettings = { rtspUrl: "", ezvizAppKey: "", ezvizAppSecret: "", autoCapture: false };
+let cameraSnapshots: CameraSnapshot[] = [];
+
+export function getCameraSettings() {
+  return cameraSettings;
+}
+
+export function saveCameraSettings(newSettings: Partial<CameraSettings>) {
+  cameraSettings = { ...cameraSettings, ...newSettings };
+  saveStateToDisk();
+}
+
+export function getCameraSnapshots() {
+  return cameraSnapshots;
+}
+
+export function addCameraSnapshot(snap: CameraSnapshot) {
+  cameraSnapshots = [snap, ...cameraSnapshots].slice(0, 100);
+  saveStateToDisk();
 }
 
 function getSupabaseAdminClient() {
@@ -370,18 +486,7 @@ function getLatestSensorSnapshot(deviceId?: string | null) {
   return sensorHistory.find((snapshot) => !resolvedDeviceId || snapshot.deviceId === resolvedDeviceId) ?? null;
 }
 
-/**
- * Determines if grow light should be on based on schedule
- * Light is on during active hours (startHour to endHour) if enabled
- */
-function shouldLightBeOnBySchedule(now = new Date(), deviceId?: string | null): boolean {
-  if (!schedule.lightEnabled) return false;
-  if (!schedule.enabled) return false;
-  const hour = getIstHour(now);
-  const lightStartHour = schedule.lightStartHour ?? schedule.startHour;
-  const lightEndHour = schedule.lightEndHour ?? schedule.endHour;
-  return hour >= lightStartHour && hour < lightEndHour;
-}
+
 
 export function getCycleProfile(now = new Date()) {
   const mode = getModeForNow(now);
@@ -405,17 +510,22 @@ export function getCycleProfile(now = new Date()) {
 }
 
 function pushSensorSnapshot(nextStatus: LiveStatus) {
+  const compEc = compensateEc(nextStatus.ec, nextStatus.reservoirTempC);
+  const calcVpd = calculateVpd(nextStatus.towerTempC, nextStatus.humidityPct);
+
   const nextSnapshot = {
     id: makeId(),
     deviceId: nextStatus.deviceId ?? DEFAULT_DEVICE_ID,
     timestamp: Date.now(),
     reservoirTempC: nextStatus.reservoirTempC,
+    ph: nextStatus.ph ?? null,
+    ec: compEc,
+    waterLevel: nextStatus.waterLevel ?? null,
     humidityPct: nextStatus.humidityPct ?? null,
-    lightLux: nextStatus.lightLux ?? null,
     towerTempC: nextStatus.towerTempC,
     pumpState: nextStatus.pumpState,
     fault: nextStatus.fault,
-    lightOn: nextStatus.lightOn ?? false,
+    vpd: calcVpd,
   };
 
   sensorHistory = [
@@ -508,14 +618,18 @@ function createBaseStatus(now = new Date(), deviceId?: string): LiveStatus {
     flowing: false,
     pumpState: PumpState.IDLE,
     motorManualMode: "AUTO",
-    lightManualMode: "AUTO",
-    batteryManualMode: "AUTO",
+    phManualMode: "AUTO",
+    nutritionManualMode: "AUTO",
+    phDosingOn: false,
+    nutritionADosingOn: false,
+    nutritionBDosingOn: false,
+    ph: null,
+    ec: null,
+    waterLevel: "FULL",
     reservoirTempC: null,
     humidityPct: null,
-    lightLux: null,
     towerTempC: null,
     flowRateLpm: null,
-    lightOn: shouldLightBeOnBySchedule(now, deviceId),
     lastRunISO: null,
     fault: null,
     resetReason: null,
@@ -545,9 +659,7 @@ function syncScheduledState(deviceId?: string | null, now = new Date()) {
   const nightEnabled = isNightModeEnabled();
   const withinScheduledWindow = currentMode === "DAY" || nightEnabled;
 
-  if (nextStatus.lightManualMode === "AUTO") {
-    nextStatus.lightOn = shouldLightBeOnBySchedule(now, resolvedDeviceId);
-  }
+
 
   if (nextStatus.motorManualMode === "AUTO" && schedule.enabled) {
     const withinActiveWindow = withinScheduledWindow;
@@ -733,9 +845,6 @@ export function updateStatus(
   const deviceId = normalizeDeviceId(options.deviceId);
   const currentStatus = ensureDeviceStatus(deviceId);
 
-  // Apply scheduled light logic if lightOn wasn't explicitly set in patch
-  const shouldApplySchedule = patch.lightOn === undefined;
-  const scheduledLightOn = shouldApplySchedule ? shouldLightBeOnBySchedule(new Date(), deviceId) : patch.lightOn;
   const source = options.source ?? "server";
   const telemetryUpdatedAt = source === "esp32" ? Date.now() : currentStatus.telemetryUpdatedAt ?? null;
   const heartbeatUpdatedAt = source === "esp32" ? Date.now() : currentStatus.heartbeatUpdatedAt ?? null;
@@ -749,14 +858,23 @@ export function updateStatus(
       ? currentStatus.lastRunISO ?? new Date().toISOString()
       : currentStatus.lastRunISO;
 
+  const rawEc = patch.ec !== undefined ? patch.ec : currentStatus.ec;
+  const rawTemp = patch.reservoirTempC !== undefined ? patch.reservoirTempC : currentStatus.reservoirTempC;
+  const compEc = compensateEc(rawEc, rawTemp);
+
+  const airTemp = patch.towerTempC !== undefined ? patch.towerTempC : currentStatus.towerTempC;
+  const humidity = patch.humidityPct !== undefined ? patch.humidityPct : currentStatus.humidityPct;
+  const calcVpd = calculateVpd(airTemp, humidity);
+
   const mergedStatus = {
     ...createBaseStatus(new Date(), deviceId),
     ...currentStatus,
     ...patch,
+    ec: compEc,
+    vpd: calcVpd,
     deviceId,
     telemetryUpdatedAt,
     heartbeatUpdatedAt,
-    lightOn: scheduledLightOn,
     lastRunISO: resolvedLastRunISO,
   };
   const isOnline = isFresh(getLatestDeviceSignalAt(mergedStatus));
@@ -1032,6 +1150,94 @@ export function getAnalyticsSummary(days = 7, deviceId?: string | null) {
     estimatedWaterLiters: totalLitersEstimate,
     daily,
   };
+}
+
+export function getNftChannels(): NftChannel[] {
+  return nftChannels;
+}
+
+export function saveNftChannels(channels: NftChannel[]): NftChannel[] {
+  nftChannels = channels;
+  saveNftChannelsToDisk(nftChannels);
+  return nftChannels;
+}
+
+export function plantCrop(channelId: string, cropName: string, notes: string): NftChannel | null {
+  const channel = nftChannels.find((c) => c.id === channelId);
+  if (!channel) return null;
+  channel.cropName = cropName;
+  channel.notes = notes;
+  channel.plantedAt = new Date().toISOString();
+  channel.harvestedAt = null;
+  channel.status = "growing";
+  saveNftChannelsToDisk(nftChannels);
+  return channel;
+}
+
+export function getHarvestHistory(): HarvestHistoryEntry[] {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(HARVEST_HISTORY_FILE)) {
+      const raw = fs.readFileSync(HARVEST_HISTORY_FILE, "utf8");
+      return JSON.parse(raw) as HarvestHistoryEntry[];
+    }
+  } catch (error) {
+    console.error("Failed to load harvest history from disk:", error);
+  }
+  return [];
+}
+
+export function saveHarvestHistory(history: HarvestHistoryEntry[]) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(HARVEST_HISTORY_FILE, JSON.stringify(history, null, 2), "utf8");
+  } catch (error) {
+    console.error("Failed to save harvest history to disk:", error);
+  }
+}
+
+export function harvestCrop(channelId: string, notes: string): NftChannel | null {
+  const channel = nftChannels.find((c) => c.id === channelId);
+  if (!channel) return null;
+
+  // Save crop details into historical log before resetting
+  if (channel.cropName || (channel.crops && channel.crops.length > 0)) {
+    const history = getHarvestHistory();
+    const newEntry: HarvestHistoryEntry = {
+      id: `harv-${Date.now()}`,
+      channelId: channel.id,
+      channelName: channel.name,
+      cropName: channel.cropName || (channel.crops ? channel.crops.map((c) => `${c.cropName} (${c.count})`).join(", ") : ""),
+      crops: channel.crops,
+      plantedAt: channel.plantedAt,
+      harvestedAt: new Date().toISOString(),
+      notes: notes || channel.notes || "Completed harvest cycle.",
+      capacity: channel.capacity,
+      currentCount: channel.currentCount,
+    };
+    history.push(newEntry);
+    saveHarvestHistory(history);
+  }
+
+  channel.harvestedAt = new Date().toISOString();
+  channel.cropName = "";
+  channel.crops = [];
+  channel.plantedAt = null;
+  channel.notes = notes;
+  channel.status = "empty";
+  channel.currentCount = 0;
+  saveNftChannelsToDisk(nftChannels);
+  return channel;
+}
+
+export function getGpioMappings(): GpioMapping[] {
+  return gpioMappings;
+}
+
+export function saveGpioMappings(mappings: GpioMapping[]): GpioMapping[] {
+  gpioMappings = mappings;
+  saveGpioMappingsToDisk(gpioMappings);
+  return gpioMappings;
 }
 
 

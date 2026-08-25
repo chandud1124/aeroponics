@@ -1,7 +1,6 @@
 export {
   FaultAlertBanner,
   FaultHistoryPanel,
-  FlowPipeline,
   LiveCycleHistoryPanel,
   ManualControlPanel,
   NextCyclePanel,

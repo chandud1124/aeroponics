@@ -12,6 +12,9 @@ import type {
   SensorSnapshot,
   PumpLogEntry,
   AnalyticsSummary,
+  NftChannel,
+  GpioMapping,
+  HarvestHistoryEntry,
 } from "./tower-shared";
 
 export {
@@ -28,6 +31,9 @@ export type {
   SensorSnapshot,
   PumpLogEntry,
   AnalyticsSummary,
+  NftChannel,
+  GpioMapping,
+  HarvestHistoryEntry,
 };
 
 export type StatusEnvelope = {
@@ -169,7 +175,7 @@ export async function fetchAnalyticsSummary(days = 7, deviceId?: string | null):
 }
 
 // Admin device management
-export type DeviceListEntry = { id: string; name: string | null; deviceId: string; macAddress?: string | null; ipAddress?: string | null; createdAt: string };
+export type DeviceListEntry = { id: string; name: string | null; deviceId: string; macAddress?: string | null; ipAddress?: string | null; createdAt: string; pins?: GpioMapping[] };
 export type DeviceCreateSuccess = { deviceId: string; secret: string };
 export type DeviceCreateDuplicate = { error: string; existingDevice: DeviceListEntry };
 export type DeviceCreateResult = DeviceCreateSuccess | DeviceCreateDuplicate;
@@ -224,4 +230,56 @@ export async function rotateAdminDeviceSecret(adminPasskey: string, deviceId: st
     method: "POST",
     headers: { "x-admin-passkey": adminPasskey },
   });
+}
+
+export async function fetchNftChannels(): Promise<NftChannel[]> {
+  try {
+    return await requestJson<NftChannel[]>("/api/nft-channels", { method: "GET" });
+  } catch {
+    return [];
+  }
+}
+
+export async function saveNftChannels(channels: NftChannel[]): Promise<NftChannel[]> {
+  return requestJson<NftChannel[]>("/api/nft-channels", {
+    method: "PUT",
+    body: JSON.stringify(channels),
+  });
+}
+
+export async function plantCropRemote(channelId: string, cropName: string, notes: string): Promise<NftChannel> {
+  return requestJson<NftChannel>(`/api/nft-channels/${encodeURIComponent(channelId)}/plant`, {
+    method: "POST",
+    body: JSON.stringify({ cropName, notes }),
+  });
+}
+
+export async function harvestCropRemote(channelId: string, notes: string): Promise<NftChannel> {
+  return requestJson<NftChannel>(`/api/nft-channels/${encodeURIComponent(channelId)}/harvest`, {
+    method: "POST",
+    body: JSON.stringify({ notes }),
+  });
+}
+
+export async function fetchGpioMappings(): Promise<GpioMapping[]> {
+  try {
+    return await requestJson<GpioMapping[]>("/api/gpio-mappings", { method: "GET" });
+  } catch {
+    return [];
+  }
+}
+
+export async function saveGpioMappings(mappings: GpioMapping[]): Promise<GpioMapping[]> {
+  return requestJson<GpioMapping[]>("/api/gpio-mappings", {
+    method: "PUT",
+    body: JSON.stringify(mappings),
+  });
+}
+
+export async function fetchHarvestHistory(): Promise<HarvestHistoryEntry[]> {
+  try {
+    return await requestJson<HarvestHistoryEntry[]>("/api/harvest-history", { method: "GET" });
+  } catch {
+    return [];
+  }
 }

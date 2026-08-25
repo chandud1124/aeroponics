@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Lightbulb, Zap, AlertTriangle, CheckCircle, Loader2 } from "lucide-react";
+import { Lightbulb, Zap, AlertTriangle, CheckCircle, Loader2, Settings, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { withDeviceHeaders } from "@/lib/tower-storage";
 
 interface AIInsight {
@@ -27,6 +30,60 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  // API Key management states
+  const [showSettings, setShowSettings] = useState(false);
+  const [passcode, setPasscode] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  const loadSettings = async () => {
+    try {
+      const res = await fetch("/api/settings", {
+        headers: { "x-admin-passkey": passcode || "0990" }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setApiKey(data.geminiApiKey || "");
+      }
+    } catch (e) {
+      // Ignore auth errors during initial key check
+    }
+  };
+
+  useEffect(() => {
+    if (showSettings) {
+      loadSettings();
+    }
+  }, [showSettings, passcode]);
+
+  const handleSaveKey = async () => {
+    setSavingSettings(true);
+    setSettingsError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-passkey": passcode || "0990"
+        },
+        body: JSON.stringify({ geminiApiKey: apiKey })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Unauthorized passcode");
+      }
+      toast.success("Gemini API Key saved successfully!");
+      setShowSettings(false);
+      fetchInsights();
+    } catch (err: any) {
+      setSettingsError(err.message || "Failed to save API key");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
 
   const fetchInsights = async () => {
     setLoading(true);
@@ -119,10 +176,76 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
             <Lightbulb className="h-5 w-5 text-primary" />
             <h3 className="font-semibold">AI System Insights</h3>
           </div>
-          <Button onClick={fetchInsights} disabled={loading} size="sm" variant="outline">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setShowSettings(!showSettings)}
+              size="sm"
+              variant="outline"
+              className="h-8 w-8 p-0"
+              title="Configure API Key"
+            >
+              <Settings className="h-4 w-4 text-slate-500" />
+            </Button>
+            <Button onClick={fetchInsights} disabled={loading} size="sm" variant="outline" className="h-8">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
+            </Button>
+          </div>
         </div>
+
+        {showSettings && (
+          <div className="bg-muted/40 p-4 rounded-lg border border-border/80 space-y-3 text-xs">
+            <div className="flex items-center justify-between border-b pb-2 mb-1">
+              <span className="font-bold text-foreground">Configure Google Gemini AI Key</span>
+              <Badge variant="outline" className="text-[10px]">Secure Storage</Badge>
+            </div>
+            
+            <div className="space-y-1">
+              <Label htmlFor="settings-passcode" className="text-[11px] font-bold">Admin Passcode</Label>
+              <Input
+                id="settings-passcode"
+                type="password"
+                placeholder="Enter passcode (default 0990)"
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+                className="h-8 text-xs font-mono"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="settings-apikey" className="text-[11px] font-bold">Gemini API Key</Label>
+              <div className="relative">
+                <Input
+                  id="settings-apikey"
+                  type={showKey ? "text" : "password"}
+                  placeholder="AI Studio API Key (AIStudio.google.com)"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="h-8 text-xs font-mono pr-8"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-800"
+                >
+                  {showKey ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
+                </button>
+              </div>
+            </div>
+
+            {settingsError && (
+              <p className="text-red-500 text-[10px] font-semibold">{settingsError}</p>
+            )}
+
+            <div className="flex gap-2 justify-end pt-1">
+              <Button onClick={() => setShowSettings(false)} size="sm" variant="ghost" className="h-7 text-xs font-semibold">
+                Cancel
+              </Button>
+              <Button onClick={handleSaveKey} disabled={savingSettings} size="sm" className="h-7 text-xs bg-slate-800 text-white hover:bg-slate-700 font-bold px-3">
+                {savingSettings ? "Saving..." : "Save API Key"}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {loading && !insights && (
           <div className="flex items-center justify-center py-8">
@@ -140,6 +263,14 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
 
         {insights && (
           <>
+            {(insights as any).isHeuristic && (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/25 p-3 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+                <span className="font-semibold">Running on local agronomic heuristics.</span>
+                <Button onClick={() => setShowSettings(true)} size="sm" variant="ghost" className="h-6 text-[10px] text-amber-800 dark:text-amber-400 font-bold underline hover:bg-transparent p-0">
+                  Enable Gemini AI
+                </Button>
+              </div>
+            )}
             {/* Health Score */}
             <div className={`rounded-lg p-4 ${getHealthBgColor(insights.healthScore)}`}>
               <div className="flex items-center justify-between">

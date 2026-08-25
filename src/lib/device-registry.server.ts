@@ -2,6 +2,7 @@ import { randomBytes, createHash } from "crypto";
 import os from "os";
 import fs from "fs";
 import path from "path";
+import type { GpioMapping } from "./tower-shared";
 
 export type DeviceEntry = {
   id: string;
@@ -11,6 +12,7 @@ export type DeviceEntry = {
   macAddress?: string | null;
   ipAddress?: string | null;
   createdAt: string;
+  pins?: GpioMapping[];
 };
 
 let devices: DeviceEntry[] = [];
@@ -161,7 +163,28 @@ export function createDevice(opts: { name?: string | null; deviceId?: string | n
 }
 
 export function listDevices() {
-  return devices.map((d) => ({ id: d.id, name: d.name, deviceId: d.deviceId, macAddress: d.macAddress ?? null, ipAddress: d.ipAddress ?? null, createdAt: d.createdAt }));
+  return devices.map((d) => ({
+    id: d.id,
+    name: d.name,
+    deviceId: d.deviceId,
+    macAddress: d.macAddress ?? null,
+    ipAddress: d.ipAddress ?? null,
+    createdAt: d.createdAt,
+    pins: d.pins ?? [],
+  }));
+}
+
+export function updateDevicePins(deviceId: string, pins: GpioMapping[]): boolean {
+  const found = devices.find((d) => d.deviceId === deviceId);
+  if (!found) return false;
+  found.pins = pins;
+  saveDevicesToDisk();
+  return true;
+}
+
+export function getDevicePins(deviceId: string): GpioMapping[] | null {
+  const found = devices.find((d) => d.deviceId === deviceId);
+  return found?.pins ?? null;
 }
 
 export function deleteDevice(deviceId: string) {
