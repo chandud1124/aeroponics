@@ -76,6 +76,7 @@ import {
   LineChart, 
   Flame, 
   ShieldAlert, 
+  QrCode,
   Calendar,
   AlertTriangle,
   History,
@@ -150,6 +151,9 @@ function Index() {
   const [selectedTrayLogs, setSelectedTrayLogs] = useState<NurseryTray | null>(null);
   const [trayLogsDialogOpen, setTrayLogsDialogOpen] = useState(false);
   const [showCameraScanner, setShowCameraScanner] = useState(false);
+  const [globalScanInput, setGlobalScanInput] = useState("");
+  const [showGlobalScanner, setShowGlobalScanner] = useState(false);
+  const [scannedRecord, setScannedRecord] = useState<{ kind: "channel" | "tray"; label: string; detail: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -185,6 +189,36 @@ function Index() {
       ...trays,
       { id: `tray-${Date.now()}`, name: `Tray ${nextNumber}`, crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
     ]);
+  };
+
+  const replantNurseryTray = (trayId: string) => {
+    updateNurseryTray(trayId, {
+      crop: "",
+      plantedOn: new Date().toISOString().split("T")[0],
+      germinated: 0,
+      status: "growing",
+    });
+    toast.success("Tray reset for a new planting batch. Enter the crop and plug count.");
+  };
+
+  const handleGlobalScan = (value: string) => {
+    const scanned = value.trim().toLowerCase();
+    if (!scanned) return;
+    const channel = nftChannels.find((item) => [item.id, item.qrCode, item.name, `${item.stand || ""}-${item.level || ""}-ch ${item.channelIndex || ""}`].some((match) => match.trim().toLowerCase() === scanned));
+    if (channel) {
+      setScannedRecord({ kind: "channel", label: channel.name, detail: `${channel.status} · ${channel.cropName || "No crop planted"} · ${channel.currentCount || 0} plants` });
+      setActiveTab("nft");
+      setShowGlobalScanner(false);
+      return;
+    }
+    const tray = nurseryTrays.find((item) => [item.id, item.name].some((match) => match.trim().toLowerCase() === scanned));
+    if (tray) {
+      setScannedRecord({ kind: "tray", label: tray.name, detail: `${tray.status} · ${tray.crop || "No crop assigned"} · ${tray.germinated}/${tray.plugs} plugs` });
+      setActiveTab("nursery");
+      setShowGlobalScanner(false);
+      return;
+    }
+    toast.warning(`No nursery tray or NFT channel matches "${value}".`);
   };
 
   const handleTransplantConfirm = async () => {
@@ -485,6 +519,52 @@ function Index() {
           </header>
 
           <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col space-y-5 overflow-visible p-4 sm:p-6 md:space-y-6 md:p-8">
+            <Card className="border-primary/20 bg-primary/5 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-2">
+                  <QrCode className="h-5 w-5 text-primary" />
+                  <div>
+                    <h2 className="text-sm font-bold">Scan farm QR code</h2>
+                    <p className="text-[11px] text-muted-foreground">Find an NFT channel or nursery tray and open its details.</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    aria-label="Scan nursery tray or NFT channel QR code"
+                    placeholder="Scan or enter QR value"
+                    value={globalScanInput}
+                    onChange={(event) => setGlobalScanInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") handleGlobalScan(globalScanInput);
+                    }}
+                    className="h-9 w-full bg-background text-xs sm:w-64"
+                  />
+                  <Button type="button" variant="outline" className="h-9 text-xs" onClick={() => handleGlobalScan(globalScanInput)}>
+                    <QrCode className="mr-2 h-4 w-4" /> Find details
+                  </Button>
+                  <Button type="button" className="h-9 text-xs" onClick={() => setShowGlobalScanner((open) => !open)}>
+                    <Camera className="mr-2 h-4 w-4" /> {showGlobalScanner ? "Close scanner" : "Scan with camera"}
+                  </Button>
+                </div>
+              </div>
+              {showGlobalScanner && (
+                <div className="mt-3 max-w-sm">
+                  <CameraQrScanner
+                    onScanSuccess={(value) => {
+                      setGlobalScanInput(value);
+                      handleGlobalScan(value);
+                    }}
+                    onClose={() => setShowGlobalScanner(false)}
+                  />
+                </div>
+              )}
+              {scannedRecord && (
+                <div className="mt-3 flex flex-col gap-2 rounded-lg border border-primary/20 bg-background p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                  <span><Badge variant="outline" className="mr-2">{scannedRecord.kind === "channel" ? "NFT channel" : "Nursery tray"}</Badge><strong>{scannedRecord.label}</strong></span>
+                  <span className="text-muted-foreground">{scannedRecord.detail}</span>
+                </div>
+              )}
+            </Card>
             
             {/* Dashboard tab */}
             {activeTab === "status" && (
@@ -946,6 +1026,16 @@ function Index() {
                               </SelectContent>
                             </Select>
                           </div>
+                          {tray.status === "empty" && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => replantNurseryTray(tray.id)}
+                              className="w-full text-xs font-semibold"
+                            >
+                              <Sprout className="mr-2 h-4 w-4" /> Replant new batch
+                            </Button>
+                          )}
                           {tray.crop && tray.germinated > 0 && (
                             <Button
                               onClick={() => {
