@@ -202,23 +202,33 @@ function Index() {
 
     try {
       // 1. Update the NFT channel on the server
-      const targetChan = nftChannels.find((c) => c.id === targetChannelId);
-      if (!targetChan) {
+      const selectedTarget = nftChannels.find((c) => c.id === targetChannelId);
+      if (!selectedTarget) {
         toast.error("Target channel not found");
         return;
       }
 
-      const existingTargetCrops = targetChan.crops?.length
-        ? targetChan.crops
-        : targetChan.cropName
-          ? [{ cropName: targetChan.cropName, count: targetChan.currentCount ?? 0 }]
+      const selectedTargetCrops = selectedTarget.crops?.length
+        ? selectedTarget.crops
+        : selectedTarget.cropName
+          ? [{ cropName: selectedTarget.cropName, count: selectedTarget.currentCount ?? 0 }]
           : [];
-      const hasDifferentCrop = targetChan.status === "growing" && existingTargetCrops.some(
+      const hasDifferentCrop = selectedTarget.status === "growing" && selectedTargetCrops.some(
         (crop) => crop.cropName.trim().toLowerCase() !== tray.crop.trim().toLowerCase()
       );
+      let targetChan = selectedTarget;
       if (hasDifferentCrop) {
-        toast.error("Harvest or clear the target channel before transplanting a different crop");
-        return;
+        const shouldHarvest = window.confirm(
+          `${selectedTarget.name} contains ${selectedTarget.currentCount ?? 0} existing plants. Record them as harvested before planting ${tray.crop}?`
+        );
+        if (!shouldHarvest) return;
+        targetChan = await harvestCropRemote(
+          selectedTarget.id,
+          selectedTarget.currentCount ?? 0,
+          0,
+          0,
+          `Auto-recorded before nursery transplant from ${tray.name}.`,
+        );
       }
       if (transplantCount + (targetChan.currentCount ?? 0) > (targetChan.capacity ?? 0)) {
         toast.error(`Destination capacity exceeded. Available space: ${Math.max(0, (targetChan.capacity ?? 0) - (targetChan.currentCount ?? 0))} plants.`);
@@ -226,7 +236,11 @@ function Index() {
       }
 
       // Add to NFT Channel
-      const currentCrops = [...existingTargetCrops];
+      const currentCrops = targetChan.crops?.length
+        ? [...targetChan.crops]
+        : targetChan.cropName
+          ? [{ cropName: targetChan.cropName, count: targetChan.currentCount ?? 0 }]
+          : [];
       const cropIndex = currentCrops.findIndex((c) => c.cropName.toLowerCase() === tray.crop.toLowerCase());
       if (cropIndex > -1) {
         currentCrops[cropIndex].count += transplantCount;
