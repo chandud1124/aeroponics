@@ -375,11 +375,10 @@ function Index() {
     fetchDevices().then((d) => {
       if (d) {
         setDevices(d);
-        if (!selectedDeviceId && d[0]?.deviceId) setSelectedDeviceId(d[0].deviceId);
       }
     });
     fetchSchedule().then((s) => s && setSchedule(s));
-  }, [selectedDeviceId]);
+  }, []);
 
   const activeDeviceId = selectedDeviceId.trim() || status?.deviceId || null;
   const backendReachable = status !== null;
@@ -408,6 +407,9 @@ function Index() {
       fetchStatusEnvelope(requestDeviceId).then((payload) => {
         setStatus(payload?.status ?? null);
         setHasRegisteredDevice(Boolean(payload?.hasRegisteredDevice));
+        if (!selectedDeviceId && payload?.status?.deviceId) {
+          setSelectedDeviceId(payload.status.deviceId);
+        }
       });
     };
 
@@ -484,26 +486,6 @@ function Index() {
             </nav>
           </div>
 
-          {/* Scope selection */}
-          <div className="p-4 border-t border-border/80 bg-muted/10 space-y-2">
-            <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Scoped Hardware Node</span>
-            <Select value={selectedDeviceId || "__current__"} onValueChange={(value) => setSelectedDeviceId(value === "__current__" ? "" : value)}>
-              <SelectTrigger className="h-8 text-[11px] font-medium w-full">
-                <SelectValue placeholder="Scope..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__current__" className="text-xs">Follow active stream</SelectItem>
-                {devices.map((device) => (
-                  <SelectItem key={device.deviceId} value={device.deviceId} className="text-xs">
-                    {device.name ?? device.deviceId}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="text-[9px] text-muted-foreground font-mono text-center">
-              Active: {activeDeviceId ?? "default"}
-            </div>
-          </div>
         </aside>
 
         {/* Main Content Area */}

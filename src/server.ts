@@ -382,6 +382,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         lastRunAt?: string;
         sensorDataOk?: boolean;
         dhtOk?: boolean;
+        reservoirTempC?: number | null;
       };
 
       // Validate humidity (0-100%)
@@ -408,6 +409,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         waterDistanceCm: payload.waterDistanceCm ?? undefined,
         waterLevelPercent: payload.waterLevelPercent ?? undefined,
         waterVolumeLiters: payload.waterVolumeLiters ?? undefined,
+        reservoirTempC: payload.reservoirTempC ?? undefined,
         phDosingOn: payload.phDosingOn ?? undefined,
         nutritionADosingOn: payload.nutritionADosingOn ?? undefined,
         nutritionBDosingOn: payload.nutritionBDosingOn ?? undefined,
