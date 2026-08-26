@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 
 export function CameraQrScanner({
@@ -10,13 +10,22 @@ export function CameraQrScanner({
   onScanError?: (errorMessage: string) => void;
   onClose: () => void;
 }) {
-  const containerId = "camera-qr-scanner-element";
+  const containerId = `camera-qr-scanner-${useId().replaceAll(":", "")}`;
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const onScanSuccessRef = useRef(onScanSuccess);
+  const onScanErrorRef = useRef(onScanError);
+  const hasScannedRef = useRef(false);
+  const stoppingRef = useRef(false);
   const [startupError, setStartupError] = useState<string | null>(null);
+
+  onScanSuccessRef.current = onScanSuccess;
+  onScanErrorRef.current = onScanError;
 
   useEffect(() => {
     const html5QrCode = new Html5Qrcode(containerId);
     scannerRef.current = html5QrCode;
+    hasScannedRef.current = false;
+    stoppingRef.current = false;
 
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       setStartupError("Camera scanning requires HTTPS. Open the dashboard using its secure URL.");
@@ -32,58 +41,70 @@ export function CameraQrScanner({
           fps: 10,
           qrbox: { width: 200, height: 200 },
         },
-        (decodedText) => {
-          onScanSuccess(decodedText);
+        async (decodedText) => {
+          if (hasScannedRef.current || stoppingRef.current) return;
+          hasScannedRef.current = true;
+          stoppingRef.current = true;
+          try {
+            if (html5QrCode.isScanning) await html5QrCode.stop();
+          } catch {
+            // The parent may unmount the scanner while it is stopping.
+          }
+          onScanSuccessRef.current(decodedText);
         },
         (errorMessage) => {
-          if (onScanError) onScanError(errorMessage);
-        }
+          if (!hasScannedRef.current) onScanErrorRef.current?.(errorMessage);
+        },
       )
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         setStartupError(
           message.toLowerCase().includes("permission")
             ? "Camera permission was blocked. Allow camera access in the browser settings and try again."
-            : "Unable to start the camera. Use HTTPS and allow camera access in the browser settings."
+            : "Unable to start the camera. Use HTTPS and allow camera access in the browser settings.",
         );
       });
 
     return () => {
-      if (scannerRef.current && scannerRef.current.isScanning) {
-        scannerRef.current
-          .stop()
-          .then(() => {
-            scannerRef.current?.clear();
-          })
-          .catch((err) => console.error("Failed to stop scanner:", err));
+      const scanner = scannerRef.current;
+      stoppingRef.current = true;
+      if (scanner?.isScanning) {
+        scanner.stop().catch(() => {
+          // The scanner DOM can be removed by React before html5-qrcode finishes.
+        });
       }
+      scannerRef.current = null;
     };
-  }, [onScanSuccess]);
+  }, [containerId]);
 
   return (
-    <div className="space-y-3 bg-muted/40 p-3 rounded-lg border border-border">
-      <div className="flex justify-between items-center text-xs">
-        <span className="font-bold text-foreground">🎥 Camera Active</span>
+    <div className="fixed inset-0 z-100 flex min-h-screen flex-col bg-black text-white">
+      <div className="flex items-center justify-between border-b border-white/15 bg-black/90 px-4 py-4">
+        <span className="font-bold text-sm">Scan QR code</span>
         <button
           type="button"
           onClick={onClose}
-          className="text-red-500 hover:text-red-600 font-semibold"
+          className="rounded-md border border-white/25 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10"
         >
-          Stop Camera
+          Close
         </button>
       </div>
-      <div
-        id={containerId}
-        className="overflow-hidden rounded-md border bg-black aspect-square max-w-[280px] mx-auto w-full"
-      />
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 px-5">
+        <div className="w-full max-w-70 overflow-hidden rounded-xl border border-white/25 bg-black shadow-2xl">
+          <div id={containerId} className="aspect-square w-full" />
+        </div>
+        <div className="text-center">
+          <p className="text-sm font-semibold">Align the QR code inside the frame</p>
+          <p className="mt-1 text-xs text-white/65">
+            Scanning stops automatically after the first successful scan.
+          </p>
+        </div>
+      </div>
       {startupError ? (
-        <p role="alert" className="text-[11px] text-red-600 text-center font-semibold">
+        <p role="alert" className="px-5 pb-5 text-center text-sm font-semibold text-red-300">
           {startupError}
         </p>
       ) : null}
-      <p className="text-[10px] text-muted-foreground text-center">
-        Align the QR code inside the frame to scan automatically.
-      </p>
     </div>
   );
 }

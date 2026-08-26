@@ -153,7 +153,8 @@ function Index() {
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [globalScanInput, setGlobalScanInput] = useState("");
   const [showGlobalScanner, setShowGlobalScanner] = useState(false);
-  const [scannedRecord, setScannedRecord] = useState<{ kind: "channel" | "tray"; label: string; detail: string } | null>(null);
+  const [scannedChannelId, setScannedChannelId] = useState<string | null>(null);
+  const [scannedRecord, setScannedRecord] = useState<{ kind: "channel" | "tray" | "not-found"; label: string; detail: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -201,11 +202,15 @@ function Index() {
     toast.success("Tray reset for a new planting batch. Enter the crop and plug count.");
   };
 
-  const handleGlobalScan = (value: string) => {
+  const handleGlobalScan = async (value: string) => {
     const scanned = value.trim().toLowerCase();
     if (!scanned) return;
-    const channel = nftChannels.find((item) => [item.id, item.qrCode, item.name, `${item.stand || ""}-${item.level || ""}-ch ${item.channelIndex || ""}`].some((match) => match.trim().toLowerCase() === scanned));
+    const freshChannels = await fetchNftChannels();
+    const channels = freshChannels.length > 0 ? freshChannels : nftChannels;
+    if (freshChannels.length > 0) setNftChannels(freshChannels);
+    const channel = channels.find((item) => [item.id, item.qrCode, item.name, `${item.stand || ""}-${item.level || ""}-ch ${item.channelIndex || ""}`].some((match) => match.trim().toLowerCase() === scanned));
     if (channel) {
+      setScannedChannelId(channel.id);
       setScannedRecord({ kind: "channel", label: channel.name, detail: `${channel.status} · ${channel.cropName || "No crop planted"} · ${channel.currentCount || 0} plants` });
       setActiveTab("nft");
       setShowGlobalScanner(false);
@@ -213,11 +218,14 @@ function Index() {
     }
     const tray = nurseryTrays.find((item) => [item.id, item.name].some((match) => match.trim().toLowerCase() === scanned));
     if (tray) {
+      setScannedChannelId(null);
       setScannedRecord({ kind: "tray", label: tray.name, detail: `${tray.status} · ${tray.crop || "No crop assigned"} · ${tray.germinated}/${tray.plugs} plugs` });
       setActiveTab("nursery");
       setShowGlobalScanner(false);
       return;
     }
+    setScannedChannelId(null);
+    setScannedRecord({ kind: "not-found", label: "No matching record", detail: `No NFT channel or nursery tray matches "${value.trim()}".` });
     toast.warning(`No nursery tray or NFT channel matches "${value}".`);
   };
 
@@ -552,6 +560,7 @@ function Index() {
                   <CameraQrScanner
                     onScanSuccess={(value) => {
                       setGlobalScanInput(value);
+                      setShowGlobalScanner(false);
                       handleGlobalScan(value);
                     }}
                     onClose={() => setShowGlobalScanner(false)}
@@ -559,9 +568,14 @@ function Index() {
                 </div>
               )}
               {scannedRecord && (
-                <div className="mt-3 flex flex-col gap-2 rounded-lg border border-primary/20 bg-background p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
-                  <span><Badge variant="outline" className="mr-2">{scannedRecord.kind === "channel" ? "NFT channel" : "Nursery tray"}</Badge><strong>{scannedRecord.label}</strong></span>
+                <div className={`mt-3 flex flex-col gap-2 rounded-lg border p-3 text-xs sm:flex-row sm:items-center sm:justify-between ${scannedRecord.kind === "not-found" ? "border-red-500/30 bg-red-500/5" : "border-primary/20 bg-background"}`}>
+                  <span><Badge variant="outline" className="mr-2">{scannedRecord.kind === "channel" ? "NFT channel" : scannedRecord.kind === "tray" ? "Nursery tray" : "Not found"}</Badge><strong>{scannedRecord.label}</strong></span>
                   <span className="text-muted-foreground">{scannedRecord.detail}</span>
+                  {scannedRecord.kind !== "not-found" && (
+                    <Button type="button" variant="outline" className="h-7 shrink-0 text-[11px]" onClick={() => setActiveTab(scannedRecord.kind === "channel" ? "history" : "nursery")}>
+                      {scannedRecord.kind === "channel" ? "View history" : "View tray"}
+                    </Button>
+                  )}
                 </div>
               )}
             </Card>
@@ -942,7 +956,7 @@ function Index() {
               </div>
             )}
 
-            {activeTab === "nft" && <NftChannelsTab />}
+            {activeTab === "nft" && <NftChannelsTab initialChannelId={scannedChannelId} />}
 
             {/* High-Fidelity Nursery Trays */}
             {activeTab === "nursery" && (

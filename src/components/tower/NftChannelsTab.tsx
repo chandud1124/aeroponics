@@ -18,7 +18,7 @@ import {
   type NftCropEntry,
 } from "@/lib/tower-storage";
 
-export function NftChannelsTab() {
+export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string | null } = {}) {
   const [channels, setChannels] = useState<NftChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStandFilter, setSelectedStandFilter] = useState("All Stands");
@@ -367,6 +367,12 @@ export function NftChannelsTab() {
       toast.error("Failed to load logs");
     }
   };
+
+  useEffect(() => {
+    if (!initialChannelId) return;
+    const channel = channels.find((item) => item.id === initialChannelId);
+    if (channel) handleOpenLogs(channel);
+  }, [initialChannelId, channels.length]);
 
   const handleTransferSubmit = async () => {
     if (!activeChannelId) return;
@@ -776,7 +782,9 @@ export function NftChannelsTab() {
                                         alt="QR Code"
                                         className="w-24 h-24 object-contain"
                                       />
-                                      <span className="text-[9px] text-slate-500 font-mono tracking-wider">{chan.id}</span>
+                                      <span className="max-w-24 text-center text-[10px] text-slate-700 font-mono font-semibold break-all leading-tight">
+                                        ID: {chan.id}
+                                      </span>
                                     </div>
 
                                     {/* Crop details */}
