@@ -593,7 +593,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         tankHeightCm: waterCalibration?.tankHeightCm ?? 80,
         tankCapacityLiters: waterCalibration?.tankCapacityLiters ?? 200,
         ultrasonicTriggerEcho: waterCalibration?.type === "Water Level - Ultrasonic",
-        pin_dht_data: humidityMapping?.pin ?? findPin("Water Temperature Sensor", 16)
+        pin_dht_data: findPin("Humidity Sensor", 16),
+        pin_water_temp: findPin("Water Temperature Sensor", 15),
       },
       200,
     );

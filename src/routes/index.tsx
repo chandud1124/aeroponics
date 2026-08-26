@@ -425,6 +425,7 @@ function Index() {
 
   const navItems = [
     { id: "status", label: "Dashboard", icon: LayoutDashboard },
+    { id: "analytics", label: "Sensor History", icon: LineChart },
     { id: "controls", label: "Controls", icon: Settings },
     { id: "crops", label: "Crops Manager", icon: Sprout, badge: "3 Active" },
     { id: "nft", label: "NFT Channels", icon: Grid },
@@ -619,7 +620,7 @@ function Index() {
 
                     <NextCyclePanel status={status!} schedule={schedule} online={telemetryFresh} />
 
-                    <DashboardCharts deviceId={activeDeviceId} status={liveStatus} />
+                    <DashboardCharts deviceId={activeDeviceId} status={liveStatus} onViewHistory={() => setActiveTab("analytics")} />
                     <EnhancedStatusCards status={status!} />
 
                     <div className="grid min-w-0 gap-6 lg:grid-cols-2">
@@ -1366,6 +1367,11 @@ function Index() {
             {/* Nutrition Dosing */}
             {activeTab === "nutrition" && (
               <NutritionTab status={liveStatus} schedule={schedule} onScheduleChange={setSchedule} deviceId={activeDeviceId} controlsAllowed={controlsAllowed} />
+            )}
+
+            {/* Sensor Analytics Tab */}
+            {activeTab === "analytics" && (
+              <HistoryAnalyticsTab deviceId={activeDeviceId} />
             )}
 
             {/* Hardware registry tab */}

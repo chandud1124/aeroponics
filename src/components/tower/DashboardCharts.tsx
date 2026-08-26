@@ -8,9 +8,10 @@ import { Activity, Thermometer, Gauge, Zap } from "lucide-react";
 interface DashboardChartsProps {
   deviceId: string | null;
   status?: LiveStatus | null;
+  onViewHistory?: () => void;
 }
 
-export function DashboardCharts({ deviceId, status }: DashboardChartsProps) {
+export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardChartsProps) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -85,15 +86,30 @@ export function DashboardCharts({ deviceId, status }: DashboardChartsProps) {
           <h3 className="text-sm font-bold text-foreground">Sensor pulse</h3>
           <p className="text-[11px] text-muted-foreground">Last 24 hours · {hasHistory ? "live telemetry" : "waiting for history"}</p>
         </div>
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-          <span className={`h-2 w-2 rounded-full ${loading ? "animate-pulse bg-amber-500" : "bg-emerald-500"}`} />
-          {loading ? "Syncing" : hasHistory ? "Live" : "Snapshot"}
-        </span>
+        <div className="flex items-center gap-3">
+          {onViewHistory && (
+            <button
+              onClick={onViewHistory}
+              className="text-[10px] font-bold uppercase tracking-wider text-primary hover:underline"
+            >
+              View Full History →
+            </button>
+          )}
+          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            <span className={`h-2 w-2 rounded-full ${loading ? "animate-pulse bg-amber-500" : "bg-emerald-500"}`} />
+            {loading ? "Syncing" : hasHistory ? "Live" : "Snapshot"}
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       {/* pH and EC Trend Area Chart */}
-      <Card className="flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-4 shadow-sm transition-colors hover:border-primary/30 sm:p-5">
+      <Card
+        onClick={onViewHistory}
+        className={`flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-4 shadow-sm transition-colors sm:p-5 ${
+          onViewHistory ? "cursor-pointer hover:border-primary/50 hover:bg-card/90" : "hover:border-primary/30"
+        }`}
+      >
         <div className="space-y-1 mb-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
@@ -135,7 +151,12 @@ export function DashboardCharts({ deviceId, status }: DashboardChartsProps) {
       </Card>
 
       {/* Temperature and Humidity Trend Chart */}
-      <Card className="flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-4 shadow-sm transition-colors hover:border-primary/30 sm:p-5">
+      <Card
+        onClick={onViewHistory}
+        className={`flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-4 shadow-sm transition-colors sm:p-5 ${
+          onViewHistory ? "cursor-pointer hover:border-primary/50 hover:bg-card/90" : "hover:border-primary/30"
+        }`}
+      >
         <div className="space-y-1 mb-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">

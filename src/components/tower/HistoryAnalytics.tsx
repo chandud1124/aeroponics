@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertCircle, CalendarRange, Download, Droplets, Zap } from "lucide-react";
+import { AlertCircle, CalendarRange, Download, Droplets, Zap, Gauge, Activity, Thermometer } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -193,13 +193,26 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
   const [faults, setFaults] = useState<FaultRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Custom date selection state
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const [useCustomRange, setUseCustomRange] = useState(false);
+
+  // Table pagination state
+  const [sensorPage, setSensorPage] = useState(0);
+  const SENSOR_PAGE_SIZE = 10;
+
   const refresh = async () => {
     setLoading(true);
     try {
+      const queryDays = useCustomRange && customStart 
+        ? Math.max(1, Math.ceil((Date.now() - new Date(customStart).getTime()) / (24 * 60 * 60 * 1000)))
+        : days;
+
       const [nextSummary, nextSensors, nextLogs, nextReadings, nextFaults] = await Promise.all([
-        fetchAnalyticsSummary(days, deviceId),
-        fetchSensorHistory(days, deviceId),
-        fetchPumpLogs(days, 250, deviceId),
+        fetchAnalyticsSummary(queryDays, deviceId),
+        fetchSensorHistory(queryDays, deviceId),
+        fetchPumpLogs(queryDays, 500, deviceId),
         fetchManualReadings(),
         fetchFaultHistory(deviceId),
       ]);
@@ -207,8 +220,12 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
       setSummary(nextSummary ?? EMPTY_SUMMARY);
       setSensorHistory(nextSensors);
       setPumpLogs(nextLogs);
-      setManualReadings(nextReadings.filter((reading: ManualReading) => reading.timestamp >= Date.now() - days * 24 * 60 * 60 * 1000));
-      setFaults((nextFaults as FaultRow[]).filter((fault) => fault.timestamp >= Date.now() - days * 24 * 60 * 60 * 1000));
+      
+      const filterCutoff = Date.now() - queryDays * 24 * 60 * 60 * 1000;
+      setManualReadings(nextReadings.filter((reading: ManualReading) => reading.timestamp >= filterCutoff));
+      setFaults((nextFaults as FaultRow[]).filter((fault) => fault.timestamp >= filterCutoff));
+    } catch (e) {
+      console.error("Failed to fetch analytics data", e);
     } finally {
       setLoading(false);
     }
@@ -216,290 +233,428 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 10000);
+    const interval = setInterval(refresh, 15000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days]);
+  }, [days, useCustomRange]);
 
-  const lightData = groupLightHistory(sensorHistory, days);
-  const humidityData = groupHumidityHistory(sensorHistory, days);
-  const pumpData = groupPumpLogs(pumpLogs, days);
-  const avgLightLux = (() => {
-    const vals = sensorHistory.map((s) => s.lightLux).filter((v) => typeof v === "number") as number[];
-    if (!vals.length) return null;
-    return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
-  })();
-  const recentFaults = faults.slice(0, 8);
-  const manualRows = [...manualReadings].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
+  const handleApplyCustomRange = () => {
+    if (!customStart || !customEnd) return;
+    setUseCustomRange(true);
+    setSensorPage(0);
+    refresh();
+  };
 
-  const exportRows: string[] = [
-    "type,timestamp,humidityPct,lightLux,pumpState,fault,mode,durationSeconds,flowed,ph,tds,ec,notes",
+  const handleClearCustomRange = () => {
+    setUseCustomRange(false);
+    setCustomStart("");
+    setCustomEnd("");
+    setDays(7);
+    setSensorPage(0);
+  };
+
+  // Client-side filtering based on custom calendar input
+  const filteredSensors = useCustomRange && customStart && customEnd
+    ? sensorHistory.filter((pt) => {
+        const tStr = format(pt.timestamp, "yyyy-MM-dd");
+        return tStr >= customStart && tStr <= customEnd;
+      })
+    : sensorHistory;
+
+  const filteredPumpLogs = useCustomRange && customStart && customEnd
+    ? pumpLogs.filter((pt) => {
+        const tStr = format(new Date(pt.startedAt), "yyyy-MM-dd");
+        return tStr >= customStart && tStr <= customEnd;
+      })
+    : pumpLogs;
+
+  const filteredManualReadings = useCustomRange && customStart && customEnd
+    ? manualReadings.filter((pt) => {
+        const tStr = format(pt.timestamp, "yyyy-MM-dd");
+        return tStr >= customStart && tStr <= customEnd;
+      })
+    : manualReadings;
+
+  const filteredFaults = useCustomRange && customStart && customEnd
+    ? faults.filter((pt) => {
+        const tStr = format(pt.timestamp, "yyyy-MM-dd");
+        return tStr >= customStart && tStr <= customEnd;
+      })
+    : faults;
+
+  // Bucketed/grouped telemetry for performance mapping
+  const chartDays = useCustomRange && customStart && customEnd
+    ? Math.max(1, Math.ceil((new Date(customEnd).getTime() - new Date(customStart).getTime()) / (24 * 60 * 60 * 1000)))
+    : days;
+
+  const bucketMs = bucketMsForRange(chartDays);
+  const buckets = new Map<number, SensorSnapshot[]>();
+
+  for (const snapshot of filteredSensors) {
+    const bucketKey = Math.floor(snapshot.timestamp / bucketMs) * bucketMs;
+    if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
+    buckets.get(bucketKey)!.push(snapshot);
+  }
+
+  const groupedSensorData = Array.from(buckets.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([timestamp, values]) => {
+      const phs = values.map(v => v.ph).filter(v => v != null) as number[];
+      const ecs = values.map(v => v.ec).filter(v => v != null) as number[];
+      const temps = values.map(v => v.reservoirTempC).filter(v => v != null) as number[];
+      const hums = values.map(v => v.humidityPct).filter(v => v != null) as number[];
+      return {
+        label: bucketLabel(timestamp, chartDays),
+        ph: phs.length > 0 ? phs.reduce((a, b) => a + b, 0) / phs.length : null,
+        ec: ecs.length > 0 ? ecs.reduce((a, b) => a + b, 0) / ecs.length : null,
+        reservoirTempC: temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : null,
+        humidityPct: hums.length > 0 ? hums.reduce((a, b) => a + b, 0) / hums.length : null,
+      };
+    });
+
+  const pumpData = groupPumpLogs(filteredPumpLogs, chartDays);
+  const recentFaults = filteredFaults.slice(0, 8);
+  const manualRows = [...filteredManualReadings].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
+
+  // EXCEL / CSV Export Rows
+  const exportRows = [
+    "Timestamp,Date,Time,pH,EC Index (mS/cm),Water Temp (C),Air Humidity (%),Water Level,Ultrasonic Distance (cm),Water Volume (L)"
   ];
-
-  for (const snapshot of sensorHistory) {
-    exportRows.push(
-      [
-        "sensor",
-        new Date(snapshot.timestamp).toISOString(),
-        snapshot.humidityPct ?? "",
-        snapshot.lightLux ?? "",
-        snapshot.pumpState,
-        snapshot.fault ?? "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-      ].join(","),
-    );
+  for (const snapshot of filteredSensors) {
+    const dt = new Date(snapshot.timestamp);
+    exportRows.push([
+      dt.toISOString(),
+      format(dt, "yyyy-MM-dd"),
+      format(dt, "HH:mm:ss"),
+      snapshot.ph != null ? snapshot.ph.toFixed(2) : "",
+      snapshot.ec != null ? snapshot.ec.toFixed(2) : "",
+      snapshot.reservoirTempC != null ? snapshot.reservoirTempC.toFixed(1) : "",
+      snapshot.humidityPct != null ? snapshot.humidityPct.toFixed(1) : "",
+      snapshot.waterLevel || "",
+      snapshot.waterDistanceCm != null ? snapshot.waterDistanceCm.toFixed(1) : "",
+      snapshot.waterVolumeLiters != null ? snapshot.waterVolumeLiters.toFixed(1) : "",
+    ].join(","));
   }
 
-  for (const cycle of pumpLogs) {
-    exportRows.push(
-      [
-        "pump",
-        cycle.startedAt,
-        "",
-        "",
-        "",
-        "",
-        cycle.fault ?? "",
-        cycle.mode,
-        cycle.durationSeconds,
-        cycle.flowed ? "true" : "false",
-        "",
-        "",
-        "",
-        "",
-      ].join(","),
-    );
-  }
+  // Calculate Averages for Summary Cards
+  const avgPh = (() => {
+    const vals = filteredSensors.map((s) => s.ph).filter((v) => typeof v === "number") as number[];
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  })();
 
-  for (const reading of manualReadings) {
-    exportRows.push(
-      [
-        "manual",
-        new Date(reading.timestamp).toISOString(),
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        reading.ph ?? "",
-        reading.tds ?? "",
-        reading.ec ?? "",
-        (reading.notes ?? "").replaceAll(",", ";"),
-      ].join(","),
-    );
-  }
+  const avgEc = (() => {
+    const vals = filteredSensors.map((s) => s.ec).filter((v) => typeof v === "number") as number[];
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  })();
 
-  const latestSensor = sensorHistory[0];
-  const latestReading = manualRows[0];
+  const avgWaterTemp = (() => {
+    const vals = filteredSensors.map((s) => s.reservoirTempC).filter((v) => typeof v === "number") as number[];
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  })();
 
-  const lightChartConfig = {
-    value: { label: "Light", color: "hsl(var(--chart-1))" },
-  };
+  const avgHumidity = (() => {
+    const vals = filteredSensors.map((s) => s.humidityPct).filter((v) => typeof v === "number") as number[];
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  })();
 
-  const pumpChartConfig = {
-    cycles: { label: "Cycles", color: "hsl(var(--chart-3))" },
-    successRate: { label: "Success %", color: "hsl(var(--chart-2))" },
-  };
+  // Pagination bounds
+  const totalSensorPages = Math.ceil(filteredSensors.length / SENSOR_PAGE_SIZE);
+  const paginatedSensors = filteredSensors.slice(sensorPage * SENSOR_PAGE_SIZE, (sensorPage + 1) * SENSOR_PAGE_SIZE);
 
   return (
     <div className="space-y-6">
+      {/* Dynamic Date Filtering Dashboard Toolbar */}
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <CalendarRange className="h-4 w-4" />
-            History & Analytics
+            <CalendarRange className="h-4 w-4 text-emerald-500 animate-pulse" />
+            Historical Operations Audits
           </div>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight">Data logging and trend analysis</h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Track humidity, light, cycles, manual readings, and faults over time. Charts update from the local ESP32 API.
+          <h2 className="mt-1 text-2xl font-bold tracking-tight">Sensor History & Trends</h2>
+          <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+            Check historical pH, EC, water temperature, and humidity trends over custom ranges.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {RANGE_OPTIONS.map((option) => (
-            <Button
-              key={option.days}
-              variant={days === option.days ? "default" : "outline"}
-              size="sm"
-              onClick={() => setDays(option.days)}
+        {/* Date presets and calendar inputs */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-lg border border-border/80">
+            {RANGE_OPTIONS.map((option) => (
+              <Button
+                key={option.days}
+                variant={!useCustomRange && days === option.days ? "secondary" : "ghost"}
+                size="sm"
+                className="text-xs h-7 px-2.5 font-bold"
+                onClick={() => {
+                  setUseCustomRange(false);
+                  setDays(option.days);
+                  setSensorPage(0);
+                }}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 rounded-lg border border-border/80 bg-muted/20 px-2.5 py-1">
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-muted-foreground font-bold uppercase">From</span>
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="bg-transparent text-xs font-mono font-bold border-none focus:outline-none w-26 h-5"
+              />
+            </div>
+            <div className="flex items-center gap-1 border-l pl-2">
+              <span className="text-[9px] text-muted-foreground font-bold uppercase">To</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="bg-transparent text-xs font-mono font-bold border-none focus:outline-none w-26 h-5"
+              />
+            </div>
+            <Button 
+              size="xs" 
+              variant="default" 
+              onClick={handleApplyCustomRange} 
+              disabled={!customStart || !customEnd} 
+              className="h-6 px-2 text-[10px] font-bold"
             >
-              {option.label}
+              Apply
             </Button>
-          ))}
-          <Button variant="outline" size="sm" onClick={() => downloadCsv(`tower-analytics-${days}d.csv`, exportRows)}>
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
+            {useCustomRange && (
+              <Button 
+                size="xs" 
+                variant="ghost" 
+                onClick={handleClearCustomRange} 
+                className="h-6 px-2 text-[10px] text-red-500 hover:text-red-600 font-bold"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="text-xs border-emerald-500/30 hover:bg-emerald-50/50 hover:text-emerald-700 font-bold"
+            onClick={() => downloadCsv(`sensor_history_${useCustomRange ? customStart + "_to_" + customEnd : days + "d"}.csv`, exportRows)}
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
+            Export Excel (CSV)
           </Button>
         </div>
       </div>
 
+      {/* Numerical Averages Summary Cards */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
         <SummaryCard
-          icon={<Droplets className="h-5 w-5" />}
-          label="Humidity"
-          value={latestSensor?.humidityPct != null ? `${latestSensor.humidityPct.toFixed(1)} %` : "Waiting"}
-          hint="From the active humidity sensor"
+          icon={<Gauge className="h-5 w-5 text-indigo-500" />}
+          label="Average pH"
+          value={avgPh != null ? avgPh.toFixed(2) : "——"}
+          hint="Target range: 5.5 - 6.5"
         />
         <SummaryCard
-          icon={<Zap className="h-5 w-5" />}
-          label="Ambient light"
-          value={latestSensor?.lightLux != null ? `${Math.round(latestSensor.lightLux)} lux` : "Waiting"}
-          hint="From the active light sensor"
+          icon={<Activity className="h-5 w-5 text-amber-500" />}
+          label="Average EC"
+          value={avgEc != null ? `${avgEc.toFixed(2)} mS` : "——"}
+          hint="Target range: 0.8 - 1.2"
         />
         <SummaryCard
-          icon={<Zap className="h-5 w-5" />}
-          label="Pump success"
-          value={`${summary.successRate.toFixed(1)}%`}
-          hint={`${summary.pumpCycles} cycles in range`}
+          icon={<Thermometer className="h-5 w-5 text-sky-500" />}
+          label="Avg Water Temp"
+          value={avgWaterTemp != null ? `${avgWaterTemp.toFixed(1)}°C` : "——"}
+          hint="Comfort band: 20°C - 26°C"
         />
         <SummaryCard
-          icon={<Droplets className="h-5 w-5" />}
-          label="Estimated water"
-          value={`${summary.estimatedWaterLiters.toFixed(1)} L`}
-          hint="From logged pump durations"
+          icon={<Droplets className="h-5 w-5 text-emerald-500" />}
+          label="Avg Air Humidity"
+          value={avgHumidity != null ? `${avgHumidity.toFixed(1)}%` : "——"}
+          hint="Ideal range: 50% - 70%"
         />
         <SummaryCard
-          icon={<AlertCircle className="h-5 w-5" />}
-          label="Faults"
-          value={summary.faultCount}
-          hint={`${summary.sensorPoints} sensor samples`}
+          icon={<AlertCircle className="h-5 w-5 text-indigo-500" />}
+          label="Total Logged Points"
+          value={filteredSensors.length}
+          hint={`History window size: ${chartDays} days`}
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="p-5">
+      {/* Advanced Trend Area Charts */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* pH & EC Historical Balance Chart */}
+        <Card className="p-5 border-border bg-card">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-muted-foreground">Ambient light trends</div>
-              <div className="text-xs text-muted-foreground">Average lux per bucket</div>
+              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">pH & EC Solution Balance</div>
+              <div className="text-2xs text-muted-foreground mt-0.5">Dual Y-axis chart outlining pH (left) vs Electrical Conductivity (right)</div>
             </div>
-            <Badge variant="outline">Light threshold 2000 lux</Badge>
+            <Badge variant="outline" className="text-2xs">Target pH 5.5–6.5 | EC 0.8–1.2</Badge>
           </div>
-          <ChartContainer config={lightChartConfig} className="h-80 w-full">
-            <LineChart data={lightData} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={20} />
-              <YAxis tickLine={false} axisLine={false} domain={["auto", "auto"]} />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <ReferenceLine y={2000} stroke="#34d399" strokeDasharray="6 6" />
-              <Line type="monotone" dataKey="value" stroke="var(--color-value)" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ChartContainer>
+          
+          <div className="h-80 w-full">
+            <ChartContainer config={{ 
+              ph: { label: "pH Value", color: "#6366f1" },
+              ec: { label: "EC Index", color: "#f59e0b" }
+            }} className="h-full w-full">
+              <LineChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} className="text-[10px] font-semibold" />
+                <YAxis yAxisId="left" domain={[4.5, 7.5]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
+                <YAxis yAxisId="right" orientation="right" domain={[0.4, 2.0]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Legend content={<ChartLegendContent />} />
+                <ReferenceLine yAxisId="left" y={5.5} stroke="#a5b4fc" strokeDasharray="4 4" />
+                <ReferenceLine yAxisId="left" y={6.5} stroke="#a5b4fc" strokeDasharray="4 4" />
+                <ReferenceLine yAxisId="right" y={0.8} stroke="#fde047" strokeDasharray="4 4" />
+                <ReferenceLine yAxisId="right" y={1.2} stroke="#fde047" strokeDasharray="4 4" />
+                <Line yAxisId="left" type="monotone" dataKey="ph" stroke="var(--color-ph)" strokeWidth={2} dot={false} connectNulls />
+                <Line yAxisId="right" type="monotone" dataKey="ec" stroke="var(--color-ec)" strokeWidth={2} dot={false} connectNulls />
+              </LineChart>
+            </ChartContainer>
+          </div>
         </Card>
 
-        <Card className="p-5">
+        {/* Water Temperature & Air Humidity Trend Chart */}
+        <Card className="p-5 border-border bg-card">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-muted-foreground">Pump performance</div>
-              <div className="text-xs text-muted-foreground">Daily cycles and success rate</div>
+              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Reservoir Temp & Air Humidity</div>
+              <div className="text-2xs text-muted-foreground mt-0.5">Water temperature logs (left) plotted against local air humidity (right)</div>
             </div>
-            <Badge variant="outline">{days}-day window</Badge>
+            <Badge variant="outline" className="text-2xs">Comfort: 20–26°C | Humidity 40–90%</Badge>
           </div>
-          <ChartContainer config={pumpChartConfig} className="h-80 w-full">
-            <BarChart data={pumpData} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} />
-              <YAxis yAxisId="left" tickLine={false} axisLine={false} allowDecimals={false} />
-              <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} domain={[0, 100]} />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <Legend content={<ChartLegendContent />} />
-              <Bar yAxisId="left" dataKey="cycles" fill="var(--color-cycles)" radius={[6, 6, 0, 0]} />
-              <Line
-                yAxisId="right"
-                type="monotone"
-                dataKey="successRate"
-                stroke="var(--color-successRate)"
-                strokeWidth={2}
-                dot={false}
-              />
-            </BarChart>
-          </ChartContainer>
-        </Card>
-
-        <Card className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium text-muted-foreground">Humidity trends</div>
-              <div className="text-xs text-muted-foreground">Average humidity per bucket</div>
-            </div>
-            <Badge variant="outline">Target 50–70%</Badge>
+          
+          <div className="h-80 w-full">
+            <ChartContainer config={{ 
+              temp: { label: "Water Temp", color: "#0ea5e9" },
+              humidity: { label: "Air Humidity", color: "#10b981" }
+            }} className="h-full w-full">
+              <LineChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} className="text-[10px] font-semibold" />
+                <YAxis yAxisId="left" domain={[15, 32]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
+                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} allowDecimals={false} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Legend content={<ChartLegendContent />} />
+                <ReferenceLine yAxisId="right" y={40} stroke="#6ee7b7" strokeDasharray="4 4" />
+                <ReferenceLine yAxisId="right" y={90} stroke="#6ee7b7" strokeDasharray="4 4" />
+                <Line yAxisId="left" type="monotone" dataKey="reservoirTempC" stroke="var(--color-temp)" strokeWidth={2} dot={false} connectNulls />
+                <Line yAxisId="right" type="monotone" dataKey="humidityPct" stroke="var(--color-humidity)" strokeWidth={2} dot={false} connectNulls />
+              </LineChart>
+            </ChartContainer>
           </div>
-          <ChartContainer config={{ value: { label: "Humidity", color: "hsl(var(--chart-4))" } }} className="h-80 w-full">
-            <LineChart data={humidityData} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={20} />
-              <YAxis tickLine={false} axisLine={false} domain={[0, 100]} />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <ReferenceLine y={50} stroke="#60a5fa" strokeDasharray="4 4" />
-              <ReferenceLine y={70} stroke="#34d399" strokeDasharray="4 4" />
-              <Line type="monotone" dataKey="humidityPct" stroke="var(--color-value)" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ChartContainer>
         </Card>
       </div>
 
+      {/* Historical Data Tables Audit Logs */}
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="p-5 xl:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
+        {/* Sensor Logs Paginated Table */}
+        <Card className="p-5 xl:col-span-2 border-border bg-card">
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
-              <div className="text-sm font-medium text-muted-foreground">Recent cycles</div>
-              <div className="text-xs text-muted-foreground">Mode, ON duration, OFF interval, and fault status</div>
+              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Historical Sensor Registry</div>
+              <div className="text-2xs text-muted-foreground mt-0.5">Paginated tabular logs of every raw ESP32 sensor transmission</div>
             </div>
+            
+            {/* Simple Pagination Buttons */}
+            {totalSensorPages > 1 && (
+              <div className="flex items-center gap-1.5 self-end">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={sensorPage === 0}
+                  onClick={() => setSensorPage((p) => p - 1)}
+                  className="h-6 w-14 text-[10px]"
+                >
+                  Prev
+                </Button>
+                <span className="text-[10px] font-bold text-muted-foreground font-mono">
+                  {sensorPage + 1} / {totalSensorPages}
+                </span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={sensorPage >= totalSensorPages - 1}
+                  onClick={() => setSensorPage((p) => p + 1)}
+                  className="h-6 w-14 text-[10px]"
+                >
+                  Next
+                </Button>
+              </div>
+            )}
           </div>
-          <div className="overflow-hidden rounded-lg border border-border">
-            <table className="w-full text-sm">
+
+          <div className="overflow-hidden rounded-lg border border-border/80">
+            <table className="w-full text-xs">
               <thead className="bg-secondary text-secondary-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-left">Time</th>
-                  <th className="px-3 py-2 text-left">Mode</th>
-                  <th className="px-3 py-2 text-left">ON</th>
-                  <th className="px-3 py-2 text-left">OFF</th>
-                  <th className="px-3 py-2 text-left">Cycle</th>
-                  <th className="px-3 py-2 text-left">Fault</th>
+                <tr className="font-bold text-2xs uppercase tracking-wider">
+                  <th className="px-3 py-2 text-left">Timestamp</th>
+                  <th className="px-3 py-2 text-center">pH</th>
+                  <th className="px-3 py-2 text-center">EC</th>
+                  <th className="px-3 py-2 text-center">Temp</th>
+                  <th className="px-3 py-2 text-center">Humidity</th>
+                  <th className="px-3 py-2 text-center">Volume (L)</th>
+                  <th className="px-3 py-2 text-right">Distance</th>
                 </tr>
               </thead>
               <tbody>
-                {pumpLogs.slice(0, 10).map((cycle) => {
-                  const code = parseFault(cycle.fault);
-                  const info = code ? FAULT_INFO[code] : null;
-                  return (
-                    <tr key={cycle.id} className="border-t border-border">
-                      <td className="px-3 py-2">{format(new Date(cycle.startedAt), "MMM d, HH:mm")}</td>
-                      <td className="px-3 py-2">
-                        <Badge variant="outline">{cycle.mode}</Badge>
+                {paginatedSensors.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
+                      No sensor logs recorded in this date range.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedSensors.map((snapshot) => (
+                    <tr key={snapshot.timestamp} className="border-t border-border hover:bg-muted/10 transition-colors">
+                      <td className="px-3 py-2 font-mono text-2xs">
+                        {format(snapshot.timestamp, "yyyy-MM-dd HH:mm:ss")}
                       </td>
-                      <td className="px-3 py-2 font-mono">{cycle.onDurationSeconds}s</td>
-                      <td className="px-3 py-2 font-mono">{cycle.offIntervalMinutes}m</td>
-                      <td className="px-3 py-2">
-                        <Badge variant={cycle.fault ? "destructive" : "default"}>
-                          {cycle.fault ? "Fault" : "Complete"}
-                        </Badge>
+                      <td className="px-3 py-2 text-center font-bold text-indigo-600">
+                        {snapshot.ph != null ? snapshot.ph.toFixed(2) : "——"}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground">{info?.label ?? "—"}</td>
+                      <td className="px-3 py-2 text-center font-bold text-amber-600">
+                        {snapshot.ec != null ? snapshot.ec.toFixed(2) : "——"}
+                      </td>
+                      <td className="px-3 py-2 text-center font-semibold text-sky-600">
+                        {snapshot.reservoirTempC != null ? `${snapshot.reservoirTempC.toFixed(1)}°C` : "——"}
+                      </td>
+                      <td className="px-3 py-2 text-center font-semibold text-emerald-600">
+                        {snapshot.humidityPct != null ? `${snapshot.humidityPct.toFixed(1)}%` : "——"}
+                      </td>
+                      <td className="px-3 py-2 text-center font-mono">
+                        {snapshot.waterVolumeLiters != null ? `${snapshot.waterVolumeLiters.toFixed(1)} L` : "——"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-500">
+                        {snapshot.waterDistanceCm != null ? `${snapshot.waterDistanceCm.toFixed(1)} cm` : "——"}
+                      </td>
                     </tr>
-                  );
-                })}
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </Card>
 
-        <Card className="p-5">
-          <div className="mb-4 text-sm font-medium text-muted-foreground">Fault timeline</div>
+        {/* Fault Timeline Panel */}
+        <Card className="p-5 border-border bg-card">
+          <div className="mb-4">
+            <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Anomaly & Fault Logs</div>
+            <div className="text-2xs text-muted-foreground mt-0.5">WDT reboots, dry runs, and dosing error markers</div>
+          </div>
           {recentFaults.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-              No recent faults logged.
+            <div className="rounded-lg border border-dashed border-border/80 p-4 text-xs text-muted-foreground">
+              No recent anomalies logged in the selected window.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
               {recentFaults.map((fault) => {
                 const code = parseFault(fault.fault);
                 const info = code ? FAULT_INFO[code] : null;
@@ -508,12 +663,12 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
                   <div key={`${fault.timestamp}-${fault.fault}`} className="rounded-lg border border-border p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="text-sm font-medium">{info?.label ?? fault.fault}</div>
-                        <div className="text-xs text-muted-foreground">{format(new Date(fault.timestamp), "MMM d, HH:mm")}</div>
+                        <div className="text-xs font-bold">{info?.label ?? fault.fault}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{format(new Date(fault.timestamp), "MMM d, HH:mm")}</div>
                       </div>
-                      <Badge variant={tone}>{code ?? "INFO"}</Badge>
+                      <Badge variant={tone} className="text-3xs uppercase font-bold">{code ?? "INFO"}</Badge>
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">{info?.hint ?? "Event logged by the controller"}</div>
+                    <div className="mt-2 text-[10px] text-muted-foreground leading-relaxed">{info?.hint ?? "Hardware event recorded by core microcontrollers."}</div>
                   </div>
                 );
               })}
@@ -522,90 +677,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        {[
-          { label: "pH history", color: "hsl(var(--chart-1))", data: manualRows.filter((r) => r.ph != null).map((r) => ({ label: format(r.timestamp, "HH:mm"), value: r.ph })) },
-          { label: "TDS history", color: "hsl(var(--chart-2))", data: manualRows.filter((r) => r.tds != null).map((r) => ({ label: format(r.timestamp, "HH:mm"), value: r.tds })) },
-          { label: "EC history", color: "hsl(var(--chart-3))", data: manualRows.filter((r) => r.ec != null).map((r) => ({ label: format(r.timestamp, "HH:mm"), value: r.ec })) },
-        ].map((series) => (
-          <Card className="p-5" key={series.label}>
-            <div className="mb-4">
-              <div className="text-sm font-medium text-muted-foreground">{series.label}</div>
-              <div className="text-xs text-muted-foreground">Latest manual readings</div>
-            </div>
-              <ChartContainer config={{ value: { label: series.label, color: series.color } }} className="h-55 w-full">
-                <LineChart data={series.data} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} />
-                  <YAxis tickLine={false} axisLine={false} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Line type="monotone" dataKey="value" stroke="var(--color-value)" strokeWidth={2} dot={false} />
-                  {series.label === "pH history" && (
-                    <>
-                      <ReferenceLine y={5.5} stroke="#f59e0b" strokeDasharray="4 4" />
-                      <ReferenceLine y={6.2} stroke="#34d399" strokeDasharray="4 4" />
-                    </>
-                  )}
-                  {series.label === "TDS history" && (
-                    <>
-                      <ReferenceLine y={560} stroke="#f59e0b" strokeDasharray="4 4" />
-                      <ReferenceLine y={840} stroke="#34d399" strokeDasharray="4 4" />
-                    </>
-                  )}
-                  {series.label === "EC history" && (
-                    <>
-                      <ReferenceLine y={0.8} stroke="#f59e0b" strokeDasharray="4 4" />
-                      <ReferenceLine y={1.2} stroke="#34d399" strokeDasharray="4 4" />
-                    </>
-                  )}
-                </LineChart>
-              </ChartContainer>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium text-muted-foreground">Manual readings history</div>
-            <div className="text-xs text-muted-foreground">Handheld meter entries captured in the dashboard</div>
-          </div>
-          <Badge variant="outline">{manualRows.length} shown</Badge>
-        </div>
-
-        {manualRows.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-            No manual pH/TDS/EC readings in the selected range.
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-secondary text-secondary-foreground">
-                <tr>
-                  <th className="px-3 py-2 text-left">Time</th>
-                  <th className="px-3 py-2 text-left">pH</th>
-                  <th className="px-3 py-2 text-left">TDS</th>
-                  <th className="px-3 py-2 text-left">EC</th>
-                  <th className="px-3 py-2 text-left">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {manualRows.map((reading) => (
-                  <tr key={reading.id} className="border-t border-border">
-                    <td className="px-3 py-2">{format(reading.timestamp, "MMM d, HH:mm")}</td>
-                    <td className="px-3 py-2">{reading.ph ?? "—"}</td>
-                    <td className="px-3 py-2">{reading.tds ?? "—"}</td>
-                    <td className="px-3 py-2">{reading.ec ?? "—"}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{reading.notes || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {loading && <p className="text-xs text-muted-foreground">Refreshing analytics…</p>}
+      {loading && <p className="text-xs text-muted-foreground animate-pulse">Syncing logs and data metrics…</p>}
     </div>
   );
 }

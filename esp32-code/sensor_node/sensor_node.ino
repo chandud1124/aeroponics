@@ -6,21 +6,25 @@
 #include <sys/time.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 // ─────────────────────────────────────────────────────────────────────
 //  PIN ASSIGNMENTS (BOOT DEFAULTS AND DYNAMIC OVERRIDES)
 // ─────────────────────────────────────────────────────────────────────
-#define PH_PIN     2
-#define TDS_PIN    4
-#define TEMP_PIN   16
-#define TRIG_PIN   5
-#define ECHO_PIN   18
+#define PH_PIN         2
+#define TDS_PIN        4
+#define TEMP_PIN       16   // DHT22 Air Temperature / Humidity sensor
+#define WATER_TEMP_PIN 15   // Waterproof DS18B20 Water Temperature sensor
+#define TRIG_PIN       5
+#define ECHO_PIN       18
 
-int PIN_PH_SENSOR       = PH_PIN;
-int PIN_EC_SENSOR       = TDS_PIN;
-int PIN_TEMP_SENSOR     = TEMP_PIN;
-int PIN_LEVEL_SENSOR_TX = TRIG_PIN;
-int PIN_LEVEL_SENSOR_RX = ECHO_PIN;
+int PIN_PH_SENSOR         = PH_PIN;
+int PIN_EC_SENSOR         = TDS_PIN;
+int PIN_TEMP_SENSOR       = TEMP_PIN;
+int PIN_WATER_TEMP_SENSOR = WATER_TEMP_PIN;
+int PIN_LEVEL_SENSOR_TX   = TRIG_PIN;
+int PIN_LEVEL_SENSOR_RX   = ECHO_PIN;
 
 // ─────────────────────────────────────────────────────────────────────
 //  FORWARD DECLARATIONS & CONSTANTS
@@ -48,7 +52,7 @@ const char* DEVICE_ID     = "device-ry5fbc";
 const char* DEVICE_SECRET = "32044676ac399a0f383ccc4f9693001a8163ebc228abbf2c";
 
 // Timing Intervals
-const unsigned long IV_SENSOR       = 15000UL; // Read sensors every 15s
+const unsigned long IV_SENSOR       = 5000UL; // Read sensors every 5s
 const unsigned long IV_SCHEDULE     = 60000UL; // Handshake every 60s
 const unsigned long IV_WDT_FEED     = 5000UL;
 const unsigned long IV_WIFI_CHECK   = 10000UL;
@@ -57,6 +61,8 @@ const unsigned long API_TIMEOUT_MS  = 8000UL;
 
 // Globals
 DHT dht(TEMP_PIN, DHT22);
+OneWire oneWireWaterTemp(WATER_TEMP_PIN);
+DallasTemperature waterTempSensor(&oneWireWaterTemp);
 Preferences prefs;
 const char* NVS_NS         = "sensorNode";
 const char* NVS_TIME_CACHE = "timeCache";
@@ -113,6 +119,7 @@ void setup() {
 
   setupPinModes();
   dht.begin();
+  waterTempSensor.begin();
 
   // Watchdog
   esp_task_wdt_config_t wdtCfg = {
@@ -201,7 +208,7 @@ void loop() {
   }
 
   // Status posting
-  if (now - tsLastStatusPost >= 60000UL) {
+  if (now - tsLastStatusPost >= 5000UL) {
     postStatus();
     tsLastStatusPost = now;
   }
@@ -217,27 +224,45 @@ void setupPinModes() {
   if (PIN_EC_SENSOR > 0) pinMode(PIN_EC_SENSOR, INPUT);
   if (PIN_LEVEL_SENSOR_TX > 0) pinMode(PIN_LEVEL_SENSOR_TX, OUTPUT);
   if (PIN_LEVEL_SENSOR_RX > 0) pinMode(PIN_LEVEL_SENSOR_RX, INPUT);
+  if (PIN_TEMP_SENSOR > 0) pinMode(PIN_TEMP_SENSOR, INPUT_PULLUP);
+  if (PIN_WATER_TEMP_SENSOR > 0) pinMode(PIN_WATER_TEMP_SENSOR, INPUT_PULLUP);
 }
 
 void readSensors() {
-  // DHT22
+  // DHT22 (Air Temp & Air Humidity)
   float hum = NAN;
-  float temp = NAN;
+  float airTemp = NAN;
   bool dhtOk = false;
   if (PIN_TEMP_SENSOR > 0) {
     hum = dht.readHumidity();
-    temp = dht.readTemperature();
+    airTemp = dht.readTemperature();
     dhtOk = (!isnan(hum) && hum >= 0.0f && hum <= 100.0f);
   }
   if (dhtOk) {
     sensors.humidityPct = hum;
     sensors.humidityValid = true;
-    sensors.waterTempC = !isnan(temp) ? temp : 24.5f;
-    Serial.printf("[DHT22] Hum: %.1f%% | Temp: %.1fC\n", hum, temp);
+    Serial.printf("[DHT22] Air Hum: %.1f%% | Air Temp: %.1fC\n", hum, airTemp);
   } else {
     sensors.humidityValid = false;
-    sensors.waterTempC = 24.5f;
     Serial.println("[DHT22] Sensor not connected or read error");
+  }
+
+  // Waterproof DS18B20 Water Temperature sensor (Water Tank)
+  float wTemp = NAN;
+  bool wTempOk = false;
+  if (PIN_WATER_TEMP_SENSOR > 0) {
+    waterTempSensor.requestTemperatures();
+    wTemp = waterTempSensor.getTempCByIndex(0);
+    wTempOk = (wTemp != DEVICE_DISCONNECTED_C && wTemp > -40.0f && wTemp < 85.0f);
+  }
+
+  if (wTempOk) {
+    sensors.waterTempC = wTemp;
+    Serial.printf("[DS18B20] Waterproof Probe Water Temp: %.1fC\n", wTemp);
+  } else {
+    // Fallback to DHT22 air temperature or default value
+    sensors.waterTempC = (!isnan(airTemp)) ? airTemp : 24.5f;
+    Serial.printf("[DS18B20] Probe error or disabled, falling back to: %.1fC\n", sensors.waterTempC);
   }
 
   // pH (analog)
@@ -277,14 +302,21 @@ void readSensors() {
 
   // Water level (Ultrasonic)
   float distanceCm = -1.0f;
+  unsigned long durationUs = 0;
   if (ULTRASONIC_TRIGGER_ECHO) {
-    digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
-    delayMicroseconds(2);
-    digitalWrite(PIN_LEVEL_SENSOR_TX, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
-    unsigned long durationUs = pulseIn(PIN_LEVEL_SENSOR_RX, HIGH, 30000UL);
-    if (durationUs > 0) distanceCm = durationUs * 0.0343f / 2.0f;
+    if (PIN_LEVEL_SENSOR_TX <= 0 || PIN_LEVEL_SENSOR_RX <= 0) {
+      Serial.printf("[Ultrasonic] Disabled (pins: TRIG=%d, ECHO=%d)\n", PIN_LEVEL_SENSOR_TX, PIN_LEVEL_SENSOR_RX);
+    } else {
+      digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
+      delayMicroseconds(2);
+      digitalWrite(PIN_LEVEL_SENSOR_TX, HIGH);
+      delayMicroseconds(10);
+      digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
+      durationUs = pulseIn(PIN_LEVEL_SENSOR_RX, HIGH, 30000UL);
+      if (durationUs > 0) {
+        distanceCm = durationUs * 0.0343f / 2.0f;
+      }
+    }
   }
 
   if (distanceCm > 0.0f && emptyDistanceCm > fullDistanceCm) {
@@ -295,14 +327,16 @@ void readSensors() {
     sensors.waterLevel = sensors.waterLevelPercent <= 10.0f ? "LOW" :
       sensors.waterLevelPercent >= 90.0f ? "FULL" : "MEDIUM";
     sensors.levelValid = true;
-    Serial.printf("[Ultrasonic] %.1fcm | %.1f%% | %.1fL\n", distanceCm, sensors.waterLevelPercent, sensors.waterVolumeLiters);
+    Serial.printf("[Ultrasonic] OK | Pins: TRIG=%d, ECHO=%d | Raw Duration: %lu us | Distance: %.1f cm | level: %.1f%% | Vol: %.1f L\n", 
+      PIN_LEVEL_SENSOR_TX, PIN_LEVEL_SENSOR_RX, durationUs, distanceCm, sensors.waterLevelPercent, sensors.waterVolumeLiters);
   } else {
     sensors.levelValid = false;
     sensors.waterLevel = "MEDIUM";
     sensors.waterDistanceCm = 0.0f;
     sensors.waterLevelPercent = 0.0f;
     sensors.waterVolumeLiters = 0.0f;
-    Serial.println("[Ultrasonic] No valid reading");
+    Serial.printf("[Ultrasonic] FAIL | Pins: TRIG=%d, ECHO=%d | Raw Duration: %lu us | Calculated Distance: %.1f cm\n", 
+      PIN_LEVEL_SENSOR_TX, PIN_LEVEL_SENSOR_RX, durationUs, distanceCm);
   }
 }
 
@@ -345,8 +379,13 @@ int httpRequest(const char* method, const char* path, const String& body = "") {
   int code = -1;
   if (strcmp(method, "POST") == 0) code = http.POST(body);
   if (strcmp(method, "PUT")  == 0) code = http.PUT(body);
+  
+  if (code < 0) {
+    Serial.printf("[API] ERROR: %s %s failed. Connection error code: %d (%s)\n", method, path, code, http.errorToString(code).c_str());
+  } else {
+    Serial.printf("[API] SUCCESS: %s %s -> HTTP %d\n", method, path, code);
+  }
   http.end();
-  Serial.printf("[API] %s %s -> HTTP %d\n", method, path, code);
   return code;
 }
 
@@ -373,6 +412,7 @@ bool fetchHandshakeAndSync() {
   int p_phS   = extractJsonInt(resp, "pin_ph_sensor");
   int p_ecS   = extractJsonInt(resp, "pin_ec_sensor");
   int p_dht   = extractJsonInt(resp, "pin_dht_data");
+  int p_wtemp = extractJsonInt(resp, "pin_water_temp");
   int p_level_rx = extractJsonInt(resp, "pin_level_sensor_rx");
   int p_level_tx = extractJsonInt(resp, "pin_level_sensor_tx");
   bool serverTriggerEcho = extractJsonBool(resp, "ultrasonicTriggerEcho", true);
@@ -390,10 +430,21 @@ bool fetchHandshakeAndSync() {
   if (p_dht >= -1 && p_dht != PIN_TEMP_SENSOR) { 
     PIN_TEMP_SENSOR = p_dht; 
     if (PIN_TEMP_SENSOR > 0) {
+      pinMode(PIN_TEMP_SENSOR, INPUT_PULLUP);
       dht = DHT(PIN_TEMP_SENSOR, DHT22);
       dht.begin();
     }
     pinChanged = true; 
+  }
+  if (p_wtemp >= -1 && p_wtemp != PIN_WATER_TEMP_SENSOR) {
+    PIN_WATER_TEMP_SENSOR = p_wtemp;
+    if (PIN_WATER_TEMP_SENSOR > 0) {
+      pinMode(PIN_WATER_TEMP_SENSOR, INPUT_PULLUP);
+      oneWireWaterTemp = OneWire(PIN_WATER_TEMP_SENSOR);
+      waterTempSensor = DallasTemperature(&oneWireWaterTemp);
+      waterTempSensor.begin();
+    }
+    pinChanged = true;
   }
   if (p_level_rx >= -1 && p_level_rx != PIN_LEVEL_SENSOR_RX) { PIN_LEVEL_SENSOR_RX = p_level_rx; pinChanged = true; }
   if (p_level_tx >= -1 && p_level_tx != PIN_LEVEL_SENSOR_TX) { PIN_LEVEL_SENSOR_TX = p_level_tx; pinChanged = true; }
@@ -432,18 +483,38 @@ void postStatus() {
   if (!wifiConnected) return;
 
   String body = "{";
-  body += "\"humidityPct\":"      + String(sensors.humidityPct, 1) + ",";
-  body += "\"ph\":"               + String(sensors.phValue, 2) + ",";
-  body += "\"ec\":"               + String(sensors.ecValue, 2) + ",";
+  
+  if (sensors.humidityValid) {
+    body += "\"humidityPct\":" + String(sensors.humidityPct, 1) + ",";
+    body += "\"reservoirTempC\":" + String(sensors.waterTempC, 1) + ",";
+  } else {
+    body += "\"humidityPct\":null,";
+    body += "\"reservoirTempC\":null,";
+  }
+  
+  if (sensors.phValid) {
+    body += "\"ph\":" + String(sensors.phValue, 2) + ",";
+  } else {
+    body += "\"ph\":null,";
+  }
+  
+  if (sensors.ecValid) {
+    body += "\"ec\":" + String(sensors.ecValue, 2) + ",";
+  } else {
+    body += "\"ec\":null,";
+  }
+
   body += "\"waterLevel\":\""     + sensors.waterLevel + "\",";
   body += "\"waterDistanceCm\":"   + String(sensors.waterDistanceCm, 1) + ",";
   body += "\"waterLevelPercent\":" + String(sensors.waterLevelPercent, 1) + ",";
   body += "\"waterVolumeLiters\":" + String(sensors.waterVolumeLiters, 1) + ",";
-  body += "\"reservoirTempC\":"   + String(sensors.waterTempC, 1) + ",";
   body += "\"dhtOk\":"            + String(sensors.humidityValid ? "true" : "false") + ",";
   body += "\"levelSensorOk\":"    + String(sensors.levelValid ? "true" : "false") + ",";
   body += "\"sensorDataOk\":"      + String(sensors.humidityValid && sensors.phValid && sensors.ecValid ? "true" : "false");
   body += "}";
+
+  Serial.print("[API] Submitting Status Payload: ");
+  Serial.println(body);
 
   httpRequest("PUT", "/api/status", body);
 }
