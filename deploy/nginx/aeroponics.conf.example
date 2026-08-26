@@ -1,13 +1,9 @@
 server {
     listen 80;
-    server_name chandugowda.site www.chandugowda.site;
+    server_name hydroponics.chandugowda.site;
 
-    location = /hydroponics {
-        return 301 /hydroponics/;
-    }
-
-    location /hydroponics/ {
-        proxy_pass http://127.0.0.1:8080/;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
