@@ -177,7 +177,7 @@ export async function fetchAnalyticsSummary(days = 7, deviceId?: string | null):
 }
 
 // Admin device management
-export type DeviceListEntry = { id: string; name: string | null; deviceId: string; macAddress?: string | null; ipAddress?: string | null; createdAt: string; pins?: GpioMapping[] };
+export type DeviceListEntry = { id: string; name: string | null; deviceId: string; macAddress?: string | null; ipAddress?: string | null; createdAt: string; pins?: GpioMapping[]; online?: boolean; lastSeen?: string | number | null };
 export type DeviceCreateSuccess = { deviceId: string; secret: string };
 export type DeviceCreateDuplicate = { error: string; existingDevice: DeviceListEntry };
 export type DeviceCreateResult = DeviceCreateSuccess | DeviceCreateDuplicate;

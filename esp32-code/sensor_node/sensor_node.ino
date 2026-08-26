@@ -213,17 +213,22 @@ void loop() {
 //  SENSOR READINGS
 // ─────────────────────────────────────────────────────────────────────
 void setupPinModes() {
-  pinMode(PIN_PH_SENSOR, INPUT);
-  pinMode(PIN_EC_SENSOR, INPUT);
-  pinMode(PIN_LEVEL_SENSOR_TX, OUTPUT);
-  pinMode(PIN_LEVEL_SENSOR_RX, INPUT);
+  if (PIN_PH_SENSOR > 0) pinMode(PIN_PH_SENSOR, INPUT);
+  if (PIN_EC_SENSOR > 0) pinMode(PIN_EC_SENSOR, INPUT);
+  if (PIN_LEVEL_SENSOR_TX > 0) pinMode(PIN_LEVEL_SENSOR_TX, OUTPUT);
+  if (PIN_LEVEL_SENSOR_RX > 0) pinMode(PIN_LEVEL_SENSOR_RX, INPUT);
 }
 
 void readSensors() {
   // DHT22
-  float hum  = dht.readHumidity();
-  float temp = dht.readTemperature();
-  bool dhtOk = (!isnan(hum) && hum >= 0.0f && hum <= 100.0f);
+  float hum = NAN;
+  float temp = NAN;
+  bool dhtOk = false;
+  if (PIN_TEMP_SENSOR > 0) {
+    hum = dht.readHumidity();
+    temp = dht.readTemperature();
+    dhtOk = (!isnan(hum) && hum >= 0.0f && hum <= 100.0f);
+  }
   if (dhtOk) {
     sensors.humidityPct = hum;
     sensors.humidityValid = true;
@@ -232,37 +237,43 @@ void readSensors() {
   } else {
     sensors.humidityValid = false;
     sensors.waterTempC = 24.5f;
-    Serial.println("[DHT22] Read error");
+    Serial.println("[DHT22] Sensor not connected or read error");
   }
 
   // pH (analog)
-  int phRaw = readAnalogFiltered(PIN_PH_SENSOR);
-  float ph = 6.0f;
-  if (phRaw < 100) {
-    ph = 5.8f + 0.3f * sin(millis() / 60000.0f); // Simulated fallback
-    sensors.phValid = true;
+  if (PIN_PH_SENSOR <= 0) {
+    sensors.phValid = false;
+    Serial.println("[pH Sensor] Disabled");
   } else {
-    float phUncompensated = 7.0f + ((float)(phRaw - 2048) * 3.3f / 4095.0f * 3.5f);
-    float tempCompFactor = 298.15f / (273.15f + sensors.waterTempC);
-    ph = 7.0f + (phUncompensated - 7.0f) * tempCompFactor;
-    sensors.phValid = true;
+    int phRaw = readAnalogFiltered(PIN_PH_SENSOR);
+    if (phRaw < 100) {
+      sensors.phValid = false;
+      Serial.printf("[pH Sensor] Sensor not connected (Raw ADC: %d)\n", phRaw);
+    } else {
+      float phUncompensated = 7.0f + ((float)(phRaw - 2048) * 3.3f / 4095.0f * 3.5f);
+      float tempCompFactor = 298.15f / (273.15f + (sensors.humidityValid ? sensors.waterTempC : 25.0f));
+      sensors.phValue = 7.0f + (phUncompensated - 7.0f) * tempCompFactor;
+      sensors.phValid = true;
+      Serial.printf("[pH Sensor] Raw ADC: %d -> %.2f pH\n", phRaw, sensors.phValue);
+    }
   }
-  sensors.phValue = ph;
-  Serial.printf("[pH Sensor] Raw ADC: %d -> %.2f pH (temp comp @ %.1fC)\n", phRaw, ph, sensors.waterTempC);
 
   // EC/TDS (analog)
-  int ecRaw = readAnalogFiltered(PIN_EC_SENSOR);
-  float ec = 1.2f;
-  if (ecRaw < 100) {
-    ec = 1.15f + 0.1f * cos(millis() / 60000.0f); // Simulated fallback
-    sensors.ecValid = true;
+  if (PIN_EC_SENSOR <= 0) {
+    sensors.ecValid = false;
+    Serial.println("[EC Sensor] Disabled");
   } else {
-    float ecUncompensated = (float)ecRaw * 3.3f / 4095.0f * 2.0f;
-    ec = ecUncompensated / (1.0f + 0.019f * (sensors.waterTempC - 25.0f));
-    sensors.ecValid = true;
+    int ecRaw = readAnalogFiltered(PIN_EC_SENSOR);
+    if (ecRaw < 100) {
+      sensors.ecValid = false;
+      Serial.printf("[EC Sensor] Sensor not connected (Raw ADC: %d)\n", ecRaw);
+    } else {
+      float ecUncompensated = (float)ecRaw * 3.3f / 4095.0f * 2.0f;
+      sensors.ecValue = ecUncompensated / (1.0f + 0.019f * ((sensors.humidityValid ? sensors.waterTempC : 25.0f) - 25.0f));
+      sensors.ecValid = true;
+      Serial.printf("[EC Sensor] Raw ADC: %d -> %.2f mS/cm\n", ecRaw, sensors.ecValue);
+    }
   }
-  sensors.ecValue = ec;
-  Serial.printf("[EC Sensor] Raw ADC: %d -> %.2f mS/cm (temp comp @ %.1fC)\n", ecRaw, ec, sensors.waterTempC);
 
   // Water level (Ultrasonic)
   float distanceCm = -1.0f;
@@ -374,16 +385,18 @@ bool fetchHandshakeAndSync() {
   float serverTankCapacity = extractJsonNumber(resp, "tankCapacityLiters").toFloat();
 
   bool pinChanged = false;
-  if (p_phS > 0 && p_phS != PIN_PH_SENSOR) { PIN_PH_SENSOR = p_phS; pinChanged = true; }
-  if (p_ecS > 0 && p_ecS != PIN_EC_SENSOR) { PIN_EC_SENSOR = p_ecS; pinChanged = true; }
-  if (p_dht > 0 && p_dht != PIN_TEMP_SENSOR) { 
+  if (p_phS >= -1 && p_phS != PIN_PH_SENSOR) { PIN_PH_SENSOR = p_phS; pinChanged = true; }
+  if (p_ecS >= -1 && p_ecS != PIN_EC_SENSOR) { PIN_EC_SENSOR = p_ecS; pinChanged = true; }
+  if (p_dht >= -1 && p_dht != PIN_TEMP_SENSOR) { 
     PIN_TEMP_SENSOR = p_dht; 
-    dht = DHT(PIN_TEMP_SENSOR, DHT22);
-    dht.begin();
+    if (PIN_TEMP_SENSOR > 0) {
+      dht = DHT(PIN_TEMP_SENSOR, DHT22);
+      dht.begin();
+    }
     pinChanged = true; 
   }
-  if (p_level_rx > 0 && p_level_rx != PIN_LEVEL_SENSOR_RX) { PIN_LEVEL_SENSOR_RX = p_level_rx; pinChanged = true; }
-  if (p_level_tx > 0 && p_level_tx != PIN_LEVEL_SENSOR_TX) { PIN_LEVEL_SENSOR_TX = p_level_tx; pinChanged = true; }
+  if (p_level_rx >= -1 && p_level_rx != PIN_LEVEL_SENSOR_RX) { PIN_LEVEL_SENSOR_RX = p_level_rx; pinChanged = true; }
+  if (p_level_tx >= -1 && p_level_tx != PIN_LEVEL_SENSOR_TX) { PIN_LEVEL_SENSOR_TX = p_level_tx; pinChanged = true; }
   ULTRASONIC_TRIGGER_ECHO = serverTriggerEcho;
 
   if (serverEmptyDistance > serverFullDistance) {

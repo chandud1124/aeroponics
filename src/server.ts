@@ -315,7 +315,15 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (request.method === "GET" && url.pathname === "/api/admin/devices") {
-      return jsonResponse({ devices: listDevices() });
+      const enrichedDevices = listDevices().map((d) => {
+        const s = getStatus(d.deviceId);
+        return {
+          ...d,
+          online: s ? s.isOnline : false,
+          lastSeen: s ? (s.telemetryUpdatedAt ?? s.heartbeatUpdatedAt ?? null) : null,
+        };
+      });
+      return jsonResponse({ devices: enrichedDevices });
     }
 
     if (request.method === "DELETE") {
@@ -334,7 +342,15 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         return jsonResponse({ error: "Method not allowed" }, 405);
       }
 
-      return jsonResponse({ devices: listDevices() });
+      const enrichedDevices = listDevices().map((d) => {
+        const s = getStatus(d.deviceId);
+        return {
+          ...d,
+          online: s ? s.isOnline : false,
+          lastSeen: s ? (s.telemetryUpdatedAt ?? s.heartbeatUpdatedAt ?? null) : null,
+        };
+      });
+      return jsonResponse({ devices: enrichedDevices });
     }
 
   if (url.pathname === "/api/status") {
@@ -508,8 +524,12 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     const schedule = getSchedule();
     const cycleProfile = getCycleProfile();    const devicePins = getDevicePins(resolvedDeviceId);
     const mappings = (devicePins && devicePins.length > 0) ? devicePins : getGpioMappings();
-    const findPin = (type: string, defaultPin: number) =>
-      mappings.find((m) => m.type === type)?.pin ?? defaultPin;
+    const findPin = (type: string, defaultPin: number) => {
+      const found = mappings.find((m) => m.type === type);
+      if (found) return found.pin;
+      if (devicePins && devicePins.length > 0) return -1;
+      return defaultPin;
+    };
     const ultrasonic = mappings.find((m) => m.type === "Water Level - Ultrasonic");
     const waterCalibration = ultrasonic ?? mappings.find((m) =>
       m.type === "Water Level - Analog Sensor" || m.type === "Water Level Sensor"
@@ -537,7 +557,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pin_ec_sensor: findPin("EC Sensor", 4),
         pin_level_sensor: findPin("Water Level Sensor", 18),
         pin_level_sensor_rx: ultrasonic?.pin ?? findPin("Water Level Sensor", 18),
-        pin_level_sensor_tx: ultrasonic?.txPin ?? 5,
+        pin_level_sensor_tx: ultrasonic?.txPin ?? (devicePins && devicePins.length > 0 ? -1 : 5),
         pin_motor_button: findPin("Motor Override Button", 19),
         emptyDistanceCm: waterCalibration?.emptyDistanceCm ?? 50,
         fullDistanceCm: waterCalibration?.fullDistanceCm ?? 10,

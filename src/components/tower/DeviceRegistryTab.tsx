@@ -99,6 +99,8 @@ export function DeviceRegistryTab() {
 
   useEffect(() => {
     loadData();
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
   }, [adminPasskey]);
 
   const handleRegisterDevice = async () => {
@@ -334,14 +336,24 @@ export function DeviceRegistryTab() {
             <Card key={dev.id} className="p-5 border-border/80 bg-card flex flex-col justify-between hover:border-primary/50 transition-colors">
               <div className="space-y-4">
                 {/* Device identifier headers */}
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <span className="text-sm font-bold text-foreground block">{dev.name}</span>
                     <span className="text-[10px] font-mono text-slate-500 block">ID: {dev.deviceId}</span>
+                    {dev.lastSeen && (
+                      <span className="text-[9px] font-mono text-slate-400 block">
+                        Last ping: {new Date(dev.lastSeen).toLocaleTimeString()}
+                      </span>
+                    )}
                   </div>
-                  <Badge variant="default" className="text-[10px] font-mono font-bold bg-green-500/10 text-green-600 border-green-500/20">
-                    MAC: {dev.macAddress || "—"}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    <Badge className={`text-[10px] font-mono font-bold border ${dev.online ? "bg-green-500/10 text-green-600 border-green-500/20" : "bg-red-500/10 text-red-600 border-red-500/20"}`}>
+                      {dev.online ? "ONLINE" : "OFFLINE"}
+                    </Badge>
+                    <Badge variant="outline" className="text-[9px] font-mono font-bold bg-muted/30 text-muted-foreground border-border/80">
+                      MAC: {dev.macAddress || "—"}
+                    </Badge>
+                  </div>
                 </div>
 
                 {/* Remapped status display */}
