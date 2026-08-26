@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 
 export function CameraQrScanner({
@@ -12,10 +12,18 @@ export function CameraQrScanner({
 }) {
   const containerId = "camera-qr-scanner-element";
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
 
   useEffect(() => {
     const html5QrCode = new Html5Qrcode(containerId);
     scannerRef.current = html5QrCode;
+
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setStartupError("Camera scanning requires HTTPS. Open the dashboard using its secure URL.");
+      return () => {
+        scannerRef.current = null;
+      };
+    }
 
     html5QrCode
       .start(
@@ -32,7 +40,12 @@ export function CameraQrScanner({
         }
       )
       .catch((err) => {
-        console.error("Failed to start QR scanner:", err);
+        const message = err instanceof Error ? err.message : String(err);
+        setStartupError(
+          message.toLowerCase().includes("permission")
+            ? "Camera permission was blocked. Allow camera access in the browser settings and try again."
+            : "Unable to start the camera. Use HTTPS and allow camera access in the browser settings."
+        );
       });
 
     return () => {
@@ -63,6 +76,11 @@ export function CameraQrScanner({
         id={containerId}
         className="overflow-hidden rounded-md border bg-black aspect-square max-w-[280px] mx-auto w-full"
       />
+      {startupError ? (
+        <p role="alert" className="text-[11px] text-red-600 text-center font-semibold">
+          {startupError}
+        </p>
+      ) : null}
       <p className="text-[10px] text-muted-foreground text-center">
         Align the QR code inside the frame to scan automatically.
       </p>

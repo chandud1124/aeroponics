@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Activity, Timer, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { parseFault, FAULT_INFO, type FaultCode } from "@/lib/tower-faults";
-import { withDeviceHeaders } from "@/lib/tower-storage";
+import { API_BASE_URL, withDeviceHeaders } from "@/lib/tower-storage";
 
 type LogRow = {
   id: string;
@@ -35,7 +35,7 @@ const EMPTY: Summary = {
 };
 
 async function loadSummary(deviceId?: string | null): Promise<Summary> {
-  const response = await fetch("/api/pump-log", withDeviceHeaders({ method: "GET" }, deviceId));
+  const response = await fetch(`${API_BASE_URL}/api/pump-log`, withDeviceHeaders({ method: "GET" }, deviceId));
   if (!response.ok) return EMPTY;
   const payload = (await response.json()) as {
     cycles: Array<{

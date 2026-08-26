@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { withDeviceHeaders } from "@/lib/tower-storage";
+import { API_BASE_URL, withDeviceHeaders } from "@/lib/tower-storage";
 
 interface AIInsight {
   insights: string;
@@ -41,7 +41,7 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
 
   const loadSettings = async () => {
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(`${API_BASE_URL}/api/settings`, {
         headers: { "x-admin-passkey": passcode || "0990" }
       });
       if (res.ok) {
@@ -63,7 +63,7 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
     setSavingSettings(true);
     setSettingsError(null);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(`${API_BASE_URL}/api/settings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -89,7 +89,7 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/ai-insights?days=7", withDeviceHeaders({ method: "GET" }, deviceId));
+      const response = await fetch(`${API_BASE_URL}/api/ai-insights?days=7`, withDeviceHeaders({ method: "GET" }, deviceId));
       const data = (await response.json().catch(() => null)) as AIInsightsResponse | null;
 
       if (data?.error) {

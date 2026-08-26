@@ -44,7 +44,7 @@ export type StatusEnvelope = {
   hasRegisteredDevice: boolean;
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.BASE_URL === "/hydroponics/" ? "/hydroponics" : "");
 
 export function withDeviceHeaders(init: RequestInit = {}, deviceId?: string | null): RequestInit {
   const headers = new Headers(init.headers ?? {});

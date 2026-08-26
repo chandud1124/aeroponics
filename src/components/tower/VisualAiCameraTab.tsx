@@ -18,7 +18,7 @@ import {
   Calendar, 
   Clock 
 } from "lucide-react";
-import { withDeviceHeaders } from "@/lib/tower-storage";
+import { API_BASE_URL, withDeviceHeaders } from "@/lib/tower-storage";
 import type { CameraSettings, CameraSnapshot } from "@/lib/tower-shared";
 
 export function VisualAiCameraTab({ activeDeviceId }: { activeDeviceId?: string | null }) {
@@ -41,7 +41,7 @@ export function VisualAiCameraTab({ activeDeviceId }: { activeDeviceId?: string 
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch("/api/camera/settings", {
+      const res = await fetch(`${API_BASE_URL}/api/camera/settings`, {
         headers: { "x-admin-passkey": passcode || "0990" }
       });
       if (res.ok) {
@@ -62,7 +62,7 @@ export function VisualAiCameraTab({ activeDeviceId }: { activeDeviceId?: string 
   const fetchSnapshots = async () => {
     setLoadingSnapshots(true);
     try {
-      const res = await fetch("/api/camera/snapshots");
+      const res = await fetch(`${API_BASE_URL}/api/camera/snapshots`);
       if (res.ok) {
         const data = await res.json();
         setSnapshots(data.snapshots || []);
@@ -91,7 +91,7 @@ export function VisualAiCameraTab({ activeDeviceId }: { activeDeviceId?: string 
   const handleSaveSettings = async () => {
     setSavingSettings(true);
     try {
-      const res = await fetch("/api/camera/settings", {
+      const res = await fetch(`${API_BASE_URL}/api/camera/settings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -126,7 +126,7 @@ export function VisualAiCameraTab({ activeDeviceId }: { activeDeviceId?: string 
     }
     setInspecting(true);
     try {
-      const res = await fetch("/api/camera/inspect", withDeviceHeaders({
+      const res = await fetch(`${API_BASE_URL}/api/camera/inspect`, withDeviceHeaders({
         method: "POST",
         headers: {
           "x-admin-passkey": passcode || "0990"
