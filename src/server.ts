@@ -402,6 +402,33 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         reservoirTempC?: number | null;
       };
 
+      // Force unmapped sensor values to null if device registry has custom pins configured
+      const devicePins = getDevicePins(resolvedDeviceId);
+      const hasCustomPins = devicePins && devicePins.length > 0;
+      if (hasCustomPins) {
+        const hasPh = devicePins.some((p) => p.type === "pH Sensor");
+        const hasEc = devicePins.some((p) => p.type === "EC Sensor");
+        const hasTemp = devicePins.some((p) => p.type === "Water Temperature Sensor" || p.type === "Humidity Sensor");
+        const hasLevel = devicePins.some((p) => p.type === "Water Level - Ultrasonic" || p.type === "Water Level Sensor" || p.type === "Water Level - Analog Sensor");
+
+        if (!hasPh) {
+          payload.ph = null;
+        }
+        if (!hasEc) {
+          payload.ec = null;
+        }
+        if (!hasTemp) {
+          payload.humidityPct = null;
+          payload.reservoirTempC = null;
+        }
+        if (!hasLevel) {
+          payload.waterLevel = null;
+          payload.waterLevelPercent = null;
+          payload.waterVolumeLiters = null;
+          payload.waterDistanceCm = null;
+        }
+      }
+
       // Validate humidity (0-100%)
       if (payload.humidityPct !== undefined && payload.humidityPct !== null) {
         if (payload.humidityPct < 0 || payload.humidityPct > 100) {
@@ -419,14 +446,14 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           }
           return payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE;
         })(),
-        humidityPct: payload.humidityPct ?? undefined,
-        ph: payload.ph ?? undefined,
-        ec: payload.ec ?? undefined,
-        waterLevel: payload.waterLevel ?? undefined,
-        waterDistanceCm: payload.waterDistanceCm ?? undefined,
-        waterLevelPercent: payload.waterLevelPercent ?? undefined,
-        waterVolumeLiters: payload.waterVolumeLiters ?? undefined,
-        reservoirTempC: payload.reservoirTempC ?? undefined,
+        humidityPct: payload.humidityPct === null ? null : (payload.humidityPct ?? undefined),
+        ph: payload.ph === null ? null : (payload.ph ?? undefined),
+        ec: payload.ec === null ? null : (payload.ec ?? undefined),
+        waterLevel: payload.waterLevel === null ? null : (payload.waterLevel ?? undefined),
+        waterDistanceCm: payload.waterDistanceCm === null ? null : (payload.waterDistanceCm ?? undefined),
+        waterLevelPercent: payload.waterLevelPercent === null ? null : (payload.waterLevelPercent ?? undefined),
+        waterVolumeLiters: payload.waterVolumeLiters === null ? null : (payload.waterVolumeLiters ?? undefined),
+        reservoirTempC: payload.reservoirTempC === null ? null : (payload.reservoirTempC ?? undefined),
         phDosingOn: payload.phDosingOn ?? undefined,
         nutritionADosingOn: payload.nutritionADosingOn ?? undefined,
         nutritionBDosingOn: payload.nutritionBDosingOn ?? undefined,
