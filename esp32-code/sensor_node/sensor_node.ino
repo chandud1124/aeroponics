@@ -12,7 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────
 #define PH_PIN     2
 #define TDS_PIN    4
-#define TEMP_PIN   1
+#define TEMP_PIN   16
 #define TRIG_PIN   5
 #define ECHO_PIN   18
 
@@ -43,9 +43,9 @@ const char* WIFI_SSID     = "I am Not A Witch I am Your Wifi";
 const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend API
-const char* API_BASE_URL  = "https://hydroponics.chandugowda.site";
-const char* DEVICE_ID      = "device-w7p329";
-const char* DEVICE_SECRET  = "54364796ead0fe885adcea29c48267cf462e5c163fb1ac77";
+const char* API_BASE_URL = "https://hydroponics.chandugowda.site";
+const char* DEVICE_ID     = "device-ry5fbc";
+const char* DEVICE_SECRET = "32044676ac399a0f383ccc4f9693001a8163ebc228abbf2c";
 
 // Timing Intervals
 const unsigned long IV_SENSOR       = 15000UL; // Read sensors every 15s
@@ -428,6 +428,7 @@ void postStatus() {
   body += "\"waterVolumeLiters\":" + String(sensors.waterVolumeLiters, 1) + ",";
   body += "\"reservoirTempC\":"   + String(sensors.waterTempC, 1) + ",";
   body += "\"dhtOk\":"            + String(sensors.humidityValid ? "true" : "false") + ",";
+  body += "\"levelSensorOk\":"    + String(sensors.levelValid ? "true" : "false") + ",";
   body += "\"sensorDataOk\":"      + String(sensors.humidityValid && sensors.phValid && sensors.ecValid ? "true" : "false");
   body += "}";
 

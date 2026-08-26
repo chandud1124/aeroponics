@@ -437,7 +437,11 @@ function isRetryableFlowFault(fault: string | null | undefined): boolean {
 }
 
 function normalizeDeviceId(deviceId?: string | null): string {
-  return deviceId?.trim() || DEFAULT_DEVICE_ID;
+  const trimmed = deviceId?.trim();
+  if (!trimmed || trimmed === "__current__") {
+    return getPrimaryStatusDeviceId() ?? DEFAULT_DEVICE_ID;
+  }
+  return trimmed;
 }
 
 function getPrimaryStatusDeviceId() {

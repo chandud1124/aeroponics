@@ -382,6 +382,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         lastRunAt?: string;
         sensorDataOk?: boolean;
         dhtOk?: boolean;
+        levelSensorOk?: boolean;
         reservoirTempC?: number | null;
       };
 
@@ -432,6 +433,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         })(),
         sensorDataOk: payload.sensorDataOk ?? undefined,
         dhtOk: payload.dhtOk ?? undefined,
+        levelSensorOk: payload.levelSensorOk ?? undefined,
         // accept optional device-sent fields
         scheduleAppliedAt: (payload as any).scheduleAppliedAt ?? undefined,
         appliedPlanName: (payload as any).planName ?? undefined,
@@ -544,7 +546,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         tankHeightCm: waterCalibration?.tankHeightCm ?? 80,
         tankCapacityLiters: waterCalibration?.tankCapacityLiters ?? 200,
         ultrasonicTriggerEcho: waterCalibration?.type === "Water Level - Ultrasonic",
-        pin_dht_data: humidityMapping?.pin ?? findPin("Water Temperature Sensor", 1)
+        pin_dht_data: humidityMapping?.pin ?? findPin("Water Temperature Sensor", 16)
       },
       200,
     );

@@ -94,6 +94,7 @@ export type LiveStatus = {
   retryNextCycleIn?: number | null;
   sensorDataOk?: boolean;
   dhtOk?: boolean;
+  levelSensorOk?: boolean;
   reservoirDsOk?: boolean;
   towerDsOk?: boolean;
   cycleMode?: "DAY" | "NIGHT";
