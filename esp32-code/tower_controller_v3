@@ -53,9 +53,9 @@ const char* WIFI_SSID     = "I am Not A Witch I am Your Wifi";
 const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend
-const char* API_BASE_URL  = "http://13.234.122.175:8080";
-const char* DEVICE_ID     = "device-zp07xd";
-const char* DEVICE_SECRET = "c5f86f564a628618afffccfcc8f7a42ee11741c51d9941eb";
+const char* API_BASE_URL = "https://hydroponics.chandugowda.site";
+const char* DEVICE_ID     = "device-w7p329";
+const char* DEVICE_SECRET = "54364796ead0fe885adcea29c48267cf462e5c163fb1ac77";
 // GPIO (mutable dynamic mappings re-configured from backend handshake)
 int PIN_DHT_DATA           = 16;
 int PIN_PH_SENSOR          = 35; // Analog input for pH Probe

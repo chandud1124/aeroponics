@@ -397,6 +397,8 @@ function Index() {
   const tankCapacity = waterPin?.tankCapacityLiters ?? 200;
   const emptyDistance = waterPin?.emptyDistanceCm ?? 50;
   const fullDistance = waterPin?.fullDistanceCm ?? 10;
+  const hasWaterReading = (status?.waterDistanceCm ?? 0) > 0 && status?.waterLevelPercent != null;
+  const currentVolume = hasWaterReading ? Math.round(status?.waterVolumeLiters ?? 0) : null;
 
   useEffect(() => {
     if (!mounted) return;
@@ -1312,7 +1314,7 @@ function Index() {
                         <div className="w-24 h-48 bg-muted rounded-2xl border-2 border-border relative overflow-hidden shrink-0 flex items-end">
                           <div className="w-full bg-blue-500/80 animate-pulse transition-all" style={{ height: `${status?.waterLevelPercent ?? 0}%` }} />
                           <div className="absolute inset-0 flex items-center justify-center font-bold font-mono text-sm text-foreground">
-                            {Math.round(status?.waterLevelPercent ?? 0)}%
+                            {hasWaterReading ? `${Math.round(status?.waterLevelPercent ?? 0)}%` : "--"}
                           </div>
                         </div>
                         <div className="space-y-3 text-xs flex-1">
@@ -1322,11 +1324,11 @@ function Index() {
                           </div>
                           <div className="flex justify-between border-b pb-1.5">
                             <span className="text-muted-foreground">Current Volume:</span>
-                            <span className="font-bold">{Math.round(status?.waterVolumeLiters ?? 0)} Liters (Calibrated)</span>
+                            <span className="font-bold">{currentVolume != null ? `${currentVolume} Liters (Calibrated)` : "No reading"}</span>
                           </div>
                           <div className="flex justify-between border-b pb-1.5">
                             <span className="text-muted-foreground">Ultrasonic Distance:</span>
-                            <span className="font-bold">{status?.waterDistanceCm != null ? `${status.waterDistanceCm.toFixed(1)} cm` : "No reading"}</span>
+                            <span className="font-bold">{hasWaterReading ? `${status!.waterDistanceCm!.toFixed(1)} cm` : "No reading"}</span>
                           </div>
                           <div className="flex justify-between border-b pb-1.5">
                             <span className="text-muted-foreground">Inflow Source:</span>
@@ -1334,7 +1336,7 @@ function Index() {
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Refill Status:</span>
-                            <span className="font-semibold text-slate-500">Idle (Refill Threshold 30%)</span>
+                            <span className="font-semibold text-slate-500">{hasWaterReading ? "Idle (Refill Threshold 30%)" : "Waiting for sensor"}</span>
                           </div>
                         </div>
                       </div>
@@ -1358,9 +1360,17 @@ function Index() {
                         {waterPin && (
                           <div className="p-2 rounded bg-primary/5 border border-primary/20 space-y-1">
                             <span className="text-[10px] text-muted-foreground font-bold block">Water Sensor Calibration:</span>
-                            <span className="text-[11px] text-foreground font-semibold block">{waterPin.type}</span>
+                            <span className="text-[11px] text-foreground font-semibold block">{waterPin.name} ({waterPin.type})</span>
+                            {waterPin.type === "Water Level - Ultrasonic" && (
+                              <span className="text-[10px] text-slate-500 font-mono block">
+                                ECHO: GPIO {waterPin.pin} · TRIG: GPIO {waterPin.txPin ?? 18}
+                              </span>
+                            )}
                             <span className="text-[10px] text-slate-500 font-mono block">
                               Range: {emptyDistance}cm (Empty) - {fullDistance}cm (Full)
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono block">
+                              Capacity: {tankCapacity} L ({waterPin.tankWidthCm ?? 50} × {waterPin.tankLengthCm ?? 50} × {waterPin.tankHeightCm ?? 80} cm)
                             </span>
                           </div>
                         )}
