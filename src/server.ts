@@ -531,11 +531,11 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pin_nutrition_b: findPin("Relay - Nutrition B", 26),
         pin_nutrition_c: findPin("Relay - Nutrition C", 0),
         pin_ph_down: findPin("Relay - pH Down", 25),
-        pin_ph_sensor: findPin("pH Sensor", 35),
-        pin_ec_sensor: findPin("EC Sensor", 34),
-        pin_level_sensor: findPin("Water Level Sensor", 32),
-        pin_level_sensor_rx: ultrasonic?.pin ?? findPin("Water Level Sensor", 32),
-        pin_level_sensor_tx: ultrasonic?.txPin ?? 18,
+        pin_ph_sensor: findPin("pH Sensor", 2),
+        pin_ec_sensor: findPin("EC Sensor", 4),
+        pin_level_sensor: findPin("Water Level Sensor", 18),
+        pin_level_sensor_rx: ultrasonic?.pin ?? findPin("Water Level Sensor", 18),
+        pin_level_sensor_tx: ultrasonic?.txPin ?? 5,
         pin_motor_button: findPin("Motor Override Button", 19),
         emptyDistanceCm: waterCalibration?.emptyDistanceCm ?? 50,
         fullDistanceCm: waterCalibration?.fullDistanceCm ?? 10,
@@ -544,7 +544,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         tankHeightCm: waterCalibration?.tankHeightCm ?? 80,
         tankCapacityLiters: waterCalibration?.tankCapacityLiters ?? 200,
         ultrasonicTriggerEcho: waterCalibration?.type === "Water Level - Ultrasonic",
-        pin_dht_data: humidityMapping?.pin ?? findPin("Water Temperature Sensor", 16)
+        pin_dht_data: humidityMapping?.pin ?? findPin("Water Temperature Sensor", 1)
       },
       200,
     );

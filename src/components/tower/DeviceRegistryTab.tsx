@@ -19,7 +19,7 @@ import {
 // Default fallback passkey
 const DEFAULT_ADMIN_PASSKEY = "0990"; 
 
-const VALID_GPIO_PINS = [4, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36];
+const VALID_GPIO_PINS = [1, 2, 4, 5, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36];
 
 const SENSOR_ACTUATOR_TYPES = [
   "pH Sensor",
@@ -67,8 +67,8 @@ export function DeviceRegistryTab() {
   const [newConnName, setNewConnName] = useState("");
   const [newConnType, setNewConnType] = useState<GpioMapping["type"]>("Other Sensor");
   const [newConnDirection, setNewConnDirection] = useState<"INPUT" | "OUTPUT">("INPUT");
-  const [newConnPin, setNewConnPin] = useState<number>(32);
-  const [newConnTxPin, setNewConnTxPin] = useState<number>(18);
+  const [newConnPin, setNewConnPin] = useState<number>(18);
+  const [newConnTxPin, setNewConnTxPin] = useState<number>(5);
 
   // Calibration parameters state
   const [emptyDistanceCm, setEmptyDistanceCm] = useState<number>(50);
@@ -166,15 +166,15 @@ export function DeviceRegistryTab() {
     setNewConnName(waterMapping?.name ?? "");
     setNewConnType(waterMapping?.type ?? "Other Sensor");
     setNewConnDirection(waterMapping?.direction ?? "INPUT");
-    setNewConnPin(waterMapping?.pin ?? 32);
-    setNewConnTxPin(waterMapping?.txPin ?? 18);
+    setNewConnPin(waterMapping?.pin ?? 18);
+    setNewConnTxPin(waterMapping?.txPin ?? 5);
     setEmptyDistanceCm(waterMapping?.emptyDistanceCm ?? 50);
     setFullDistanceCm(waterMapping?.fullDistanceCm ?? 10);
     setTankWidthCm(waterMapping?.tankWidthCm ?? 50);
     setTankLengthCm(waterMapping?.tankLengthCm ?? 50);
     setTankHeightCm(waterMapping?.tankHeightCm ?? 80);
     setTankCapacityLiters(waterMapping?.tankCapacityLiters ?? 200);
-    setNewConnTxPin(waterMapping?.txPin ?? 18);
+    setNewConnTxPin(waterMapping?.txPin ?? 5);
   };
 
   const handleAddConnectionLine = () => {
