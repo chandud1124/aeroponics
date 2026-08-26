@@ -253,6 +253,7 @@ export type GpioMapping = {
     | "Relay - Nutrition B"
     | "Relay - Nutrition C"
     | "Relay - pH Down"
+    | "Motor Override Button"
     | "Other Sensor"
     | "Other Actuator";
   direction: "INPUT" | "OUTPUT";

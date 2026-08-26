@@ -19,6 +19,7 @@ const SENSOR_ACTUATOR_TYPES = [
   "pH Sensor",
   "EC Sensor",
   "Water Level Sensor",
+  "Water Level - Ultrasonic",
   "Humidity Sensor",
   "Water Temperature Sensor",
   "Relay - Water Pump",
@@ -41,6 +42,7 @@ export function GpioConfigTab() {
   const [connType, setConnType] = useState<GpioMapping["type"]>("Other Sensor");
   const [connDirection, setConnDirection] = useState<"INPUT" | "OUTPUT">("INPUT");
   const [connPin, setConnPin] = useState<number>(32);
+  const [connAuxPin, setConnAuxPin] = useState<number>(18);
 
   const loadData = () => {
     setLoading(true);
@@ -59,6 +61,7 @@ export function GpioConfigTab() {
     setConnType("Other Sensor");
     setConnDirection("INPUT");
     setConnPin(32);
+    setConnAuxPin(18);
     setShowForm(true);
   };
 
@@ -68,6 +71,7 @@ export function GpioConfigTab() {
     setConnType(m.type);
     setConnDirection(m.direction);
     setConnPin(m.pin);
+    setConnAuxPin(m.txPin ?? 18);
     setShowForm(true);
   };
 
@@ -83,6 +87,17 @@ export function GpioConfigTab() {
       toast.error(`Pin GPIO ${connPin} is already assigned to "${duplicatePin.name}"`);
       return;
     }
+    if (connType === "Water Level - Ultrasonic" && connAuxPin === connPin) {
+      toast.error("TRIG and ECHO must use different GPIO pins");
+      return;
+    }
+    if (connType === "Water Level - Ultrasonic") {
+      const duplicateAuxPin = mappings.find((m) => m.id !== editId && (m.pin === connAuxPin || m.txPin === connAuxPin));
+      if (duplicateAuxPin) {
+        toast.error(`GPIO ${connAuxPin} is already assigned to "${duplicateAuxPin.name}"`);
+        return;
+      }
+    }
 
     // Check duplicate type mapping (e.g. only one pH sensor or water pump relay)
     if (connType !== "Other Sensor" && connType !== "Other Actuator") {
@@ -97,7 +112,7 @@ export function GpioConfigTab() {
     if (editId) {
       updatedList = mappings.map((m) =>
         m.id === editId
-          ? { ...m, name: connName, type: connType, direction: connDirection, pin: connPin }
+          ? { ...m, name: connName, type: connType, direction: connDirection, pin: connPin, txPin: connType === "Water Level - Ultrasonic" ? connAuxPin : undefined }
           : m
       );
     } else {
@@ -107,6 +122,7 @@ export function GpioConfigTab() {
         type: connType,
         direction: connDirection,
         pin: connPin,
+        txPin: connType === "Water Level - Ultrasonic" ? connAuxPin : undefined,
       };
       updatedList = [...mappings, newMapping];
     }
@@ -208,7 +224,14 @@ export function GpioConfigTab() {
                         {m.direction}
                       </span>
                     </td>
-                    <td className="p-4 font-mono font-bold text-foreground">GPIO {m.pin}</td>
+                    <td className="p-4 font-mono font-bold text-foreground">
+                      {m.type === "Water Level - Ultrasonic" ? (
+                        <span className="flex flex-col gap-1">
+                          <span>ECHO: GPIO {m.pin}</span>
+                          <span>TRIG: GPIO {m.txPin ?? 18}</span>
+                        </span>
+                      ) : `GPIO ${m.pin}`}
+                    </td>
                     <td className="p-4 text-right space-x-1.5">
                       <Button
                         onClick={() => handleOpenEdit(m)}
@@ -297,7 +320,7 @@ export function GpioConfigTab() {
 
               <div className="space-y-1">
                 <Label className="text-xs font-semibold flex items-center gap-1">
-                  GPIO Pin Selection
+                  {connType === "Water Level - Ultrasonic" ? "ECHO Pin" : "GPIO Pin Selection"}
                   {connDirection === "INPUT" && (connType.includes("pH") || connType.includes("EC")) && (
                     <span className="inline-flex text-[9px] text-amber-500 font-bold bg-amber-500/10 px-1 rounded">ADC1 Preferred</span>
                   )}
@@ -315,6 +338,25 @@ export function GpioConfigTab() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {connType === "Water Level - Ultrasonic" && (
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">TRIG Pin</Label>
+                  <Select value={String(connAuxPin)} onValueChange={(val) => setConnAuxPin(Number(val))}>
+                    <SelectTrigger className="w-full text-xs font-mono font-bold">
+                      <SelectValue placeholder="Select TRIG GPIO Pin..." />
+                    </SelectTrigger>
+                    <SelectContent className="font-mono">
+                      {VALID_GPIO_PINS.map((pin) => (
+                        <SelectItem key={pin} value={String(pin)} className="text-xs">GPIO {pin}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {connType === "Water Level - Ultrasonic" && (
+                    <span className="text-[10px] text-muted-foreground block">Use the main pin for ECHO and the second pin below for TRIG.</span>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-border/60">

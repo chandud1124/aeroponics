@@ -62,6 +62,7 @@ int PIN_PH_SENSOR          = 35; // Analog input for pH Probe
 int PIN_EC_SENSOR          = 34; // Analog input for EC Probe
 int PIN_LEVEL_SENSOR       = 32; // Digital input for float switch
 int PIN_LEVEL_SENSOR_TX    = 18;
+bool ULTRASONIC_TRIGGER_ECHO = false;
 int PIN_MOTOR_BUTTON       = 19;
 int PIN_LIGHT_BUTTON       = 23; // Repurposed for manual pH dosing
 int PIN_PUMP_RELAY         = 27;
@@ -357,7 +358,13 @@ void setupPinModes() {
   pinMode(PIN_PH_SENSOR,    INPUT);
   pinMode(PIN_EC_SENSOR,    INPUT);
   pinMode(PIN_LEVEL_SENSOR, INPUT_PULLUP);
-  Serial2.begin(9600, SERIAL_8N1, PIN_LEVEL_SENSOR, PIN_LEVEL_SENSOR_TX);
+  if (ULTRASONIC_TRIGGER_ECHO) {
+    pinMode(PIN_LEVEL_SENSOR, INPUT);
+    pinMode(PIN_LEVEL_SENSOR_TX, OUTPUT);
+    digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
+  } else {
+    Serial2.begin(9600, SERIAL_8N1, PIN_LEVEL_SENSOR, PIN_LEVEL_SENSOR_TX);
+  }
   pinMode(PIN_MOTOR_BUTTON, INPUT_PULLUP);
   pinMode(PIN_LIGHT_BUTTON, INPUT_PULLUP);
 }
@@ -949,16 +956,26 @@ void readSensors() {
   sensors.ecValue = ec;
   Serial.printf("[EC Probe] Raw ADC: %d -> %.2f mS/cm (temp compensated @ %.1fC)\n", ecRaw, ec, sensors.waterTempC);
 
-  // ── Water Level Sensor (A02YYUW UART ultrasonic) ─────────────────
+  // ── Water Level Sensor ────────────────────────────────────────────
   float distanceCm = -1.0f;
-  while (Serial2.available() >= 4) {
-    if (Serial2.read() != 0xFF) continue;
-    int highByte = Serial2.read();
-    int lowByte = Serial2.read();
-    int checksum = Serial2.read();
-    if (((0xFF + highByte + lowByte) & 0xFF) != checksum) continue;
-    distanceCm = ((highByte << 8) | lowByte) / 10.0f;
-    break;
+  if (ULTRASONIC_TRIGGER_ECHO) {
+    digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
+    delayMicroseconds(2);
+    digitalWrite(PIN_LEVEL_SENSOR_TX, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
+    unsigned long durationUs = pulseIn(PIN_LEVEL_SENSOR, HIGH, 30000UL);
+    if (durationUs > 0) distanceCm = durationUs * 0.0343f / 2.0f;
+  } else {
+    while (Serial2.available() >= 4) {
+      if (Serial2.read() != 0xFF) continue;
+      int highByte = Serial2.read();
+      int lowByte = Serial2.read();
+      int checksum = Serial2.read();
+      if (((0xFF + highByte + lowByte) & 0xFF) != checksum) continue;
+      distanceCm = ((highByte << 8) | lowByte) / 10.0f;
+      break;
+    }
   }
 
   if (distanceCm > 0.0f && emptyDistanceCm > fullDistanceCm) {
@@ -1473,6 +1490,7 @@ bool fetchHandshakeAndSync() {
   int dNightDur = extractJsonInt(resp, "nightDurationSeconds");
   int levelRx = extractJsonInt(resp, "pin_level_sensor_rx");
   int levelTx = extractJsonInt(resp, "pin_level_sensor_tx");
+  bool serverTriggerEcho = extractJsonBool(resp, "ultrasonicTriggerEcho", false);
   float serverEmptyDistance = extractJsonNumber(resp, "emptyDistanceCm").toFloat();
   float serverFullDistance = extractJsonNumber(resp, "fullDistanceCm").toFloat();
   float serverTankWidth = extractJsonNumber(resp, "tankWidthCm").toFloat();
@@ -1540,6 +1558,7 @@ bool fetchHandshakeAndSync() {
       if (ecDoseCool > 0) schedule.ecDoseIntervalMinutes = ecDoseCool;
 
       bool calibrationChanged =
+        (serverTriggerEcho != ULTRASONIC_TRIGGER_ECHO) ||
         (levelRx > 0 && levelRx != PIN_LEVEL_SENSOR) ||
         (levelTx > 0 && levelTx != PIN_LEVEL_SENSOR_TX) ||
         (serverEmptyDistance > serverFullDistance && serverEmptyDistance != emptyDistanceCm) ||
@@ -1550,6 +1569,7 @@ bool fetchHandshakeAndSync() {
         (serverTankCapacity > 0 && serverTankCapacity != tankCapacityLiters);
       if (levelRx > 0) PIN_LEVEL_SENSOR = levelRx;
       if (levelTx > 0) PIN_LEVEL_SENSOR_TX = levelTx;
+      ULTRASONIC_TRIGGER_ECHO = serverTriggerEcho;
       if (serverEmptyDistance > serverFullDistance) {
         emptyDistanceCm = serverEmptyDistance;
         fullDistanceCm = serverFullDistance;
@@ -1623,6 +1643,7 @@ bool fetchHandshakeAndSync() {
     int p_phS   = extractJsonInt(resp, "pin_ph_sensor");
     int p_ecS   = extractJsonInt(resp, "pin_ec_sensor");
     int p_level = extractJsonInt(resp, "pin_level_sensor_rx");
+      int p_motor = extractJsonInt(resp, "pin_motor_button");
     int p_dht   = extractJsonInt(resp, "pin_dht_data");
 
     bool pinChanged = false;
@@ -1633,6 +1654,7 @@ bool fetchHandshakeAndSync() {
     if (p_phS > 0 && p_phS != PIN_PH_SENSOR) { PIN_PH_SENSOR = p_phS; pinChanged = true; }
     if (p_ecS > 0 && p_ecS != PIN_EC_SENSOR) { PIN_EC_SENSOR = p_ecS; pinChanged = true; }
     if (p_level > 0 && p_level != PIN_LEVEL_SENSOR) { PIN_LEVEL_SENSOR = p_level; pinChanged = true; }
+    if (p_motor > 0 && p_motor != PIN_MOTOR_BUTTON) { PIN_MOTOR_BUTTON = p_motor; pinChanged = true; }
     if (p_dht > 0 && p_dht != PIN_DHT_DATA) { PIN_DHT_DATA = p_dht; pinChanged = true; }
 
     if (pinChanged) {

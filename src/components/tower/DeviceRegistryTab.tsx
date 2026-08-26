@@ -35,6 +35,7 @@ const SENSOR_ACTUATOR_TYPES = [
   "Relay - Nutrition B",
   "Relay - Nutrition C",
   "Relay - pH Down",
+  "Motor Override Button",
   "Other Sensor",
   "Other Actuator",
 ];
@@ -185,6 +186,10 @@ export function DeviceRegistryTab() {
       p.type === "Water Level - Ultrasonic" || p.type === "Water Level - Analog Sensor"
     );
     if (existingWaterMapping && (newConnType === "Water Level - Ultrasonic" || newConnType === "Water Level - Analog Sensor")) {
+      if (newConnType === "Water Level - Ultrasonic" && newConnPin === newConnTxPin) {
+        toast.error("Ultrasonic TRIG and ECHO must use different GPIO pins");
+        return;
+      }
       setDevicePins(devicePins.map((mapping) => mapping.id === existingWaterMapping.id ? {
         ...mapping,
         name: newConnName,
@@ -208,6 +213,17 @@ export function DeviceRegistryTab() {
     if (duplicatePin) {
       toast.error(`Pin GPIO ${newConnPin} is already mapped to connection: "${duplicatePin.name}"`);
       return;
+    }
+    if (newConnType === "Water Level - Ultrasonic" && newConnPin === newConnTxPin) {
+      toast.error("Ultrasonic TRIG and ECHO must use different GPIO pins");
+      return;
+    }
+    if (newConnType === "Water Level - Ultrasonic") {
+      const duplicateTrigPin = devicePins.find((p) => p.pin === newConnTxPin || p.txPin === newConnTxPin);
+      if (duplicateTrigPin) {
+        toast.error(`Pin GPIO ${newConnTxPin} is already mapped to connection: "${duplicateTrigPin.name}"`);
+        return;
+      }
     }
     const newMapping: GpioMapping = {
       id: `map-${Date.now()}`,
@@ -479,7 +495,7 @@ export function DeviceRegistryTab() {
 
               {newConnType === "Water Level - Ultrasonic" && (
                 <div className="space-y-1">
-                  <Label className="text-[11px] font-bold">Ultrasonic TX GPIO</Label>
+                  <Label className="text-[11px] font-bold">Ultrasonic TRIG GPIO</Label>
                   <Select value={String(newConnTxPin)} onValueChange={(val) => setNewConnTxPin(Number(val))}>
                     <SelectTrigger className="h-8 text-xs font-mono">
                       <SelectValue />
@@ -504,7 +520,7 @@ export function DeviceRegistryTab() {
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-[11px] font-bold">Select GPIO Pin</Label>
+                  <Label className="text-[11px] font-bold">{newConnType === "Water Level - Ultrasonic" ? "Ultrasonic ECHO GPIO" : "Select GPIO Pin"}</Label>
                   <Select value={String(newConnPin)} onValueChange={(val) => setNewConnPin(Number(val))}>
                     <SelectTrigger className="h-8 text-xs font-mono">
                       <SelectValue placeholder="Select Pin..." />
