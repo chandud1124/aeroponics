@@ -173,12 +173,11 @@ export async function analyzeSensorDataWithGemini(
     const tdsAvg = tdsVals.length ? (tdsVals.reduce((s, v) => s + v, 0) / tdsVals.length).toFixed(1) : "N/A";
     const ecAvg = ecVals.length ? (ecVals.reduce((s, v) => s + v, 0) / ecVals.length).toFixed(2) : "N/A";
 
-    const prompt = `You are an expert hydroponics and vertical farming analyst. Analyze the following smart tower garden sensor data and provide concise insights, recommendations, and risk assessment. Use the attached indoor lettuce guide as reference — include humidity, pH, TDS/PPM, EC, ambient light, pump performance, and recent manual readings.
+    const prompt = `You are an expert hydroponics and vertical farming analyst. Analyze the following smart tower garden sensor data and provide concise insights, recommendations, and risk assessment. Use the attached lettuce guide as reference — include humidity, pH, TDS/PPM, EC, ambient sunlight levels (measured by LDR sensor), pump performance, and recent manual readings. Note: This farm does NOT have grow lights installed; it only has an LDR ambient light sensor to measure natural daylight exposure. Do not recommend light automation schedules or grow light toggles.
 
   Current Status:
   - Pump: ${currentStatus.pumpOn ? "ON" : "OFF"}
   - Fault: ${currentStatus.fault || "None"}
-  - Grow Light: ${currentStatus.lightOn ? "ON" : "OFF"}
   - Ambient light (current): ${currentStatus.lightLux != null ? currentStatus.lightLux + " lux" : "N/A"}
 
   Sensor Summary (last ${days} days):
@@ -188,22 +187,19 @@ export async function analyzeSensorDataWithGemini(
   - Sensor data points: ${sensorHistory.length}
   - Ambient light: Avg ${avgLightLux != null ? avgLightLux + " lux" : "N/A"} (recent samples: ${lightLuxValues.length})${avgPAR != null ? ` (~${avgPAR} μmol/m²/s PAR, factor=${DEFAULT_PAR_FACTOR})` : ""}
 
-  Reference indoor lettuce targets (use these when making recommendations):
+  Reference lettuce targets (use these when making recommendations):
   - Target pH: 5.5–6.2 (aim for 5.8–6.0 in vegetative growth)
   - Target EC: 0.8–1.2 mS/cm (approx. 560–840 PPM using 700 factor). Seedling lower, vegetative higher.
-  - Recommended LED photoperiod (indoor): 14–16 hours/day (example schedule: 5:00–21:00)
-  - Indoor misting suggestion: typical fixed cycle ~2 min ON / 8 min OFF
-  - Use ambient light lux thresholds for auto-on: consider ~2000 lux as conservative indoor threshold for supplemental LEDs
+  - Natural daylight suggestions: Lettuce requires at least 10-12 hours of natural daylight. Extreme direct sun (>35,000 lux) during peak noon hours may cause leaf scorching/heat stress; consider shade netting if high temperature alerts occur.
 
   Please provide:
-  1. A system health score (1-100)
-  2. 3 concise observations
-  3. 3-6 actionable recommendations (include light scheduling recommendations for indoor LED use and lux thresholds)
-  4. Any immediate risk factors or warnings
-  5. Suggested adjustments to watering schedule, nutrient targets (pH/TDS/EC), and light automation if needed
+  - system health score (1-100)
+  - 3 concise observations
+  - 3-6 actionable recommendations (such as shade netting, crop placement, watering frequency, or nutrient dose adjustments)
+  - Any immediate risk factors or warnings (heat stress, low daylight exposure, or nutrient imbalance)
+  - Suggested adjustments to watering cycle and pH/TDS/EC targets.
 
-  Return JSON with keys: "healthScore", "observations", "recommendations", "riskFactors", "summary". Use the reference targets above when proposing numeric recommendations.
-  `;
+  Return JSON with keys: "healthScore", "observations", "recommendations", "riskFactors", "summary". Use the reference targets above when proposing numeric recommendations.`;
 
     const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
       method: "POST",
