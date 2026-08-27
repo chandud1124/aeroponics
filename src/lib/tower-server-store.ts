@@ -59,10 +59,10 @@ let nftChannels: NftChannel[] = [];
 let gpioMappings: GpioMapping[] = [];
 
 const DEFAULT_NFT_CHANNELS: NftChannel[] = [
-  { id: "channel-1", name: "NFT Channel 1", qrCode: "Stand A-Level 1-Ch 1", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 1", channelIndex: 1 },
-  { id: "channel-2", name: "NFT Channel 2", qrCode: "Stand A-Level 1-Ch 2", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 1", channelIndex: 2 },
-  { id: "channel-3", name: "NFT Channel 3", qrCode: "Stand A-Level 2-Ch 1", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 2", channelIndex: 1 },
-  { id: "channel-4", name: "NFT Channel 4", qrCode: "Stand A-Level 2-Ch 2", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", stand: "Stand A", level: "Level 2", channelIndex: 2 }
+  { id: "PH01-B01-R01-L01-C01", name: "PH01-B01-R01-L01-C01", qrCode: "PH01-B01-R01-L01-C01", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", polyhouse: "PH01", block: "B01", row: "R01", level: "L01", channelIndex: 1, capacity: 50 },
+  { id: "PH01-B01-R01-L01-C02", name: "PH01-B01-R01-L01-C02", qrCode: "PH01-B01-R01-L01-C02", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", polyhouse: "PH01", block: "B01", row: "R01", level: "L01", channelIndex: 2, capacity: 50 },
+  { id: "PH01-B01-R01-L02-C01", name: "PH01-B01-R01-L02-C01", qrCode: "PH01-B01-R01-L02-C01", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", polyhouse: "PH01", block: "B01", row: "R01", level: "L02", channelIndex: 1, capacity: 50 },
+  { id: "PH01-B01-R01-L02-C02", name: "PH01-B01-R01-L02-C02", qrCode: "PH01-B01-R01-L02-C02", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", polyhouse: "PH01", block: "B01", row: "R01", level: "L02", channelIndex: 2, capacity: 50 }
 ];
 
 function loadNftChannelsFromDisk(): NftChannel[] {

@@ -58,8 +58,10 @@ export function CropOperationsDashboard({
     () =>
       Array.from(
         new Set(
-          channels.map(
-            (channel) => `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`,
+          channels.map((channel) =>
+            channel.polyhouse && channel.block && channel.row
+              ? `${channel.polyhouse}-${channel.block}-${channel.row}`
+              : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`
           ),
         ),
       ).sort(),
@@ -68,10 +70,12 @@ export function CropOperationsDashboard({
   const selectedChannels =
     groupFilter === "ALL"
       ? channels
-      : channels.filter(
-          (channel) =>
-            `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}` === groupFilter,
-        );
+      : channels.filter((channel) => {
+          const displayGroup = channel.polyhouse && channel.block && channel.row
+            ? `${channel.polyhouse}-${channel.block}-${channel.row}`
+            : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`;
+          return displayGroup === groupFilter;
+        });
   const crops = useMemo(() => {
     const totals = new Map<string, number>();
     selectedChannels.forEach((channel) => {
@@ -107,17 +111,24 @@ export function CropOperationsDashboard({
   }, [nurseryFilter, nurseryTrays]);
 
   const yieldByCrop = useMemo(() => {
-    const totals = new Map<string, { yieldQty: number; wasteQty: number; harvests: number }>();
+    const totals = new Map<string, { yieldQty: number; wasteQty: number; yieldKg: number; wasteKg: number; harvests: number }>();
     harvestHistory.forEach((entry) => {
       const name = entry.cropName || entry.crops?.[0]?.cropName || "Unknown crop";
-      const current = totals.get(name) || { yieldQty: 0, wasteQty: 0, harvests: 0 };
+      const current = totals.get(name) || { yieldQty: 0, wasteQty: 0, yieldKg: 0, wasteKg: 0, harvests: 0 };
+      
+      const wGrams = entry.avgWeightGrams || 150; // default 150 grams per plant
+      const yKg = ((entry.yieldQty || 0) * wGrams) / 1000;
+      const wKg = ((entry.wasteQty || 0) * wGrams) / 1000;
+
       current.yieldQty += entry.yieldQty || 0;
       current.wasteQty += entry.wasteQty || 0;
+      current.yieldKg += yKg;
+      current.wasteKg += wKg;
       current.harvests += 1;
       totals.set(name, current);
     });
     return Array.from(totals, ([name, value]) => ({ name, ...value })).sort(
-      (a, b) => b.yieldQty - a.yieldQty,
+      (a, b) => b.yieldKg - a.yieldKg,
     );
   }, [harvestHistory]);
 
@@ -214,10 +225,12 @@ export function CropOperationsDashboard({
           />
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {groups.map((group) => {
-              const rows = channels.filter(
-                (channel) =>
-                  `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}` === group,
-              );
+              const rows = channels.filter((channel) => {
+                const displayGroup = channel.polyhouse && channel.block && channel.row
+                  ? `${channel.polyhouse}-${channel.block}-${channel.row}`
+                  : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`;
+                return displayGroup === group;
+              });
               return (
                 <div key={group} className="border rounded-lg p-4">
                   <div className="flex justify-between">
@@ -260,14 +273,14 @@ export function CropOperationsDashboard({
     );
   }
 
-  const totalYield = yieldByCrop.reduce((sum, crop) => sum + crop.yieldQty, 0);
-  const totalWaste = yieldByCrop.reduce((sum, crop) => sum + crop.wasteQty, 0);
+  const totalYieldKg = yieldByCrop.reduce((sum, crop) => sum + crop.yieldKg, 0);
+  const totalWasteKg = yieldByCrop.reduce((sum, crop) => sum + crop.wasteKg, 0);
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric icon={PackageCheck} label="Harvest records" value={harvestHistory.length} />
-        <Metric icon={Leaf} label="Yield" value={`${totalYield.toFixed(1)} kg`} />
-        <Metric icon={BarChart3} label="Waste" value={`${totalWaste.toFixed(1)} kg`} />
+        <Metric icon={Leaf} label="Yield" value={`${totalYieldKg.toFixed(1)} kg`} />
+        <Metric icon={BarChart3} label="Waste" value={`${totalWasteKg.toFixed(1)} kg`} />
         <Metric icon={Sprout} label="Growing now" value={activeChannels.length} />
       </div>
       <Card className="p-5">
@@ -283,8 +296,8 @@ export function CropOperationsDashboard({
                   <strong>{channel.cropName || "Unnamed crop"}</strong>
                   <Badge variant="secondary">{channel.currentCount || 0} plants</Badge>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {channel.stand || "Unassigned stand"} / {channel.level || "Unassigned row"}
+                <p className="mt-1 text-xs font-semibold text-muted-foreground font-mono">
+                  {channel.name}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
                   {channel.expectedHarvestISO

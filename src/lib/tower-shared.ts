@@ -258,6 +258,10 @@ export type NftChannel = {
   stand?: string;
   level?: string;
   channelIndex?: number;
+  polyhouse?: string;
+  block?: string;
+  row?: string;
+  holeConfig?: string;
   incidents?: NftIncidentLog[];
 };
 

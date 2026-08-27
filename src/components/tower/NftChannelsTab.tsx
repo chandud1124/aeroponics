@@ -40,6 +40,10 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   const [stand, setStand] = useState("");
   const [level, setLevel] = useState("");
   const [channelIndex, setChannelIndex] = useState<number>(1);
+  const [polyhouse, setPolyhouse] = useState("PH01");
+  const [block, setBlock] = useState("B01");
+  const [row, setRow] = useState("R01");
+  const [holeConfig, setHoleConfig] = useState("HA01");
 
   // Harvest Audit states
   const [yieldQty, setYieldQty] = useState<number>(0);
@@ -70,11 +74,19 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
     setLoading(true);
     fetchNftChannels()
       .then((data) => {
-        // Sort channels by stand, level, then channelIndex
+        // Sort channels by polyhouse, block, row, level, then channelIndex
         const sorted = [...data].sort((a, b) => {
-          const standA = a.stand || "";
-          const standB = b.stand || "";
-          if (standA !== standB) return standA.localeCompare(standB);
+          const phA = a.polyhouse || "";
+          const phB = b.polyhouse || "";
+          if (phA !== phB) return phA.localeCompare(phB);
+
+          const blkA = a.block || "";
+          const blkB = b.block || "";
+          if (blkA !== blkB) return blkA.localeCompare(blkB);
+
+          const rowA = a.row || "";
+          const rowB = b.row || "";
+          if (rowA !== rowB) return rowA.localeCompare(rowB);
           
           const levelA = a.level || "";
           const levelB = b.level || "";
@@ -190,19 +202,23 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   };
 
   const handleAddChannel = async () => {
-    if (!channelName.trim()) {
-      toast.error("Channel name is required");
+    const generatedName = polyhouse && block && row && level
+      ? `${polyhouse.trim().toUpperCase()}-${block.trim().toUpperCase()}-${row.trim().toUpperCase()}-${level.trim().toUpperCase()}${holeConfig ? `-${holeConfig.trim().toUpperCase()}` : ""}-C${String(channelIndex).padStart(2, "0")}`
+      : stand && level
+        ? `${stand}-${level}-Ch ${channelIndex}`
+        : `Channel-${Date.now()}`;
+
+    const newId = generatedName;
+
+    if (channels.some((c) => c.id === newId)) {
+      toast.error(`A channel with location ID "${newId}" already exists!`);
       return;
     }
-    const newId = `channel-${Date.now()}`;
-    const locationTag = stand && level
-      ? `${stand}-${level}-Ch ${channelIndex}`
-      : newId;
 
     const newChan: NftChannel = {
       id: newId,
-      name: channelName,
-      qrCode: locationTag,
+      name: generatedName,
+      qrCode: generatedName,
       cropName: "",
       plantedAt: null,
       harvestedAt: null,
@@ -214,6 +230,10 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
       stand: stand.trim() || undefined,
       level: level.trim() || undefined,
       channelIndex: channelIndex || undefined,
+      polyhouse: polyhouse.trim() || undefined,
+      block: block.trim() || undefined,
+      row: row.trim() || undefined,
+      holeConfig: holeConfig.trim() || undefined,
     };
     try {
       const updatedList = [...channels, newChan];
@@ -247,13 +267,16 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
             ? validCrops.map((vc) => `${vc.cropName} (${vc.count})`).join(", ")
             : (validCrops[0]?.cropName || "");
 
-          const locationTag = stand && level
-            ? `${stand}-${level}-Ch ${channelIndex}`
-            : c.qrCode;
+          const locationTag = polyhouse && block && row && level
+            ? `${polyhouse.trim().toUpperCase()}-${block.trim().toUpperCase()}-${row.trim().toUpperCase()}-${level.trim().toUpperCase()}${holeConfig ? `-${holeConfig.trim().toUpperCase()}` : ""}-C${String(channelIndex).padStart(2, "0")}`
+            : stand && level
+              ? `${stand}-${level}-Ch ${channelIndex}`
+              : c.qrCode;
 
           return {
             ...c,
-            name: channelName,
+            id: locationTag,
+            name: locationTag,
             capacity,
             currentCount: c.status === "growing" ? totalCount : 0,
             cropName: c.status === "growing" ? combinedCropName : "",
@@ -264,6 +287,10 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
             stand: stand.trim() || undefined,
             level: level.trim() || undefined,
             channelIndex: channelIndex || undefined,
+            polyhouse: polyhouse.trim() || undefined,
+            block: block.trim() || undefined,
+            row: row.trim() || undefined,
+            holeConfig: holeConfig.trim() || undefined,
             qrCode: locationTag,
           };
         }
@@ -533,6 +560,10 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
     setStand(chan.stand || "");
     setLevel(chan.level || "");
     setChannelIndex(chan.channelIndex ?? 1);
+    setPolyhouse(chan.polyhouse || "PH01");
+    setBlock(chan.block || "B01");
+    setRow(chan.row || "R01");
+    setHoleConfig(chan.holeConfig || "HA01");
     setActionType("edit-channel");
   };
 
@@ -566,6 +597,10 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
     setStand("");
     setLevel("");
     setChannelIndex(1);
+    setPolyhouse("PH01");
+    setBlock("B01");
+    setRow("R01");
+    setHoleConfig("HA01");
     setYieldQty(0);
     setWasteQty(0);
     setAvgWeightGrams(0);
@@ -588,11 +623,24 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   };
 
   // Dynamic stands extraction & grouping logic
-  const stands = Array.from(new Set(channels.map((c) => c.stand).filter(Boolean) as string[])).sort();
+  const stands = Array.from(
+    new Set(
+      channels.map((c) =>
+        c.polyhouse && c.block && c.row
+          ? `${c.polyhouse}-${c.block}-${c.row}`
+          : c.stand
+      ).filter(Boolean) as string[]
+    )
+  ).sort();
 
   const filteredChannels = selectedStandFilter === "All Stands"
     ? channels
-    : channels.filter((c) => c.stand === selectedStandFilter);
+    : channels.filter((c) => {
+        const displayStand = c.polyhouse && c.block && c.row
+          ? `${c.polyhouse}-${c.block}-${c.row}`
+          : c.stand;
+        return displayStand === selectedStandFilter;
+      });
 
   const groupedLayout: {
     [standName: string]: {
@@ -601,7 +649,9 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   } = {};
 
   filteredChannels.forEach((chan) => {
-    const standName = chan.stand || "Unassigned Racks";
+    const standName = chan.polyhouse && chan.block && chan.row
+      ? `${chan.polyhouse}-${chan.block}-${chan.row}`
+      : chan.stand || "Unassigned Racks";
     const levelName = chan.level || "Unassigned Levels";
     
     if (!groupedLayout[standName]) {
@@ -663,7 +713,12 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
           All Stands ({channels.length})
         </Button>
         {stands.map((st) => {
-          const count = channels.filter((c) => c.stand === st).length;
+          const count = channels.filter((c) => {
+            const displayStand = c.polyhouse && c.block && c.row
+              ? `${c.polyhouse}-${c.block}-${c.row}`
+              : c.stand;
+            return displayStand === st;
+          }).length;
           return (
             <Button
               key={st}
@@ -996,37 +1051,73 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
               {(actionType === "add-channel" || actionType === "edit-channel") && (
                 <>
                   <div className="space-y-1">
-                    <Label htmlFor="chan-name" className="text-xs font-semibold">Channel Label / Name</Label>
+                    <Label htmlFor="chan-name" className="text-xs font-semibold">Channel Label / Name (Auto-Generated)</Label>
                     <Input
                       id="chan-name"
-                      placeholder="e.g. Channel B4"
-                      value={channelName}
-                      onChange={(e) => setChannelName(e.target.value)}
+                      value={polyhouse && block && row && level 
+                        ? `${polyhouse.trim().toUpperCase()}-${block.trim().toUpperCase()}-${row.trim().toUpperCase()}-${level.trim().toUpperCase()}${holeConfig ? `-${holeConfig.trim().toUpperCase()}` : ""}-C${String(channelIndex).padStart(2, "0")}`
+                        : stand && level
+                          ? `${stand}-${level}-Ch ${channelIndex}`
+                          : "Unnamed Channel"}
+                      disabled
+                      className="bg-muted/60 font-mono font-bold text-xs"
                     />
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="space-y-1">
-                      <Label htmlFor="chan-stand" className="text-xs font-semibold">Stand / Rack</Label>
+                      <Label htmlFor="chan-polyhouse" className="text-xs font-semibold">Polyhouse</Label>
                       <Input
-                        id="chan-stand"
-                        placeholder="e.g. Stand A"
-                        value={stand}
-                        onChange={(e) => setStand(e.target.value)}
+                        id="chan-polyhouse"
+                        placeholder="e.g. PH01"
+                        value={polyhouse}
+                        onChange={(e) => setPolyhouse(e.target.value.toUpperCase())}
                         className="text-xs"
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="chan-level" className="text-xs font-semibold">Level / Tier</Label>
+                      <Label htmlFor="chan-block" className="text-xs font-semibold">Block</Label>
+                      <Input
+                        id="chan-block"
+                        placeholder="e.g. B01"
+                        value={block}
+                        onChange={(e) => setBlock(e.target.value.toUpperCase())}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="chan-row" className="text-xs font-semibold">Row</Label>
+                      <Input
+                        id="chan-row"
+                        placeholder="e.g. R01"
+                        value={row}
+                        onChange={(e) => setRow(e.target.value.toUpperCase())}
+                        className="text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="chan-level" className="text-xs font-semibold">NFT Level</Label>
                       <Input
                         id="chan-level"
-                        placeholder="e.g. Level 1"
+                        placeholder="e.g. L01"
                         value={level}
-                        onChange={(e) => setLevel(e.target.value)}
+                        onChange={(e) => setLevel(e.target.value.toUpperCase())}
                         className="text-xs"
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="chan-index" className="text-xs font-semibold">Index Pos</Label>
+                      <Label htmlFor="chan-holeconfig" className="text-xs font-semibold">Hole Config</Label>
+                      <Input
+                        id="chan-holeconfig"
+                        placeholder="e.g. HA01"
+                        value={holeConfig}
+                        onChange={(e) => setHoleConfig(e.target.value.toUpperCase())}
+                        className="text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="chan-index" className="text-xs font-semibold">Channel Index</Label>
                       <Input
                         id="chan-index"
                         type="number"

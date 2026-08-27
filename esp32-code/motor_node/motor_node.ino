@@ -171,6 +171,7 @@ struct PumpEngine {
   MotorStatus status;
   
   time_t lastAutoRunEpoch = 0;
+  unsigned long lastAutoRunMs = 0;
   unsigned long pumpStartMs = 0;
   unsigned long pumpScheduledEndMs = 0;
   unsigned long faultStartMs = 0;
@@ -184,6 +185,7 @@ struct PumpEngine {
     pinPumpRelay = defaultRelayPin;
     pinMotorButton = defaultBtnPin;
     nvsNs = ns;
+    lastAutoRunMs = millis();
   }
 
   void setupPins() {
@@ -248,21 +250,28 @@ struct PumpEngine {
   bool isTimeToWater() {
     if (!schedule.enabled) return false;
     time_t epochNow = getCurrentEpoch();
-    if (epochNow < 1700000000UL) return false;
+    if (epochNow >= 1700000000UL) {
+      struct tm t;
+      localtime_r(&epochNow, &t);
 
-    struct tm t;
-    localtime_r(&epochNow, &t);
+      bool isDay = t.tm_hour >= schedule.startHour && t.tm_hour < schedule.endHour;
+      if (!isDay && !schedule.nightEnabled) return false;
 
-    bool isDay = t.tm_hour >= schedule.startHour && t.tm_hour < schedule.endHour;
-    if (!isDay && !schedule.nightEnabled) return false;
+      time_t secondsSinceLastRun = epochNow - lastAutoRunEpoch;
+      int intervalMinutes = schedule.intervalMinutes;
+      int durationSeconds = schedule.durationSeconds;
+      getActivePumpProfile(epochNow, intervalMinutes, durationSeconds);
+      time_t intervalSeconds = (time_t)(intervalMinutes * 60 + durationSeconds);
 
-    time_t secondsSinceLastRun = epochNow - lastAutoRunEpoch;
-    int intervalMinutes = schedule.intervalMinutes;
-    int durationSeconds = schedule.durationSeconds;
-    getActivePumpProfile(epochNow, intervalMinutes, durationSeconds);
-    time_t intervalSeconds = (time_t)(intervalMinutes * 60 + durationSeconds);
-
-    return (secondsSinceLastRun >= intervalSeconds);
+      return (secondsSinceLastRun >= intervalSeconds);
+    } else {
+      // Fallback: NTP not synced/offline. Follow NVS active schedule using millis()
+      int intervalMinutes = schedule.intervalMinutes;
+      int durationSeconds = schedule.durationSeconds;
+      unsigned long intervalMs = (unsigned long)(intervalMinutes * 60UL + durationSeconds) * 1000UL;
+      unsigned long elapsed = millis() - lastAutoRunMs;
+      return (elapsed >= intervalMs);
+    }
   }
 
   void getActivePumpProfile(time_t epochNow, int& intervalMinutes, int& durationSeconds) {
@@ -385,6 +394,7 @@ struct PumpEngine {
           p.end();
         }
 
+        lastAutoRunMs = pumpStartMs;
         curState = STATE_RUNNING;
         break;
       }
