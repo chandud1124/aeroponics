@@ -522,7 +522,7 @@ export function GrowBagsTab() {
                           return (
                             <Card 
                               key={bag.id}
-                              className={`p-3 relative overflow-hidden transition-all duration-200 border-border/80 hover:border-primary/50 shadow-sm flex flex-col justify-between aspect-square select-none ${
+                              className={`p-3 relative overflow-hidden transition-all duration-200 border-border/80 hover:border-primary/50 shadow-sm flex flex-col justify-between min-h-[145px] h-auto select-none ${
                                 isGrowing ? "bg-emerald-50/5 dark:bg-emerald-500/5 border-emerald-500/25" : "bg-card/45"
                               }`}
                             >

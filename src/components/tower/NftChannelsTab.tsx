@@ -166,7 +166,9 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   }, []);
 
   const handleAddCropRow = () => {
-    setCropsList([...cropsList, { cropName: "", count: 10 }]);
+    const currentSum = cropsList.reduce((sum, c) => sum + (c.count || 0), 0);
+    const remaining = Math.max(0, capacity - currentSum);
+    setCropsList([...cropsList, { cropName: "", count: remaining }]);
   };
 
   const handleRemoveCropRow = (index: number) => {
@@ -220,7 +222,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
       const activeChan = channels.find((c) => c.id === activeChannelId);
       if (!activeChan) return;
 
-      if (activeChan.status === "growing") {
+      if (activeChan.status === "growing" && actionType === "plant") {
         await harvestCropRemote(activeChan.id, activeChan.currentCount ?? 0, 0, 0, "Auto-logged on replant.");
       }
 
@@ -390,6 +392,16 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
       if (!incidentCultivar.trim() || !Number.isFinite(incidentQty) || incidentQty <= 0) {
         toast.error("Select a cultivar and enter a removal quantity greater than zero");
         return;
+      }
+
+      const activeChan = channels.find((c) => c.id === activeChannelId);
+      if (activeChan) {
+        const targetCrop = activeChan.crops?.find(crop => crop.cropName.toLowerCase() === incidentCultivar.trim().toLowerCase());
+        const availableCount = targetCrop ? targetCrop.count : (activeChan.cropName?.trim().toLowerCase() === incidentCultivar.trim().toLowerCase() ? (activeChan.currentCount ?? 0) : 0);
+        if (incidentQty > availableCount) {
+          toast.error(`Cannot remove more than the available ${incidentCultivar} plants (${availableCount})`);
+          return;
+        }
       }
     }
 
@@ -647,7 +659,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
     if (chan.crops && chan.crops.length > 0) {
       setCropsList(chan.crops);
     } else {
-      setCropsList([{ cropName: chan.cropName || "", count: chan.capacity ? Math.round(chan.capacity * 0.8) : 40 }]);
+      setCropsList([{ cropName: chan.cropName || "", count: chan.capacity ?? 50 }]);
     }
     setCropName("");
     setCapacity(chan.capacity ?? 50);
@@ -668,7 +680,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
     setPlantedAt("");
     setExpectedHarvestISO("");
     setNotes("");
-    setCropsList([{ cropName: "", count: 20 }]);
+    setCropsList([{ cropName: "", count: 50 }]);
     setStand("");
     setLevel("");
     setChannelIndex(1);
@@ -1294,7 +1306,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                 </>
               )}
 
-              {actionType === "plant" && (
+              {(actionType === "plant" || actionType === "edit-planted-crops") && (
                 <>
                   {/* Multi-crop rows */}
                   <div className="space-y-2 border border-border p-2.5 rounded-lg bg-muted/15">
@@ -1455,14 +1467,22 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                       </div>
                       <div className="space-y-1">
                         <Label htmlFor="inc-qty" className="text-xs font-semibold">Qty to Remove</Label>
-                        <Input
-                          id="inc-qty"
-                          type="number"
-                          min={1}
-                          value={incidentQty}
-                          onChange={(e) => { const v = e.target.value; setIncidentQty(v === "" ? "" as any : Number(v)); }}
-                          className="text-xs"
-                        />
+                        {(() => {
+                          const activeChan = channels.find((c) => c.id === activeChannelId);
+                          const targetCrop = activeChan?.crops?.find(crop => crop.cropName.toLowerCase() === incidentCultivar.trim().toLowerCase());
+                          const maxQty = targetCrop ? targetCrop.count : (activeChan?.cropName?.trim().toLowerCase() === incidentCultivar.trim().toLowerCase() ? (activeChan?.currentCount ?? 0) : 50);
+                          return (
+                            <Input
+                              id="inc-qty"
+                              type="number"
+                              min={1}
+                              max={maxQty}
+                              value={incidentQty}
+                              onChange={(e) => { const v = e.target.value; setIncidentQty(v === "" ? "" as any : Number(v)); }}
+                              className="text-xs"
+                            />
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
@@ -1602,6 +1622,21 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {selectedChannelLogs.status === "growing" ? (
                         <>
+                          <Button
+                            onClick={() => {
+                              setActiveChannelId(selectedChannelLogs.id);
+                              setNotes(selectedChannelLogs.notes || "");
+                              setPlantedAt(selectedChannelLogs.plantedAt ? selectedChannelLogs.plantedAt.split("T")[0] : "");
+                              setExpectedHarvestISO(selectedChannelLogs.expectedHarvestISO ? selectedChannelLogs.expectedHarvestISO.split("T")[0] : "");
+                              setCropsList(selectedChannelLogs.crops && selectedChannelLogs.crops.length > 0 ? selectedChannelLogs.crops : [{ cropName: selectedChannelLogs.cropName, count: selectedChannelLogs.currentCount || 20 }]);
+                              setCapacity(selectedChannelLogs.capacity || 50);
+                              setActionType("edit-planted-crops");
+                            }}
+                            variant="outline"
+                            className="text-foreground border-primary/20 hover:bg-primary/5 font-semibold text-[10px] px-2.5 h-7 py-0.5 rounded shadow-sm"
+                          >
+                            Edit Crops
+                          </Button>
                           <Button
                             onClick={() => {
                               setActiveChannelId(selectedChannelLogs.id);
@@ -1759,9 +1794,9 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
               <Button onClick={closeForm} variant="outline" className="text-xs font-semibold px-4 h-9">
                 {actionType === "logs" ? "Close" : "Cancel"}
               </Button>
-              {actionType === "plant" && (
+              {(actionType === "plant" || actionType === "edit-planted-crops") && (
                 <Button onClick={handlePlant} className="bg-primary text-primary-foreground font-bold text-xs px-4 h-9">
-                  Confirm Seeding
+                  {actionType === "plant" ? "Confirm Seeding" : "Save Crops"}
                 </Button>
               )}
               {actionType === "harvest" && (

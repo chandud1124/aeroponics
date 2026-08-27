@@ -40,6 +40,8 @@ const RANGE_OPTIONS = [
   { label: "24h", days: 1 },
   { label: "7 days", days: 7 },
   { label: "30 days", days: 30 },
+  { label: "90 days", days: 90 },
+  { label: "365 days", days: 365 },
 ] as const;
 
 type RangeDays = (typeof RANGE_OPTIONS)[number]["days"];
@@ -77,19 +79,22 @@ const EMPTY_SUMMARY: AnalyticsSummary = {
   daily: [],
 };
 
-function bucketMsForRange(days: RangeDays) {
+function bucketMsForRange(days: number) {
   if (days <= 1) return 15 * 60 * 1000;
   if (days <= 7) return 60 * 60 * 1000;
-  return 24 * 60 * 60 * 1000;
+  if (days <= 30) return 24 * 60 * 60 * 1000;
+  if (days <= 90) return 3 * 24 * 60 * 60 * 1000;
+  return 7 * 24 * 60 * 60 * 1000;
 }
 
-function bucketLabel(timestamp: number, days: RangeDays) {
+function bucketLabel(timestamp: number, days: number) {
   if (days <= 1) return format(timestamp, "HH:mm");
   if (days <= 7) return format(timestamp, "EEE HH:00");
-  return format(timestamp, "MMM d");
+  if (days <= 90) return format(timestamp, "MMM d");
+  return format(timestamp, "MMM d, yy");
 }
 
-function groupLightHistory(snapshots: SensorSnapshot[], days: RangeDays): SensorPoint[] {
+function groupLightHistory(snapshots: SensorSnapshot[], days: number): SensorPoint[] {
   const bucketMs = bucketMsForRange(days);
   const buckets = new Map<number, number[]>();
 
@@ -110,7 +115,7 @@ function groupLightHistory(snapshots: SensorSnapshot[], days: RangeDays): Sensor
     }));
 }
 
-function groupHumidityHistory(snapshots: SensorSnapshot[], days: RangeDays) {
+function groupHumidityHistory(snapshots: SensorSnapshot[], days: number) {
   const bucketMs = bucketMsForRange(days);
   const buckets = new Map<number, number[]>();
 
@@ -129,7 +134,7 @@ function groupHumidityHistory(snapshots: SensorSnapshot[], days: RangeDays) {
     }));
 }
 
-function groupPumpLogs(logs: PumpLogEntry[], days: RangeDays): PumpPoint[] {
+function groupPumpLogs(logs: PumpLogEntry[], days: number): PumpPoint[] {
   const bucketMs = bucketMsForRange(days);
   const buckets = new Map<number, { cycles: number; success: number }>();
 
@@ -199,6 +204,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [useCustomRange, setUseCustomRange] = useState(false);
+  const [registryDateFilter, setRegistryDateFilter] = useState("");
 
   // Table pagination state
   const [sensorPage, setSensorPage] = useState(0);
@@ -373,8 +379,12 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
   })();
 
   // Pagination bounds
-  const totalSensorPages = Math.ceil(filteredSensors.length / SENSOR_PAGE_SIZE);
-  const paginatedSensors = filteredSensors.slice(sensorPage * SENSOR_PAGE_SIZE, (sensorPage + 1) * SENSOR_PAGE_SIZE);
+  const tableFilteredSensors = registryDateFilter
+    ? filteredSensors.filter((s) => format(s.timestamp, "yyyy-MM-dd") === registryDateFilter)
+    : filteredSensors;
+
+  const totalSensorPages = Math.ceil(tableFilteredSensors.length / SENSOR_PAGE_SIZE);
+  const paginatedSensors = tableFilteredSensors.slice(sensorPage * SENSOR_PAGE_SIZE, (sensorPage + 1) * SENSOR_PAGE_SIZE);
 
   return (
     <div className="space-y-6">
@@ -601,9 +611,36 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
         {/* Sensor Logs Paginated Table */}
         <Card className="p-5 xl:col-span-2 border-border bg-card">
           <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div>
-              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Historical Sensor Registry</div>
-              <div className="text-2xs text-muted-foreground mt-0.5">Paginated tabular logs of every raw ESP32 sensor transmission</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div>
+                <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Historical Sensor Registry</div>
+                <div className="text-2xs text-muted-foreground mt-0.5">Paginated tabular logs of every raw ESP32 sensor transmission</div>
+              </div>
+              <div className="flex items-center gap-1.5 bg-muted/20 px-2 py-0.5 rounded-md border border-border/80">
+                <span className="text-[9px] text-muted-foreground font-bold uppercase">Filter Date:</span>
+                <input
+                  type="date"
+                  value={registryDateFilter}
+                  onChange={(e) => {
+                    setRegistryDateFilter(e.target.value);
+                    setSensorPage(0);
+                  }}
+                  className="bg-transparent text-xs font-mono font-bold border-none focus:outline-none w-26 h-5"
+                />
+                {registryDateFilter && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setRegistryDateFilter("");
+                      setSensorPage(0);
+                    }}
+                    className="h-5 px-1.5 text-[9px] text-red-500 font-bold"
+                  >
+                    Reset
+                  </Button>
+                )}
+              </div>
             </div>
             
             {/* Simple Pagination Buttons */}

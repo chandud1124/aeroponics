@@ -182,6 +182,11 @@ function Index() {
   const [nftChannels, setNftChannels] = useState<NftChannel[]>([]);
   const [harvestHistory, setHarvestHistory] = useState<HarvestHistoryEntry[]>([]);
   const [loadingCrops, setLoadingCrops] = useState(true);
+  const [harvestSearch, setHarvestSearch] = useState("");
+  const [harvestStart, setHarvestStart] = useState("");
+  const [harvestEnd, setHarvestEnd] = useState("");
+  const [harvestCropSelect, setHarvestCropSelect] = useState("all");
+  const [harvestPage, setHarvestPage] = useState(0);
   const [nurseryTrays, setNurseryTrays] = useState<NurseryTray[]>(DEFAULT_NURSERY_TRAYS);
   const [nurseryHistory, setNurseryHistory] = useState<NurseryHistoryEntry[]>([]);
 
@@ -944,9 +949,37 @@ function Index() {
                 .filter((tray) => tray.status !== "empty")
                 .reduce((sum, tray) => sum + tray.germinated, 0);
 
+              // Filter completed harvest history list
+              const filteredHarvestHistory = harvestHistory.filter((item) => {
+                if (harvestSearch.trim() !== "") {
+                  const query = harvestSearch.toLowerCase();
+                  const match = 
+                    item.cropName.toLowerCase().includes(query) ||
+                    (item.notes || "").toLowerCase().includes(query) ||
+                    (item.channelName || "").toLowerCase().includes(query);
+                  if (!match) return false;
+                }
+
+                if (harvestCropSelect !== "all") {
+                  const key = item.cropName.split("(")[0].trim().toLowerCase();
+                  if (key !== harvestCropSelect.toLowerCase()) return false;
+                }
+
+                if (harvestStart) {
+                  const itemDate = item.harvestedAt.split("T")[0];
+                  if (itemDate < harvestStart) return false;
+                }
+                if (harvestEnd) {
+                  const itemDate = item.harvestedAt.split("T")[0];
+                  if (itemDate > harvestEnd) return false;
+                }
+
+                return true;
+              });
+
               // 2. Calculate completed harvest yields usable vs waste
               const historicalYieldMap: { [name: string]: { yield: number; waste: number } } = {};
-              harvestHistory.forEach((item) => {
+              filteredHarvestHistory.forEach((item) => {
                 const key = item.cropName.split("(")[0].trim() || "Unknown";
                 if (!historicalYieldMap[key]) {
                   historicalYieldMap[key] = { yield: 0, waste: 0 };
@@ -960,6 +993,10 @@ function Index() {
                 "Usable Yield": stats.yield,
                 "Waste / Defect": stats.waste,
               })).sort((a, b) => (b["Usable Yield"] + b["Waste / Defect"]) - (a["Usable Yield"] + a["Waste / Defect"]));
+
+              const HARVEST_PAGE_SIZE = 5;
+              const totalHarvestPages = Math.ceil(filteredHarvestHistory.length / HARVEST_PAGE_SIZE);
+              const paginatedHarvestHistory = filteredHarvestHistory.slice(harvestPage * HARVEST_PAGE_SIZE, (harvestPage + 1) * HARVEST_PAGE_SIZE);
 
               return (
                 <div className="space-y-6">
@@ -1074,22 +1111,143 @@ function Index() {
                   </div>
 
                   {/* Harvest History Log */}
-                  <Card className="p-5 border-border/80 bg-card">
-                    <div className="border-b pb-3 mb-4">
-                      <h3 className="text-sm font-bold flex items-center gap-2">
-                        <History className="h-4 w-4 text-amber-500" />
-                        Completed Harvest History Database
-                      </h3>
-                      <p className="text-[11px] text-muted-foreground">Audit logs of completed crop batches and yields.</p>
+                   <Card className="p-5 border-border/80 bg-card">
+                    <div className="border-b pb-3 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-bold flex items-center gap-2">
+                          <History className="h-4 w-4 text-amber-500" />
+                          Completed Harvest History Database
+                        </h3>
+                        <p className="text-[11px] text-muted-foreground">Audit logs of completed crop batches and yields.</p>
+                      </div>
+
+                      {/* Pagination Controls */}
+                      {totalHarvestPages > 1 && (
+                        <div className="flex items-center gap-1.5 self-end">
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={harvestPage === 0}
+                            onClick={() => setHarvestPage((p) => p - 1)}
+                            className="h-6 w-14 text-[10px]"
+                          >
+                            Prev
+                          </Button>
+                          <span className="text-[10px] font-bold text-muted-foreground font-mono">
+                            {harvestPage + 1} / {totalHarvestPages}
+                          </span>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={harvestPage >= totalHarvestPages - 1}
+                            onClick={() => setHarvestPage((p) => p + 1)}
+                            className="h-6 w-14 text-[10px]"
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Filter Inputs block */}
+                    <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/20 p-3 mb-4 md:flex-row md:items-center text-xs">
+                      {/* Search */}
+                      <div className="relative flex-1 min-w-[150px]">
+                        <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                        <Input
+                          placeholder="Search batch..."
+                          value={harvestSearch}
+                          onChange={(e) => {
+                            setHarvestSearch(e.target.value);
+                            setHarvestPage(0);
+                          }}
+                          className="pl-7 h-7.5 text-xs bg-background"
+                        />
+                      </div>
+
+                      {/* Crop select */}
+                      <div className="w-full md:w-36">
+                        <Select
+                          value={harvestCropSelect}
+                          onValueChange={(val) => {
+                            setHarvestCropSelect(val);
+                            setHarvestPage(0);
+                          }}
+                        >
+                          <SelectTrigger className="h-7.5 text-xs bg-background">
+                            <SelectValue placeholder="Variety" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Varieties</SelectItem>
+                            {(() => {
+                              const uniqueCrops = Array.from(
+                                new Set(
+                                  harvestHistory
+                                    .map((h) => h.cropName.split("(")[0].trim())
+                                    .filter(Boolean)
+                                )
+                              ).sort();
+                              return uniqueCrops.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {c}
+                                </SelectItem>
+                              ));
+                            })()}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Date bounds */}
+                      <div className="flex items-center gap-1.5 bg-background px-2 py-0.5 rounded border">
+                        <span className="text-[9px] text-muted-foreground font-bold uppercase">From</span>
+                        <input
+                          type="date"
+                          value={harvestStart}
+                          onChange={(e) => {
+                            setHarvestStart(e.target.value);
+                            setHarvestPage(0);
+                          }}
+                          className="bg-transparent text-[11px] font-mono font-semibold focus:outline-none w-26"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-background px-2 py-0.5 rounded border">
+                        <span className="text-[9px] text-muted-foreground font-bold uppercase">To</span>
+                        <input
+                          type="date"
+                          value={harvestEnd}
+                          onChange={(e) => {
+                            setHarvestEnd(e.target.value);
+                            setHarvestPage(0);
+                          }}
+                          className="bg-transparent text-[11px] font-mono font-semibold focus:outline-none w-26"
+                        />
+                      </div>
+
+                      {(harvestSearch || harvestStart || harvestEnd || harvestCropSelect !== "all") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setHarvestSearch("");
+                            setHarvestStart("");
+                            setHarvestEnd("");
+                            setHarvestCropSelect("all");
+                            setHarvestPage(0);
+                          }}
+                          className="h-7 px-2 text-[10px] text-destructive hover:bg-destructive/5 font-semibold"
+                        >
+                          Reset
+                        </Button>
+                      )}
                     </div>
 
                     {loadingCrops ? (
                       <div className="text-center py-6 text-xs text-muted-foreground">Loading harvest log...</div>
-                    ) : harvestHistory.length === 0 ? (
-                      <div className="text-center py-6 text-xs text-muted-foreground italic">No historical crops harvested yet.</div>
+                    ) : paginatedHarvestHistory.length === 0 ? (
+                      <div className="text-center py-6 text-xs text-muted-foreground italic">No completed crops harvested matching the filters.</div>
                     ) : (
                       <div className="space-y-3 font-mono text-xs">
-                        {harvestHistory.map((item) => {
+                        {paginatedHarvestHistory.map((item) => {
                           const ageDays = item.plantedAt 
                             ? Math.max(1, Math.round((new Date(item.harvestedAt).getTime() - new Date(item.plantedAt).getTime()) / (24 * 60 * 60 * 1000)))
                             : null;
