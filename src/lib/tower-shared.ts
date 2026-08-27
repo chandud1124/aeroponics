@@ -60,6 +60,14 @@ export type Schedule = {
   phDoseIntervalMinutes?: number;
   ecDoseSeconds?: number;
   ecDoseIntervalMinutes?: number;
+  // Secondary Pump (Pump 2) schedule properties
+  intervalMinutes_2?: number;
+  durationSeconds_2?: number;
+  dayIntervalMinutes_2?: number;
+  dayDurationSeconds_2?: number;
+  nightIntervalMinutes_2?: number;
+  nightDurationSeconds_2?: number;
+  enabled_2?: boolean;
 };
 
 export type LiveStatus = {
@@ -68,6 +76,10 @@ export type LiveStatus = {
   flowing: boolean;
   pumpState: PumpState;
   motorManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
+  pumpOn_2?: boolean;
+  flowing_2?: boolean;
+  pumpState_2?: PumpState;
+  motorManualMode_2?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
   phManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
   nutritionManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
   phDosingOn: boolean;
@@ -84,12 +96,16 @@ export type LiveStatus = {
   towerTempC: number | null;
   flowRateLpm?: number | null;
   lastRunISO: string | null;
+  lastRunISO_2?: string | null;
   scheduleAppliedAt?: number | null;
   appliedPlanName?: string | null;
   pumpEndISO?: string | null;
+  pumpEndISO_2?: string | null;
   fault: string | null;
   plannedNextCycleISO?: string | null;
   plannedNextCycleIn?: number | null;
+  plannedNextCycleISO_2?: string | null;
+  plannedNextCycleIn_2?: number | null;
   retryNextCycleISO?: string | null;
   retryNextCycleIn?: number | null;
   sensorDataOk?: boolean;
@@ -142,6 +158,7 @@ export type ManualReading = {
 export type PumpLogEntry = {
   id: string;
   deviceId?: string;
+  pumpIndex?: number;
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
@@ -250,11 +267,13 @@ export type GpioMapping = {
     | "Humidity Sensor"
     | "Water Temperature Sensor"
     | "Relay - Water Pump"
+    | "Relay - Water Pump 2"
     | "Relay - Nutrition A"
     | "Relay - Nutrition B"
     | "Relay - Nutrition C"
     | "Relay - pH Down"
     | "Motor Override Button"
+    | "Motor Override Button 2"
     | "Other Sensor"
     | "Other Actuator";
   direction: "INPUT" | "OUTPUT";

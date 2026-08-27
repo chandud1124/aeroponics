@@ -222,7 +222,10 @@ void loop() {
 void setupPinModes() {
   if (PIN_PH_SENSOR > 0) pinMode(PIN_PH_SENSOR, INPUT);
   if (PIN_EC_SENSOR > 0) pinMode(PIN_EC_SENSOR, INPUT);
-  if (PIN_LEVEL_SENSOR_TX > 0) pinMode(PIN_LEVEL_SENSOR_TX, OUTPUT);
+  if (PIN_LEVEL_SENSOR_TX > 0) {
+    pinMode(PIN_LEVEL_SENSOR_TX, OUTPUT);
+    digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
+  }
   if (PIN_LEVEL_SENSOR_RX > 0) pinMode(PIN_LEVEL_SENSOR_RX, INPUT);
   if (PIN_TEMP_SENSOR > 0) pinMode(PIN_TEMP_SENSOR, INPUT_PULLUP);
   if (PIN_WATER_TEMP_SENSOR > 0) pinMode(PIN_WATER_TEMP_SENSOR, INPUT_PULLUP);
@@ -283,20 +286,32 @@ void readSensors() {
     }
   }
 
-  // EC/TDS (analog)
+  // EC/TDS (analog TDS Sensor converted to EC)
   if (PIN_EC_SENSOR <= 0) {
     sensors.ecValid = false;
-    Serial.println("[EC Sensor] Disabled");
+    Serial.println("[TDS/EC Sensor] Disabled");
   } else {
-    int ecRaw = readAnalogFiltered(PIN_EC_SENSOR);
-    if (ecRaw < 100) {
+    int tdsRaw = readAnalogFiltered(PIN_EC_SENSOR);
+    if (tdsRaw < 100) {
       sensors.ecValid = false;
-      Serial.printf("[EC Sensor] Sensor not connected (Raw ADC: %d)\n", ecRaw);
+      Serial.printf("[TDS/EC Sensor] Sensor not connected (Raw ADC: %d)\n", tdsRaw);
     } else {
-      float ecUncompensated = (float)ecRaw * 3.3f / 4095.0f * 2.0f;
-      sensors.ecValue = ecUncompensated / (1.0f + 0.019f * ((sensors.humidityValid ? sensors.waterTempC : 25.0f) - 25.0f));
+      float voltage = (float)tdsRaw * 3.3f / 4095.0f;
+      float temperature = sensors.humidityValid ? sensors.waterTempC : 25.0f;
+      // Temperature compensation: DFRobot formula uses 0.02 per degree C
+      float compensationCoefficient = 1.0f + 0.02f * (temperature - 25.0f);
+      float compensationVoltage = voltage / compensationCoefficient;
+      
+      // DFRobot TDS calculation formula (in ppm)
+      float tdsValue = (133.33f * compensationVoltage * compensationVoltage * compensationVoltage 
+                        - 255.86f * compensationVoltage * compensationVoltage 
+                        + 857.39f * compensationVoltage) * 0.5f;
+      
+      // Convert TDS (ppm) to EC (mS/cm) using standard 0.5 conversion factor (TDS = EC * 500, so EC = TDS / 500)
+      sensors.ecValue = tdsValue / 500.0f;
       sensors.ecValid = true;
-      Serial.printf("[EC Sensor] Raw ADC: %d -> %.2f mS/cm\n", ecRaw, sensors.ecValue);
+      Serial.printf("[TDS/EC Sensor] Raw ADC: %d -> Voltage: %.2fV -> TDS: %.0f ppm -> EC: %.2f mS/cm\n", 
+                    tdsRaw, voltage, tdsValue, sensors.ecValue);
     }
   }
 

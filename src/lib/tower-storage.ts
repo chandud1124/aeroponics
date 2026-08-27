@@ -73,16 +73,18 @@ async function requestJson<T>(path: string, init?: RequestInit, deviceId?: strin
   return (await response.json()) as T;
 }
 
-export async function fetchSchedule(): Promise<Schedule> {
+export async function fetchSchedule(deviceId?: string | null): Promise<Schedule> {
   try {
-    return await requestJson<Schedule>("/api/schedule", { method: "GET" });
+    const url = deviceId ? `/api/schedule?deviceId=${encodeURIComponent(deviceId)}` : "/api/schedule";
+    return await requestJson<Schedule>(url, { method: "GET" });
   } catch {
     return defaultSchedule;
   }
 }
 
-export async function saveScheduleRemote(s: Schedule) {
-  await requestJson("/api/schedule", {
+export async function saveScheduleRemote(s: Schedule, deviceId?: string | null) {
+  const url = deviceId ? `/api/schedule?deviceId=${encodeURIComponent(deviceId)}` : "/api/schedule";
+  await requestJson(url, {
     method: "PUT",
     body: JSON.stringify(s),
   });

@@ -46,6 +46,7 @@ const DEFAULT_SCHEDULE: Schedule = defaultSchedule;
 
 const DATA_DIR = process.env.TOWER_DATA_DIR ?? path.join(os.homedir(), ".smart-tower-garden");
 const SCHEDULE_FILE = process.env.TOWER_SCHEDULE_FILE ?? path.join(DATA_DIR, "schedule.json");
+const DEVICE_SCHEDULES_FILE = process.env.TOWER_DEVICE_SCHEDULES_FILE ?? path.join(DATA_DIR, "device-schedules.json");
 const STATE_FILE = process.env.TOWER_STATE_FILE ?? path.join(DATA_DIR, "tower-state.json");
 const NFT_CHANNELS_FILE = process.env.TOWER_NFT_CHANNELS_FILE ?? path.join(DATA_DIR, "nft-channels.json");
 const GPIO_MAPPINGS_FILE = process.env.TOWER_GPIO_MAPPINGS_FILE ?? path.join(DATA_DIR, "gpio-mappings.json");
@@ -138,6 +139,27 @@ function saveScheduleToDisk(nextSchedule: Schedule) {
     fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(nextSchedule, null, 2), "utf8");
   } catch (error) {
     console.error("Failed to save schedule to disk:", error);
+  }
+}
+
+function loadDeviceSchedulesFromDisk(): Record<string, Schedule> {
+  try {
+    if (fs.existsSync(DEVICE_SCHEDULES_FILE)) {
+      const raw = fs.readFileSync(DEVICE_SCHEDULES_FILE, "utf8");
+      return JSON.parse(raw) as Record<string, Schedule>;
+    }
+  } catch (error) {
+    console.error("Failed to load device schedules from disk:", error);
+  }
+  return {};
+}
+
+function saveDeviceSchedulesToDisk(schedules: Record<string, Schedule>) {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(DEVICE_SCHEDULES_FILE, JSON.stringify(schedules, null, 2), "utf8");
+  } catch (error) {
+    console.error("Failed to save device schedules to disk:", error);
   }
 }
 
@@ -374,6 +396,7 @@ export async function initializeTowerStore() {
 }
 
 let schedule: Schedule = loadScheduleFromDisk();
+let deviceSchedules: Record<string, Schedule> = loadDeviceSchedulesFromDisk();
 const DEFAULT_DEVICE_ID = "default";
 let statuses: Record<string, LiveStatus> = {};
 let sensorHistory: SensorSnapshot[] = [];
@@ -421,13 +444,23 @@ function getLatestDeviceSignalAt(status: LiveStatus | null | undefined): number 
   return timestamps.length > 0 ? Math.max(...timestamps) : null;
 }
 
-function getModeForNow(now = new Date()): "DAY" | "NIGHT" {
-  const hour = getIstHour(now);
-  return hour >= schedule.startHour && hour < schedule.endHour ? "DAY" : "NIGHT";
+function resolveSchedule(deviceId?: string | null): Schedule {
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  if (resolvedDeviceId && deviceSchedules[resolvedDeviceId]) {
+    return deviceSchedules[resolvedDeviceId];
+  }
+  return schedule;
 }
 
-function isNightModeEnabled(): boolean {
-  return schedule.nightEnabled !== false;
+function getModeForNow(now = new Date(), deviceId?: string | null): "DAY" | "NIGHT" {
+  const hour = getIstHour(now);
+  const sched = resolveSchedule(deviceId);
+  return hour >= sched.startHour && hour < sched.endHour ? "DAY" : "NIGHT";
+}
+
+function isNightModeEnabled(deviceId?: string | null): boolean {
+  const sched = resolveSchedule(deviceId);
+  return sched.nightEnabled !== false;
 }
 
 function isRetryableFlowFault(fault: string | null | undefined): boolean {
@@ -492,23 +525,24 @@ function getLatestSensorSnapshot(deviceId?: string | null) {
 
 
 
-export function getCycleProfile(now = new Date()) {
-  const mode = getModeForNow(now);
+export function getCycleProfile(now = new Date(), deviceId?: string | null) {
+  const mode = getModeForNow(now, deviceId);
   const isDay = mode === "DAY";
-  const nightEnabled = isNightModeEnabled();
-  const configuredDayIntervalMinutes = schedule.dayIntervalMinutes ?? schedule.intervalMinutes;
+  const nightEnabled = isNightModeEnabled(deviceId);
+  const sched = resolveSchedule(deviceId);
+  const configuredDayIntervalMinutes = sched.dayIntervalMinutes ?? sched.intervalMinutes;
 
   return {
     mode,
     onDurationSeconds: isDay
-      ? schedule.dayDurationSeconds ?? schedule.durationSeconds
+      ? sched.dayDurationSeconds ?? sched.durationSeconds
       : nightEnabled
-        ? schedule.nightDurationSeconds ?? Math.max(15, Math.round(schedule.durationSeconds * 0.75))
-        : schedule.dayDurationSeconds ?? schedule.durationSeconds,
+        ? sched.nightDurationSeconds ?? Math.max(15, Math.round(sched.durationSeconds * 0.75))
+        : sched.dayDurationSeconds ?? sched.durationSeconds,
     offIntervalMinutes: isDay
       ? configuredDayIntervalMinutes
       : nightEnabled
-        ? schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15)
+        ? sched.nightIntervalMinutes ?? Math.max(sched.intervalMinutes, 15)
         : configuredDayIntervalMinutes,
   };
 }
@@ -541,25 +575,27 @@ function pushSensorSnapshot(nextStatus: LiveStatus) {
 }
 
 function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null): { nextCycleISO: string | null; nextCycleIn: number } {
-  if (!schedule.enabled) {
+  const deviceId = status?.deviceId ?? null;
+  const sched = resolveSchedule(deviceId);
+  if (!sched.enabled) {
     return { nextCycleISO: null, nextCycleIn: -1 };
   }
 
-  const currentMode = getModeForNow(now);
-  const nightEnabled = isNightModeEnabled();
-  const { offIntervalMinutes, onDurationSeconds } = getCycleProfile(now);
+  const currentMode = getModeForNow(now, deviceId);
+  const nightEnabled = isNightModeEnabled(deviceId);
+  const { offIntervalMinutes, onDurationSeconds } = getCycleProfile(now, deviceId);
   const intervalMs = (offIntervalMinutes * 60 + onDurationSeconds) * 1000;
   const outsideDayWindow = currentMode === "NIGHT";
   const currentHour = getIstHour(now);
 
   const windowStart = currentMode === "DAY"
-    ? makeIstDateAtHour(now, schedule.startHour)
-    : currentHour >= schedule.endHour
-      ? makeIstDateAtHour(now, schedule.endHour)
-      : makeIstDateAtHour(now, schedule.endHour, -1);
+    ? makeIstDateAtHour(now, sched.startHour)
+    : currentHour >= sched.endHour
+      ? makeIstDateAtHour(now, sched.endHour)
+      : makeIstDateAtHour(now, sched.endHour, -1);
 
   if (outsideDayWindow && !nightEnabled) {
-    const tomorrow = makeIstDateAtHour(now, schedule.startHour, 1);
+    const tomorrow = makeIstDateAtHour(now, sched.startHour, 1);
     const secondsUntil = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
     return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
   }
@@ -568,7 +604,7 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
 
   // Try using actual last run time if present and valid
   const lastRunMs = status?.lastRunISO ? Date.parse(status.lastRunISO) : null;
-  const lastRunMode = lastRunMs && Number.isFinite(lastRunMs) ? getModeForNow(new Date(lastRunMs)) : null;
+  const lastRunMode = lastRunMs && Number.isFinite(lastRunMs) ? getModeForNow(new Date(lastRunMs), deviceId) : null;
   if (lastRunMs && Number.isFinite(lastRunMs) && (!lastRunMode || lastRunMode === currentMode)) {
     let targetTime = lastRunMs + intervalMs;
     if (targetTime < now.getTime()) {
@@ -587,8 +623,8 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
   }
 
   const nextHour = getIstHour(nextCycleTime);
-  if ((nextHour < schedule.startHour || nextHour >= schedule.endHour || nextCycleTime.getTime() < now.getTime()) && (!nightEnabled || currentMode === "DAY")) {
-    const nextDay = makeIstDateAtHour(now, schedule.startHour, 1);
+  if ((nextHour < sched.startHour || nextHour >= sched.endHour || nextCycleTime.getTime() < now.getTime()) && (!nightEnabled || currentMode === "DAY")) {
+    const nextDay = makeIstDateAtHour(now, sched.startHour, 1);
     const secondsUntil = Math.floor((nextDay.getTime() - now.getTime()) / 1000);
     return { nextCycleISO: nextDay.toISOString(), nextCycleIn: secondsUntil };
   }
@@ -598,11 +634,13 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
 }
 
 function calculateRetryCycle(nextStatus: LiveStatus, now = new Date()): { retryNextCycleISO: string | null; retryNextCycleIn: number | null } {
-  if (!schedule.enabled) {
+  const deviceId = nextStatus.deviceId ?? null;
+  const sched = resolveSchedule(deviceId);
+  if (!sched.enabled) {
     return { retryNextCycleISO: null, retryNextCycleIn: null };
   }
 
-  const withinActiveWindow = getIstHour(now) >= schedule.startHour && getIstHour(now) < schedule.endHour;
+  const withinActiveWindow = getIstHour(now) >= sched.startHour && getIstHour(now) < sched.endHour;
   if (!withinActiveWindow) {
     return { retryNextCycleISO: null, retryNextCycleIn: null };
   }
@@ -658,16 +696,15 @@ function syncScheduledState(deviceId?: string | null, now = new Date()) {
     return;
   }
 
+  const sched = resolveSchedule(resolvedDeviceId);
   const nextStatus = { ...currentStatus };
-  const currentMode = getModeForNow(now);
-  const nightEnabled = isNightModeEnabled();
+  const currentMode = getModeForNow(now, resolvedDeviceId);
+  const nightEnabled = isNightModeEnabled(resolvedDeviceId);
   const withinScheduledWindow = currentMode === "DAY" || nightEnabled;
 
-
-
-  if (nextStatus.motorManualMode === "AUTO" && schedule.enabled) {
+  if (nextStatus.motorManualMode === "AUTO" && sched.enabled) {
     const withinActiveWindow = withinScheduledWindow;
-    const cycleProfile = getCycleProfile(now);
+    const cycleProfile = getCycleProfile(now, resolvedDeviceId);
     const onDurationMs = cycleProfile.onDurationSeconds * 1000;
     const offIntervalMs = cycleProfile.offIntervalMinutes * 60 * 1000;
     const lastRunMs = nextStatus.lastRunISO ? Date.parse(nextStatus.lastRunISO) : null;
@@ -770,15 +807,27 @@ function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function getSchedule() {
+export function getSchedule(deviceId?: string | null) {
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  if (resolvedDeviceId && deviceSchedules[resolvedDeviceId]) {
+    return { ...deviceSchedules[resolvedDeviceId] };
+  }
   return { ...schedule };
 }
 
-export function updateSchedule(next: Schedule) {
-  schedule = { ...next };
-  saveScheduleToDisk(schedule);
-  void appendEvent("schedule_updated", schedule);
-  return getSchedule();
+export function updateSchedule(next: Schedule, deviceId?: string | null) {
+  const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  if (resolvedDeviceId) {
+    deviceSchedules[resolvedDeviceId] = { ...next };
+    saveDeviceSchedulesToDisk(deviceSchedules);
+    void appendEvent("schedule_updated", { deviceId: resolvedDeviceId, schedule: next });
+    return getSchedule(resolvedDeviceId);
+  } else {
+    schedule = { ...next };
+    saveScheduleToDisk(schedule);
+    void appendEvent("schedule_updated", schedule);
+    return getSchedule();
+  }
 }
 
 export function getStatus(deviceId?: string | null) {
@@ -789,7 +838,7 @@ export function getStatus(deviceId?: string | null) {
   // Calculate next cycle and update status
   const plannedNextCycle = calculatePlannedNextCycle(new Date(), currentStatus);
   const retryCycle = calculateRetryCycle(currentStatus);
-  const cycleProfile = getCycleProfile();
+  const cycleProfile = getCycleProfile(undefined, deviceId);
   const heartbeatUpdatedAt = currentStatus.heartbeatUpdatedAt ?? null;
   const deviceSignalUpdatedAt = getLatestDeviceSignalAt(currentStatus);
   const isOnline = isFresh(deviceSignalUpdatedAt);
@@ -800,7 +849,7 @@ export function getStatus(deviceId?: string | null) {
     if (currentStatus.pumpOn && currentStatus.lastRunISO) {
       // Prefer to use a matching pumpLog's onDurationSeconds when available
       const matching = pumpLogs.find((p) => p.startedAt === currentStatus.lastRunISO && (p.deviceId ?? DEFAULT_DEVICE_ID) === (currentStatus.deviceId ?? DEFAULT_DEVICE_ID));
-      const onDur = matching ? matching.onDurationSeconds : getCycleProfile(new Date(currentStatus.lastRunISO)).onDurationSeconds;
+      const onDur = matching ? matching.onDurationSeconds : getCycleProfile(new Date(currentStatus.lastRunISO), deviceId).onDurationSeconds;
       const lastMs = new Date(currentStatus.lastRunISO).getTime();
       pumpEndISO = new Date(lastMs + onDur * 1000).toISOString();
     }
@@ -819,7 +868,7 @@ export function getStatus(deviceId?: string | null) {
     cycleMode: cycleProfile.mode,
     cycleOnDurationSeconds: cycleProfile.onDurationSeconds,
     cycleOffIntervalMinutes: cycleProfile.offIntervalMinutes,
-    nightEnabled: isNightModeEnabled(),
+    nightEnabled: isNightModeEnabled(deviceId),
     isOnline,
     pumpEndISO,
     heartbeatUpdatedAt,
@@ -1006,11 +1055,19 @@ export function addPumpLog(log: PumpLogInput & { deviceId?: string | null }) {
   pumpLogs = [next, ...pumpLogs];
 
   if (statuses[deviceId]) {
-    statuses[deviceId] = {
-      ...statuses[deviceId],
-      lastRunISO: next.startedAt,
-      fault: next.fault ?? statuses[deviceId].fault,
-    };
+    if (next.pumpIndex === 2) {
+      statuses[deviceId] = {
+        ...statuses[deviceId],
+        lastRunISO_2: next.startedAt,
+        fault: next.fault ?? statuses[deviceId].fault,
+      };
+    } else {
+      statuses[deviceId] = {
+        ...statuses[deviceId],
+        lastRunISO: next.startedAt,
+        fault: next.fault ?? statuses[deviceId].fault,
+      };
+    }
   }
 
   saveStateToDisk();
@@ -1019,17 +1076,18 @@ export function addPumpLog(log: PumpLogInput & { deviceId?: string | null }) {
   return { ...next };
 }
 
-export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?: number; offIntervalMinutes?: number; startedAtMs?: number; deviceId?: string | null }) {
+export function startPumpLog(input: { mode?: PumpLog["mode"]; onDurationSeconds?: number; offIntervalMinutes?: number; startedAtMs?: number; deviceId?: string | null; pumpIndex?: number }) {
   const next = addPumpLog({
-    mode: input.mode ?? getCycleProfile().mode,
+    mode: input.mode ?? getCycleProfile(undefined, input.deviceId).mode,
     onDurationSeconds: input.onDurationSeconds ?? 0,
-    offIntervalMinutes: input.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
+    offIntervalMinutes: input.offIntervalMinutes ?? getCycleProfile(undefined, input.deviceId).offIntervalMinutes,
     durationSeconds: 0,
     flowed: false,
     fault: null,
     startedAtMs: input.startedAtMs ?? Date.now(),
     endedAtMs: input.startedAtMs ?? Date.now(),
     deviceId: input.deviceId ?? undefined,
+    pumpIndex: input.pumpIndex,
   });
   return next;
 }
@@ -1058,11 +1116,19 @@ export function updatePumpLog(id: string, patch: Partial<PumpLogInput & { endedA
   pumpLogs[idx] = updated;
 
   if (updated.deviceId && statuses[updated.deviceId]) {
-    statuses[updated.deviceId] = {
-      ...statuses[updated.deviceId],
-      lastRunISO: updated.startedAt,
-      fault: updated.fault ?? statuses[updated.deviceId].fault,
-    };
+    if (updated.pumpIndex === 2) {
+      statuses[updated.deviceId] = {
+        ...statuses[updated.deviceId],
+        lastRunISO_2: updated.startedAt,
+        fault: updated.fault ?? statuses[updated.deviceId].fault,
+      };
+    } else {
+      statuses[updated.deviceId] = {
+        ...statuses[updated.deviceId],
+        lastRunISO: updated.startedAt,
+        fault: updated.fault ?? statuses[updated.deviceId].fault,
+      };
+    }
   }
 
   saveStateToDisk();

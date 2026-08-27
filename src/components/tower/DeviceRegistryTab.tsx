@@ -31,11 +31,13 @@ const SENSOR_ACTUATOR_TYPES = [
   "Humidity Sensor",
   "Water Temperature Sensor",
   "Relay - Water Pump",
+  "Relay - Water Pump 2",
   "Relay - Nutrition A",
   "Relay - Nutrition B",
   "Relay - Nutrition C",
   "Relay - pH Down",
   "Motor Override Button",
+  "Motor Override Button 2",
   "Other Sensor",
   "Other Actuator",
 ];

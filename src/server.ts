@@ -379,6 +379,11 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         flowing?: boolean;
         pumpState?: string;
         state?: string;
+        pumpOn_2?: boolean;
+        flowing_2?: boolean;
+        pumpState_2?: string;
+        state_2?: string;
+        motorManualMode_2?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
         humidityPct?: number | null;
         ph?: number | null;
         ec?: number | null;
@@ -396,6 +401,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         lastBootFault?: string | null;
         uptimeSec?: number | null;
         lastRunAt?: string;
+        lastRunAt_2?: string;
         sensorDataOk?: boolean;
         dhtOk?: boolean;
         levelSensorOk?: boolean;
@@ -446,6 +452,16 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           }
           return payload.pumpOn ? PumpState.RUNNING : PumpState.IDLE;
         })(),
+        pumpOn_2: payload.pumpOn_2,
+        flowing_2: payload.flowing_2,
+        pumpState_2: (() => {
+          const rawState = payload.pumpState_2 ?? payload.state_2;
+          if (typeof rawState === "string" && Object.values(PumpState).includes(rawState as PumpState)) {
+            return rawState as PumpState;
+          }
+          return payload.pumpOn_2 ? PumpState.RUNNING : PumpState.IDLE;
+        })(),
+        motorManualMode_2: payload.motorManualMode_2,
         humidityPct: payload.humidityPct === null ? null : (payload.humidityPct ?? undefined),
         ph: payload.ph === null ? null : (payload.ph ?? undefined),
         ec: payload.ec === null ? null : (payload.ec ?? undefined),
@@ -471,6 +487,17 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
             return new Date(val).toISOString();
           }
           const parsed = Date.parse(String(payload.lastRunAt));
+          if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+          return undefined;
+        })(),
+        lastRunISO_2: (() => {
+          if (!payload.lastRunAt_2) return undefined;
+          let val = Number(payload.lastRunAt_2);
+          if (Number.isFinite(val) && val > 0) {
+            if (val < 1e12) val *= 1000;
+            return new Date(val).toISOString();
+          }
+          const parsed = Date.parse(String(payload.lastRunAt_2));
           if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
           return undefined;
         })(),
@@ -503,18 +530,47 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
             if (startedAtMs < 1e12) startedAtMs = startedAtMs * 1000;
           }
 
-          const onDur = (payload as any).onDurationSeconds ?? getCycleProfile(new Date(startedAtMs)).onDurationSeconds;
+          const onDur = (payload as any).onDurationSeconds ?? getCycleProfile(new Date(startedAtMs), resolvedDeviceId).onDurationSeconds;
           createdPumpLog = startPumpLog({
             mode: undefined,
             onDurationSeconds: onDur,
-            offIntervalMinutes: (payload as any).offIntervalMinutes ?? getCycleProfile(new Date(startedAtMs)).offIntervalMinutes,
+            offIntervalMinutes: (payload as any).offIntervalMinutes ?? getCycleProfile(new Date(startedAtMs), resolvedDeviceId).offIntervalMinutes,
             startedAtMs: startedAtMs,
             deviceId: resolvedDeviceId,
+            pumpIndex: 1,
           });
         }
       } catch (e) {
         // ignore start log failures
         console.error("Failed to create start pump log:", e);
+      }
+
+      // If device reported a lastRunAt_2 and indicates pump_2 is ON, create a start pump-log entry for Pump 2
+      try {
+        if (payload.lastRunAt_2 && payload.pumpOn_2 && !previousStatus?.pumpOn_2) {
+          let startedAtMs = Number(payload.lastRunAt_2);
+          if (!Number.isFinite(startedAtMs) || startedAtMs === 0) {
+            const parsed = Date.parse(String(payload.lastRunAt_2));
+            startedAtMs = Number.isFinite(parsed) ? parsed : Date.now();
+          } else {
+            if (startedAtMs < 1e12) startedAtMs = startedAtMs * 1000;
+          }
+
+          const deviceSchedule = getSchedule(resolvedDeviceId);
+          const onDur = deviceSchedule.dayDurationSeconds_2 ?? deviceSchedule.durationSeconds_2 ?? 180;
+          const offInterval = deviceSchedule.dayIntervalMinutes_2 ?? deviceSchedule.intervalMinutes_2 ?? 10;
+          
+          startPumpLog({
+            mode: undefined,
+            onDurationSeconds: onDur,
+            offIntervalMinutes: offInterval,
+            startedAtMs: startedAtMs,
+            deviceId: resolvedDeviceId,
+            pumpIndex: 2,
+          });
+        }
+      } catch (e) {
+        console.error("Failed to create start pump log for Pump 2:", e);
       }
 
       const respBody: any = updated ?? { success: true };
@@ -548,8 +604,9 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     touchStatus({ source: "esp32", deviceId: resolvedDeviceId });
     const status = getStatus(resolvedDeviceId);
-    const schedule = getSchedule();
-    const cycleProfile = getCycleProfile();    const devicePins = getDevicePins(resolvedDeviceId);
+    const deviceSchedule = getSchedule(resolvedDeviceId);
+    const cycleProfile = getCycleProfile(undefined, resolvedDeviceId);
+    const devicePins = getDevicePins(resolvedDeviceId);
     const mappings = (devicePins && devicePins.length > 0) ? devicePins : getGpioMappings();
     const findPin = (type: string, defaultPin: number) => {
       const found = mappings.find((m) => m.type === type);
@@ -563,6 +620,33 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     );
     const humidityMapping = mappings.find((m) => m.type === "Humidity Sensor") ??
       mappings.find((m) => m.type === "Water Temperature Sensor");
+
+    // Dynamic Cycle Profile calculation for Pump 2
+    const getCycleProfile2 = () => {
+      const mode = cycleProfile.mode;
+      const isDay = mode === "DAY";
+      const nightEnabled = deviceSchedule.nightEnabled !== false;
+      const configuredDayIntervalMinutes_2 = deviceSchedule.dayIntervalMinutes_2 ?? deviceSchedule.intervalMinutes_2 ?? 10;
+      
+      const onDurationSeconds_2 = isDay
+        ? deviceSchedule.dayDurationSeconds_2 ?? deviceSchedule.durationSeconds_2 ?? 180
+        : nightEnabled
+          ? deviceSchedule.nightDurationSeconds_2 ?? Math.max(15, Math.round((deviceSchedule.durationSeconds_2 ?? 180) * 0.75))
+          : deviceSchedule.dayDurationSeconds_2 ?? deviceSchedule.durationSeconds_2 ?? 180;
+
+      const offIntervalMinutes_2 = isDay
+        ? configuredDayIntervalMinutes_2
+        : nightEnabled
+          ? deviceSchedule.nightIntervalMinutes_2 ?? Math.max(deviceSchedule.intervalMinutes_2 ?? 10, 15)
+          : configuredDayIntervalMinutes_2;
+
+      return {
+        onDurationSeconds: onDurationSeconds_2,
+        offIntervalMinutes: offIntervalMinutes_2,
+      };
+    };
+
+    const cycleProfile2 = getCycleProfile2();
  
     return jsonResponse(
       {
@@ -571,11 +655,14 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         deviceId: resolvedDeviceId,
         serverTime: Date.now(),
         hasRegisteredDevice: true,
-        ...schedule,
+        ...deviceSchedule,
         intervalMinutes: cycleProfile.offIntervalMinutes + Math.round(cycleProfile.onDurationSeconds / 60),
         durationSeconds: cycleProfile.onDurationSeconds,
+        intervalMinutes_2: cycleProfile2.offIntervalMinutes + Math.round(cycleProfile2.onDurationSeconds / 60),
+        durationSeconds_2: cycleProfile2.onDurationSeconds,
         ...(status ?? {}),
         pin_pump_relay: findPin("Relay - Water Pump", 27),
+        pin_pump_relay_2: findPin("Relay - Water Pump 2", -1),
         pin_nutrition_a: findPin("Relay - Nutrition A", 33),
         pin_nutrition_b: findPin("Relay - Nutrition B", 26),
         pin_nutrition_c: findPin("Relay - Nutrition C", 0),
@@ -586,6 +673,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pin_level_sensor_rx: ultrasonic?.pin ?? findPin("Water Level Sensor", 18),
         pin_level_sensor_tx: ultrasonic?.txPin ?? (devicePins && devicePins.length > 0 ? -1 : 5),
         pin_motor_button: findPin("Motor Override Button", 19),
+        pin_motor_button_2: findPin("Motor Override Button 2", -1),
         emptyDistanceCm: waterCalibration?.emptyDistanceCm ?? 50,
         fullDistanceCm: waterCalibration?.fullDistanceCm ?? 10,
         tankWidthCm: waterCalibration?.tankWidthCm ?? 50,
@@ -617,14 +705,16 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       onDurationSeconds?: number;
       offIntervalMinutes?: number;
       startedAtMs?: number;
+      pumpIndex?: number;
     };
 
     const created = startPumpLog({
       mode: payload.mode ?? "MANUAL",
       onDurationSeconds: payload.onDurationSeconds ?? 0,
-      offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
+      offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile(undefined, resolvedDeviceId).offIntervalMinutes,
       startedAtMs: payload.startedAtMs,
       deviceId: resolvedDeviceId,
+      pumpIndex: payload.pumpIndex,
     });
 
     return jsonResponse(created, 201);
@@ -733,6 +823,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
   }
 
   if (url.pathname === "/api/schedule") {
+    const qDeviceId = url.searchParams.get("deviceId") ?? request.headers.get("x-device-id") ?? null;
+    
     if (request.method === "GET" || request.method === "POST") {
       // If a device is calling (provides device headers), require device auth.
       const deviceIdHeader = request.headers.get("x-device-id");
@@ -742,7 +834,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           return jsonResponse({ error: "Unauthorized (device)" }, 401);
         }
       }
-      return jsonResponse(getSchedule());
+      return jsonResponse(getSchedule(qDeviceId));
     }
 
     if (request.method === "PUT") {
@@ -756,6 +848,9 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         nightIntervalMinutes: [5, 1440], nightDurationSeconds: [10, 600],
         phDoseSeconds: [1, 60], phDoseIntervalMinutes: [5, 360],
         ecDoseSeconds: [1, 120], ecDoseIntervalMinutes: [5, 360],
+        intervalMinutes_2: [5, 1440], durationSeconds_2: [10, 600],
+        dayIntervalMinutes_2: [5, 1440], dayDurationSeconds_2: [10, 600],
+        nightIntervalMinutes_2: [5, 1440], nightDurationSeconds_2: [10, 600],
       };
       for (const [field, [minimum, maximum]] of Object.entries(numericLimits)) {
         const value = payload[field];
@@ -770,7 +865,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         }
       }
 
-      return jsonResponse(updateSchedule(payload));
+      return jsonResponse(updateSchedule(payload, qDeviceId));
     }
 
     return jsonResponse({ error: "Method not allowed" }, 405);
