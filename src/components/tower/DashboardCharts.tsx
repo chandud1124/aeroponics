@@ -66,22 +66,6 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          { label: "Current pH", value: formatValue(latest?.ph), icon: Gauge, tone: "text-indigo-500" },
-          { label: "EC balance", value: formatValue(latest?.ec), icon: Activity, tone: "text-amber-500" },
-          { label: "Water temp", value: formatValue(latest?.reservoirTempC, "°C"), icon: Thermometer, tone: "text-sky-500" },
-          { label: "Humidity", value: formatValue(latest?.humidityPct, "%"), icon: Zap, tone: "text-emerald-500" },
-        ].map((metric) => (
-          <Card key={metric.label} className="border-border/80 bg-card p-3.5 shadow-sm sm:p-4">
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{metric.label}</span>
-              <metric.icon className={`h-4 w-4 shrink-0 ${metric.tone}`} />
-            </div>
-            <div className="mt-2 text-xl font-bold tracking-tight text-foreground sm:text-2xl">{metric.value}</div>
-          </Card>
-        ))}
-      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div>

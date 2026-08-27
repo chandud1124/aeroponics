@@ -118,59 +118,92 @@ export function NextCyclePanel({
   const expectedDuration = status.cycleOnDurationSeconds ?? (isDayMode ? schedule.dayDurationSeconds ?? schedule.durationSeconds : schedule.nightDurationSeconds ?? 30);
   const expectedOff = status.cycleOffIntervalMinutes ?? (isDayMode ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes : schedule.nightIntervalMinutes ?? 15);
 
-  const [mistingRemainingSec, setMistingRemainingSec] = useState<number>(0);
-  const [idleCountdown, setIdleCountdown] = useState<string>("--:--");
+  const expectedDuration_2 = isDayMode 
+    ? (schedule.dayDurationSeconds_2 ?? schedule.durationSeconds_2 ?? schedule.durationSeconds)
+    : (schedule.nightDurationSeconds_2 ?? schedule.durationSeconds_2 ?? schedule.durationSeconds);
+  const expectedOff_2 = isDayMode 
+    ? (schedule.dayIntervalMinutes_2 ?? schedule.intervalMinutes_2 ?? schedule.intervalMinutes)
+    : (schedule.nightIntervalMinutes_2 ?? schedule.intervalMinutes_2 ?? schedule.intervalMinutes);
+
+  const [pump1State, setPump1State] = useState({ mistingRemainingSec: 0, idleCountdown: "--:--" });
+  const [pump2State, setPump2State] = useState({ mistingRemainingSec: 0, idleCountdown: "--:--" });
 
   useEffect(() => {
     const tick = () => {
       const now = Date.now();
-      const nextCycleTargetISO = status.plannedNextCycleISO ?? status.nextCycleISO;
-      const pumpEndTargetISO = status.pumpEndISO ?? status.lastRunISO;
-
+      
+      // Calculate Pump 1
+      const nextCycleTargetISO1 = status.plannedNextCycleISO ?? status.nextCycleISO;
+      const pumpEndTargetISO1 = status.pumpEndISO ?? status.lastRunISO;
+      
+      let p1Misting = 0;
+      let p1Idle = "--:--";
+      
       if (status.motorManualMode === "FORCED_OFF") {
-        setMistingRemainingSec(0);
-        setIdleCountdown("PAUSED");
-        return;
-      }
-      if (status.motorManualMode === "FORCED_ON") {
-        setMistingRemainingSec(expectedDuration);
-        setIdleCountdown("FORCED");
-        return;
-      }
-
-      if (status.pumpOn && pumpEndTargetISO) {
-        const endTime = new Date(pumpEndTargetISO).getTime();
-        const diff = Math.max(0, Math.ceil((endTime - now) / 1000));
-        setMistingRemainingSec(diff);
-        setIdleCountdown("MISTING");
-      } else if (nextCycleTargetISO) {
-        const nextTime = new Date(nextCycleTargetISO).getTime();
+        p1Misting = 0;
+        p1Idle = "PAUSED";
+      } else if (status.motorManualMode === "FORCED_ON") {
+        p1Misting = expectedDuration;
+        p1Idle = "FORCED";
+      } else if (status.pumpOn && pumpEndTargetISO1) {
+        const endTime = new Date(pumpEndTargetISO1).getTime();
+        p1Misting = Math.max(0, Math.ceil((endTime - now) / 1000));
+        p1Idle = "MISTING";
+      } else if (nextCycleTargetISO1) {
+        const nextTime = new Date(nextCycleTargetISO1).getTime();
         const diffMs = nextTime - now;
         if (diffMs <= 0) {
-          setIdleCountdown("00:00");
-          setMistingRemainingSec(0);
+          p1Idle = "00:00";
         } else {
           const totalSec = Math.ceil(diffMs / 1000);
           const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
           const ss = String(totalSec % 60).padStart(2, "0");
-          setIdleCountdown(`${mm}:${ss}`);
-          setMistingRemainingSec(0);
+          p1Idle = `${mm}:${ss}`;
         }
-      } else {
-        setIdleCountdown("--:--");
-        setMistingRemainingSec(0);
       }
+      setPump1State({ mistingRemainingSec: p1Misting, idleCountdown: p1Idle });
+
+      // Calculate Pump 2
+      const nextCycleTargetISO2 = status.plannedNextCycleISO_2;
+      const pumpEndTargetISO2 = status.pumpEndISO_2 ?? status.lastRunISO_2;
+
+      let p2Misting = 0;
+      let p2Idle = "--:--";
+
+      if (status.motorManualMode_2 === "FORCED_OFF") {
+        p2Misting = 0;
+        p2Idle = "PAUSED";
+      } else if (status.motorManualMode_2 === "FORCED_ON") {
+        p2Misting = expectedDuration_2;
+        p2Idle = "FORCED";
+      } else if (status.pumpOn_2 && pumpEndTargetISO2) {
+        const endTime = new Date(pumpEndTargetISO2).getTime();
+        p2Misting = Math.max(0, Math.ceil((endTime - now) / 1000));
+        p2Idle = "MISTING";
+      } else if (nextCycleTargetISO2) {
+        const nextTime = new Date(nextCycleTargetISO2).getTime();
+        const diffMs = nextTime - now;
+        if (diffMs <= 0) {
+          p2Idle = "00:00";
+        } else {
+          const totalSec = Math.ceil(diffMs / 1000);
+          const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+          const ss = String(totalSec % 60).padStart(2, "0");
+          p2Idle = `${mm}:${ss}`;
+        }
+      }
+      setPump2State({ mistingRemainingSec: p2Misting, idleCountdown: p2Idle });
     };
 
     tick();
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [status, expectedDuration]);
+  }, [status, expectedDuration, expectedDuration_2, isDayMode]);
 
   return (
     <Card className="p-6 border-border/80 bg-card/70 flex flex-col justify-between hover:border-primary/30 transition-colors">
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between pb-2 border-b border-border/50">
           <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Irrigation Scheduler</span>
           <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
             {isDayMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4 text-indigo-500" />}
@@ -178,18 +211,35 @@ export function NextCyclePanel({
           </div>
         </div>
 
-        {/* Circular progress visual panel */}
-        <div className="flex items-center justify-center p-4 bg-muted/20 border border-border/50 rounded-xl relative overflow-hidden">
-          <div className="text-center space-y-1">
-            <span className="text-[10px] text-muted-foreground font-bold tracking-wider uppercase block">
-              {status.pumpOn ? "Misting Time Remaining" : "Countdown Until Mist"}
-            </span>
-            <span className="text-3xl font-black font-mono tracking-tight text-foreground block">
-              {status.pumpOn ? `${mistingRemainingSec}s` : idleCountdown}
-            </span>
-            <span className="text-[10px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded block w-fit mx-auto mt-2">
-              Interval: {expectedOff}m | Duration: {expectedDuration}s
-            </span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Pump 1 Countdown */}
+          <div className="flex items-center justify-center p-4 bg-muted/20 border border-border/50 rounded-xl relative overflow-hidden">
+            <div className="text-center space-y-1">
+              <span className="text-[10px] text-muted-foreground font-bold tracking-wider uppercase block">
+                Mist Pump 1: {status.pumpOn ? "Misting" : "Idle"}
+              </span>
+              <span className="text-2xl font-black font-mono tracking-tight text-foreground block">
+                {status.pumpOn ? `${pump1State.mistingRemainingSec}s` : pump1State.idleCountdown}
+              </span>
+              <span className="text-[9px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded block w-fit mx-auto mt-1">
+                Interval: {expectedOff}m | Duration: {expectedDuration}s
+              </span>
+            </div>
+          </div>
+
+          {/* Pump 2 Countdown */}
+          <div className="flex items-center justify-center p-4 bg-muted/20 border border-border/50 rounded-xl relative overflow-hidden">
+            <div className="text-center space-y-1">
+              <span className="text-[10px] text-muted-foreground font-bold tracking-wider uppercase block">
+                Mist Pump 2: {status.pumpOn_2 ? "Misting" : "Idle"}
+              </span>
+              <span className="text-2xl font-black font-mono tracking-tight text-foreground block">
+                {status.pumpOn_2 ? `${pump2State.mistingRemainingSec}s` : pump2State.idleCountdown}
+              </span>
+              <span className="text-[9px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded block w-fit mx-auto mt-1">
+                Interval: {expectedOff_2}m | Duration: {expectedDuration_2}s
+              </span>
+            </div>
           </div>
         </div>
       </div>

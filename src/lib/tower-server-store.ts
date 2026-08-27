@@ -633,6 +633,72 @@ function calculatePlannedNextCycle(now = new Date(), status?: LiveStatus | null)
   return { nextCycleISO: nextCycleTime.toISOString(), nextCycleIn: Math.max(0, secondsUntil) };
 }
 
+function calculatePlannedNextCycle_2(now = new Date(), status?: LiveStatus | null): { nextCycleISO: string | null; nextCycleIn: number } {
+  const deviceId = status?.deviceId ?? null;
+  const sched = resolveSchedule(deviceId);
+  const enabled2 = sched.enabled_2 !== undefined ? sched.enabled_2 : sched.enabled;
+  if (!enabled2) {
+    return { nextCycleISO: null, nextCycleIn: -1 };
+  }
+
+  const currentMode = getModeForNow(now, deviceId);
+  const nightEnabled = isNightModeEnabled(deviceId);
+  
+  const isDayMode = currentMode === "DAY";
+  const offIntervalMinutes = isDayMode 
+    ? (sched.dayIntervalMinutes_2 ?? sched.intervalMinutes_2 ?? sched.intervalMinutes)
+    : (sched.nightIntervalMinutes_2 ?? sched.intervalMinutes_2 ?? sched.intervalMinutes);
+  const onDurationSeconds = isDayMode
+    ? (sched.dayDurationSeconds_2 ?? sched.durationSeconds_2 ?? sched.durationSeconds)
+    : (sched.nightDurationSeconds_2 ?? sched.durationSeconds_2 ?? sched.durationSeconds);
+
+  const intervalMs = (offIntervalMinutes * 60 + onDurationSeconds) * 1000;
+  const outsideDayWindow = currentMode === "NIGHT";
+  const currentHour = getIstHour(now);
+
+  const windowStart = currentMode === "DAY"
+    ? makeIstDateAtHour(now, sched.startHour)
+    : currentHour >= sched.endHour
+      ? makeIstDateAtHour(now, sched.endHour)
+      : makeIstDateAtHour(now, sched.endHour, -1);
+
+  if (outsideDayWindow && !nightEnabled) {
+    const tomorrow = makeIstDateAtHour(now, sched.startHour, 1);
+    const secondsUntil = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
+    return { nextCycleISO: tomorrow.toISOString(), nextCycleIn: secondsUntil };
+  }
+
+  let nextCycleTime: Date | null = null;
+
+  const lastRunMs = status?.lastRunISO_2 ? Date.parse(status.lastRunISO_2) : null;
+  const lastRunMode = lastRunMs && Number.isFinite(lastRunMs) ? getModeForNow(new Date(lastRunMs), deviceId) : null;
+  if (lastRunMs && Number.isFinite(lastRunMs) && (!lastRunMode || lastRunMode === currentMode)) {
+    let targetTime = lastRunMs + intervalMs;
+    if (targetTime < now.getTime()) {
+      const elapsed = now.getTime() - targetTime;
+      const additionalCycles = Math.ceil(elapsed / intervalMs);
+      targetTime += additionalCycles * intervalMs;
+    }
+    nextCycleTime = new Date(targetTime);
+  }
+
+  if (!nextCycleTime) {
+    const elapsedMs = now.getTime() - windowStart.getTime();
+    const slotsElapsed = Math.max(0, Math.ceil(elapsedMs / intervalMs));
+    nextCycleTime = new Date(windowStart.getTime() + slotsElapsed * intervalMs);
+  }
+
+  const nextHour = getIstHour(nextCycleTime);
+  if ((nextHour < sched.startHour || nextHour >= sched.endHour || nextCycleTime.getTime() < now.getTime()) && (!nightEnabled || currentMode === "DAY")) {
+    const nextDay = makeIstDateAtHour(now, sched.startHour, 1);
+    const secondsUntil = Math.floor((nextDay.getTime() - now.getTime()) / 1000);
+    return { nextCycleISO: nextDay.toISOString(), nextCycleIn: secondsUntil };
+  }
+
+  const secondsUntil = Math.floor((nextCycleTime.getTime() - now.getTime()) / 1000);
+  return { nextCycleISO: nextCycleTime.toISOString(), nextCycleIn: Math.max(0, secondsUntil) };
+}
+
 function calculateRetryCycle(nextStatus: LiveStatus, now = new Date()): { retryNextCycleISO: string | null; retryNextCycleIn: number | null } {
   const deviceId = nextStatus.deviceId ?? null;
   const sched = resolveSchedule(deviceId);
@@ -837,6 +903,7 @@ export function getStatus(deviceId?: string | null) {
   
   // Calculate next cycle and update status
   const plannedNextCycle = calculatePlannedNextCycle(new Date(), currentStatus);
+  const plannedNextCycle_2 = calculatePlannedNextCycle_2(new Date(), currentStatus);
   const retryCycle = calculateRetryCycle(currentStatus);
   const cycleProfile = getCycleProfile(undefined, deviceId);
   const heartbeatUpdatedAt = currentStatus.heartbeatUpdatedAt ?? null;
@@ -857,12 +924,30 @@ export function getStatus(deviceId?: string | null) {
     pumpEndISO = null;
   }
 
+  // Compute pumpEndISO_2 when pump 2 is running
+  let pumpEndISO_2: string | null = null;
+  try {
+    if (currentStatus.pumpOn_2 && currentStatus.lastRunISO_2) {
+      const sched = resolveSchedule(deviceId);
+      const isDayMode = getModeForNow(new Date(), deviceId) === "DAY";
+      const onDur2 = isDayMode
+        ? (sched.dayDurationSeconds_2 ?? sched.durationSeconds_2 ?? sched.durationSeconds)
+        : (sched.nightDurationSeconds_2 ?? sched.durationSeconds_2 ?? sched.durationSeconds);
+      const lastMs_2 = new Date(currentStatus.lastRunISO_2).getTime();
+      pumpEndISO_2 = new Date(lastMs_2 + onDur2 * 1000).toISOString();
+    }
+  } catch {
+    pumpEndISO_2 = null;
+  }
+
   return {
     ...currentStatus,
     nextCycleISO: plannedNextCycle.nextCycleISO,
     nextCycleIn: plannedNextCycle.nextCycleIn,
     plannedNextCycleISO: plannedNextCycle.nextCycleISO,
     plannedNextCycleIn: plannedNextCycle.nextCycleIn,
+    plannedNextCycleISO_2: plannedNextCycle_2.nextCycleISO,
+    plannedNextCycleIn_2: plannedNextCycle_2.nextCycleIn,
     retryNextCycleISO: retryCycle.retryNextCycleISO,
     retryNextCycleIn: retryCycle.retryNextCycleIn,
     cycleMode: cycleProfile.mode,
@@ -871,6 +956,7 @@ export function getStatus(deviceId?: string | null) {
     nightEnabled: isNightModeEnabled(deviceId),
     isOnline,
     pumpEndISO,
+    pumpEndISO_2,
     heartbeatUpdatedAt,
   };
 }
