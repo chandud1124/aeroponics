@@ -265,7 +265,7 @@ export function saveGeminiApiKey(key: string) {
   saveStateToDisk();
 }
 
-let cameraSettings: CameraSettings = { rtspUrl: "", ezvizAppKey: "", ezvizAppSecret: "", autoCapture: false };
+let cameraSettings: CameraSettings = { rtspUrl: "", liveStreamUrl: "", ezvizAppKey: "", ezvizAppSecret: "", autoCapture: false };
 let cameraSnapshots: CameraSnapshot[] = [];
 
 export function getCameraSettings() {

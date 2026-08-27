@@ -330,6 +330,7 @@ export function compensateEc(ec: number | null | undefined, tempC: number | null
 
 export type CameraSettings = {
   rtspUrl: string;
+  liveStreamUrl?: string;
   ezvizAppKey: string;
   ezvizAppSecret: string;
   autoCapture: boolean;
