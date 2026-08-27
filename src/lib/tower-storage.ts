@@ -57,10 +57,17 @@ export function withDeviceHeaders(init: RequestInit = {}, deviceId?: string | nu
 }
 
 async function requestJson<T>(path: string, init?: RequestInit, deviceId?: string | null): Promise<T> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("tower_auth_token") : null;
+  const authHeaders: Record<string, string> = {};
+  if (token) {
+    authHeaders["Authorization"] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...withDeviceHeaders(init, deviceId),
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders,
       ...Object.fromEntries(new Headers(init?.headers ?? {}).entries()),
       ...(deviceId?.trim() ? { "x-device-id": deviceId.trim() } : {}),
     },
@@ -200,12 +207,17 @@ export async function fetchAdminDevices(adminPasskey: string): Promise<DeviceLis
 }
 
 export async function createAdminDevice(adminPasskey: string, name?: string, macAddress?: string, ipAddress?: string): Promise<DeviceCreateResult> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("tower_auth_token") : null;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-admin-passkey": adminPasskey,
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   const response = await fetch(`${API_BASE_URL}/api/admin/devices`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-admin-passkey": adminPasskey,
-    },
+    headers,
     body: JSON.stringify({ name, macAddress, ipAddress }),
   });
 

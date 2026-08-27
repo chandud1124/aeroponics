@@ -87,7 +87,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
 
   // Forms states
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
-  const [actionType, setActionType] = useState<"plant" | "harvest" | "add-channel" | "edit-channel" | "incident" | "logs" | "transfer" | null>(null);
+  const [actionType, setActionType] = useState<"plant" | "harvest" | "add-channel" | "edit-channel" | "incident" | "logs" | "transfer" | "edit-planted-crops" | null>(null);
   
   const [channelName, setChannelName] = useState("");
   const [cropName, setCropName] = useState("");

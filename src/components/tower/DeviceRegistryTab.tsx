@@ -321,17 +321,6 @@ export function DeviceRegistryTab() {
         </div>
         
         <div className="flex items-center gap-2">
-          <div className="flex gap-2 items-center bg-muted/40 px-3 py-1 rounded border border-border">
-            <Label htmlFor="admin-pass" className="text-[11px] font-bold text-muted-foreground shrink-0">Admin Passcode:</Label>
-            <Input
-              id="admin-pass"
-              type="password"
-              placeholder="admin123"
-              value={adminPasskey}
-              onChange={(e) => setAdminPasskey(e.target.value)}
-              className="h-8 w-28 text-xs font-mono"
-            />
-          </div>
           <Button onClick={() => setShowAddModal(true)} className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold flex items-center gap-2 text-xs py-2 h-9">
             <Plus className="h-4 w-4" />
             Add ESP32 Controller
@@ -697,16 +686,6 @@ export function DeviceRegistryTab() {
                 />
               </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="add-passkey" className="text-xs font-semibold">Admin Passcode</Label>
-                <Input
-                  id="add-passkey"
-                  type="password"
-                  placeholder="e.g. admin123"
-                  value={adminPasskey}
-                  onChange={(e) => setAdminPasskey(e.target.value)}
-                />
-              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-border/60">

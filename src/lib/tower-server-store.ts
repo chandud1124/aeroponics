@@ -163,6 +163,12 @@ function saveDeviceSchedulesToDisk(schedules: Record<string, Schedule>) {
   }
 }
 
+export type UserEntry = {
+  username: string;
+  passwordHash: string;
+  role: "admin" | "operator";
+};
+
 type PersistedTowerState = {
   status?: LiveStatus | null;
   statuses?: Record<string, LiveStatus>;
@@ -173,6 +179,7 @@ type PersistedTowerState = {
   geminiApiKey?: string;
   cameraSettings?: CameraSettings;
   cameraSnapshots?: CameraSnapshot[];
+  users?: UserEntry[];
 };
 
 type TowerEventType =
@@ -230,10 +237,33 @@ function loadStateFromDisk() {
     if (Array.isArray(parsed.cameraSnapshots)) {
       cameraSnapshots = parsed.cameraSnapshots;
     }
+    if (Array.isArray(parsed.users)) {
+      users = parsed.users;
+    }
   } catch (error) {
     console.error("Failed to load tower state from disk:", error);
   }
 }
+
+let users: UserEntry[] = [];
+
+export function getUsers(): UserEntry[] {
+  return users;
+}
+
+export function addUser(user: UserEntry) {
+  if (users.some((u) => u.username.toLowerCase() === user.username.toLowerCase())) {
+    throw new Error("User already exists");
+  }
+  users.push(user);
+  saveStateToDisk();
+}
+
+export function deleteUser(username: string) {
+  users = users.filter((u) => u.username.toLowerCase() !== username.toLowerCase());
+  saveStateToDisk();
+}
+
 function saveStateToDisk() {
   try {
     ensureDataDir();
@@ -247,6 +277,7 @@ function saveStateToDisk() {
       geminiApiKey,
       cameraSettings,
       cameraSnapshots,
+      users,
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(nextState, null, 2), "utf8");
   } catch (error) {

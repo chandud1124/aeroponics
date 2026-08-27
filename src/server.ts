@@ -35,6 +35,9 @@ import {
   saveCameraSettings,
   getCameraSnapshots,
   addCameraSnapshot,
+  getUsers,
+  addUser,
+  deleteUser,
 } from "./lib/tower-server-store";
 
 import { sendPtzCommand } from "./lib/onvif-ptz";
@@ -234,14 +237,42 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     return null;
   }
 
-  // Admin simple passkey (can be set in environment)
-  const ADMIN_PASSKEY = process.env.ADMIN_PASSKEY ?? "0990";
+  // Admin credentials read from the env
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "admin";
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin123";
   const DEVICE_SECRET_PIN = process.env.DEVICE_SECRET_PIN ?? "";
 
+  function getUserFromRequest(request: Request) {
+    const authHeader = request.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+    const token = authHeader.substring(7).trim();
+    if (token === `admin:${ADMIN_PASSWORD}`) {
+      return { username: ADMIN_USERNAME, role: "admin" };
+    }
+    if (token.startsWith("user:")) {
+      const parts = token.split(":");
+      const username = parts[1];
+      const pwd = parts[2];
+      const found = getUsers().find(u => u.username.toLowerCase() === username.toLowerCase() && u.passwordHash === pwd);
+      if (found) {
+        return { username: found.username, role: found.role };
+      }
+    }
+    return null;
+  }
+
+  function requireUserAuth(request: Request): Response | null {
+    const user = getUserFromRequest(request);
+    if (!user) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
+    }
+    return null;
+  }
+
   function requireAdminAuth(request: Request): Response | null {
-    const pass = request.headers.get("x-admin-passkey");
-    if (pass !== ADMIN_PASSKEY) {
-      return jsonResponse({ error: "Unauthorized (admin)" }, 401);
+    const user = getUserFromRequest(request);
+    if (!user || user.role !== "admin") {
+      return jsonResponse({ error: "Unauthorized (admin role required)" }, 403);
     }
     return null;
   }
@@ -253,6 +284,86 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ error: "Invalid device secret PIN" }, 403);
     }
     return null;
+  }
+
+  // 1. Auth & user endpoints
+  if (request.method === "POST" && url.pathname === "/api/auth/login") {
+    try {
+      const payload = (await request.json().catch(() => ({}))) as { username?: string; password?: string };
+      const username = payload?.username ?? "";
+      const password = payload?.password ?? "";
+      if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase() && password === ADMIN_PASSWORD) {
+        return jsonResponse({
+          success: true,
+          token: `admin:${ADMIN_PASSWORD}`,
+          user: { username: ADMIN_USERNAME, role: "admin" }
+        });
+      }
+      const found = getUsers().find(u => u.username.toLowerCase() === username.toLowerCase() && u.passwordHash === password);
+      if (found) {
+        return jsonResponse({
+          success: true,
+          token: `user:${found.username}:${found.passwordHash}`,
+          user: { username: found.username, role: found.role }
+        });
+      }
+      return jsonResponse({ error: "Invalid username or password" }, 401);
+    } catch (e: any) {
+      return jsonResponse({ error: e.message || "Login failed" }, 500);
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/auth/me") {
+    const user = getUserFromRequest(request);
+    if (!user) {
+      return jsonResponse({ authenticated: false }, 401);
+    }
+    return jsonResponse({ authenticated: true, user });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/admin/users") {
+    const adminCheck = requireAdminAuth(request);
+    if (adminCheck instanceof Response) return adminCheck;
+    try {
+      const payload = (await request.json()) as { username?: string; password?: string; role?: "admin" | "operator" };
+      const username = payload?.username?.trim() ?? "";
+      const password = payload?.password ?? "";
+      const role = payload?.role ?? "operator";
+      if (!username || !password) {
+        return jsonResponse({ error: "Username and password are required" }, 400);
+      }
+      if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+        return jsonResponse({ error: "Cannot create user with admin username" }, 400);
+      }
+      addUser({ username, passwordHash: password, role });
+      return jsonResponse({ success: true });
+    } catch (e: any) {
+      return jsonResponse({ error: e.message || "Failed to add user" }, 400);
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/admin/users") {
+    const adminCheck = requireAdminAuth(request);
+    if (adminCheck instanceof Response) return adminCheck;
+    return jsonResponse({ users: getUsers().map(u => ({ username: u.username, role: u.role })) });
+  }
+
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/users/")) {
+    const adminCheck = requireAdminAuth(request);
+    if (adminCheck instanceof Response) return adminCheck;
+    const username = decodeURIComponent(url.pathname.substring("/api/admin/users/".length));
+    deleteUser(username);
+    return jsonResponse({ success: true });
+  }
+
+  // 2. Telemetry and public endpoint checks
+  const isTelemetry = url.pathname === "/api/telemetry";
+  const isSchedulePublic = url.pathname === "/api/schedule" && request.method === "GET";
+  const isWaterEvent = url.pathname === "/api/water-event";
+
+  if (!isTelemetry && !isSchedulePublic && !isWaterEvent) {
+    const authCheck = requireUserAuth(request);
+    if (authCheck instanceof Response) return authCheck;
   }
 
   // Admin endpoints: device management

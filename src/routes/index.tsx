@@ -26,6 +26,7 @@ import {
   fetchHarvestHistory,
   saveNftChannels,
   harvestCropRemote,
+  API_BASE_URL,
   type LiveStatus,
   type Schedule,
   type DeviceListEntry,
@@ -87,6 +88,11 @@ import {
   Trash2,
   Camera,
   Package,
+  Users,
+  Lock,
+  User,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 type NurseryCell = {
@@ -178,6 +184,68 @@ function getCropStyle(cropName: string, germinated: boolean) {
 function Index() {
   const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState("status");
+  const [user, setUser] = useState<{ username: string; role: string } | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem("tower_auth_token");
+      if (!token) {
+        setAuthLoading(false);
+        return;
+      }
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.authenticated) {
+            setUser(data.user);
+          } else {
+            localStorage.removeItem("tower_auth_token");
+          }
+        } else {
+          localStorage.removeItem("tower_auth_token");
+        }
+      } catch (e) {
+        console.error("Auth validation failed", e);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  const handleLogin = async (usernameInput: string, passwordInput: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: usernameInput, password: passwordInput })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Invalid credentials");
+      }
+      const data = await response.json();
+      localStorage.setItem("tower_auth_token", data.token);
+      setUser(data.user);
+      toast.success(`Welcome back, ${data.user.username}!`);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to log in");
+      throw e;
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("tower_auth_token");
+    setUser(null);
+    toast.success("Logged out successfully");
+  };
+
   const [devices, setDevices] = useState<DeviceListEntry[]>([]);
   const [nftChannels, setNftChannels] = useState<NftChannel[]>([]);
   const [harvestHistory, setHarvestHistory] = useState<HarvestHistoryEntry[]>([]);
@@ -555,10 +623,11 @@ function Index() {
   };
 
   useEffect(() => {
+    if (!user) return;
     if (activeTab === "crops" || activeTab === "history" || activeTab === "nursery" || activeTab === "nft" || activeTab === "grow-bags") {
       loadCropsData();
     }
-  }, [activeTab]);
+  }, [activeTab, user]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
   const [status, setStatus] = useState<LiveStatus | null>(null);
   const [schedule, setSchedule] = useState<Schedule>(defaultSchedule);
@@ -574,12 +643,6 @@ function Index() {
     } catch (e) {
       // Ignore localStorage errors
     }
-    fetchDevices().then((d) => {
-      if (d) {
-        setDevices(d);
-      }
-    });
-    fetchSchedule().then((s) => s && setSchedule(s));
   }, []);
 
   useEffect(() => {
@@ -612,7 +675,7 @@ function Index() {
   const currentVolume = hasWaterReading ? Math.round(status?.waterVolumeLiters ?? 0) : null;
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || !user) return;
     const requestDeviceId = selectedDeviceId.trim() || "__current__";
 
     const fetchEnvelope = () => {
@@ -628,12 +691,17 @@ function Index() {
     fetchEnvelope();
     const interval = setInterval(fetchEnvelope, 2000);
     return () => clearInterval(interval);
-  }, [mounted, selectedDeviceId]);
+  }, [mounted, selectedDeviceId, user]);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || !user) return;
     fetchDevices().then((d) => d && setDevices(d));
-  }, [mounted, activeTab]);
+  }, [mounted, activeTab, user]);
+
+  useEffect(() => {
+    if (!mounted || !user) return;
+    fetchSchedule(activeDeviceId).then((s) => s && setSchedule(s));
+  }, [mounted, activeDeviceId, user]);
 
   const navCategories = [
     {
@@ -672,10 +740,34 @@ function Index() {
         { id: "water", label: "Reservoir & Water", icon: Droplet },
         { id: "devices", label: "Hardware Remapper", icon: Cpu, badge: String(devices.length) },
       ]
-    }
+    },
+    ...(user?.role === "admin" ? [{
+      title: "Administration",
+      items: [
+        { id: "users", label: "Team Accounts", icon: Users },
+      ]
+    }] : [])
   ];
 
   const navItems = navCategories.flatMap((c) => c.items);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
+        <Sprout className="h-10 w-10 text-emerald-500 animate-pulse" />
+        <span className="text-xs font-bold text-slate-400 animate-pulse font-mono uppercase tracking-wider">Authenticating Portal Session...</span>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <ErrorBoundary>
+        <LoginScreen onLogin={handleLogin} />
+        <Toaster richColors position="top-center" />
+      </ErrorBoundary>
+    );
+  }
 
   return (
     <ErrorBoundary>
@@ -728,6 +820,24 @@ function Index() {
                   </nav>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Sidebar Footer / User Session */}
+          <div className="p-4 border-t border-border/60 bg-muted/25 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-foreground truncate">{user?.username}</span>
+                <span className="text-[9px] font-semibold text-muted-foreground uppercase">{user?.role}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={handleLogout}
+                className="text-red-500 hover:text-red-600 hover:bg-red-500/5 font-bold h-7 px-2.5"
+              >
+                Log out
+              </Button>
             </div>
           </div>
         </aside>
@@ -2059,10 +2169,342 @@ function Index() {
 
             {/* Manual logs */}
             {activeTab === "readings" && <ManualReadings />}
+
+            {/* Team Accounts Management */}
+            {activeTab === "users" && user?.role === "admin" && (
+              <TeamManagementTab />
+            )}
           </main>
         </div>
       </div>
       <Toaster richColors position="top-center" />
     </ErrorBoundary>
+  );
+}
+
+import { UserPlus } from "lucide-react";
+
+function TeamManagementTab() {
+  const [usersList, setUsersList] = useState<{ username: string; role: string }[]>([]);
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<"admin" | "operator">("operator");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("tower_auth_token");
+      const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUsersList(data.users || []);
+      } else {
+        toast.error("Failed to load user accounts");
+      }
+    } catch (e) {
+      console.error("Failed to load users", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername.trim() || !newPassword) {
+      toast.error("Username and password are required");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const token = localStorage.getItem("tower_auth_token");
+      const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          username: newUsername.trim(),
+          password: newPassword,
+          role: newRole
+        })
+      });
+      if (response.ok) {
+        toast.success("User account created successfully");
+        setNewUsername("");
+        setNewPassword("");
+        setNewRole("operator");
+        loadUsers();
+      } else {
+        const data = await response.json().catch(() => ({}));
+        toast.error(data.error || "Failed to create user");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to create user");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteUser = async (usernameToDelete: string) => {
+    if (!confirm(`Are you sure you want to delete user account "${usernameToDelete}"?`)) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem("tower_auth_token");
+      const response = await fetch(`${API_BASE_URL}/api/admin/users/${encodeURIComponent(usernameToDelete)}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (response.ok) {
+        toast.success(`User "${usernameToDelete}" deleted`);
+        loadUsers();
+      } else {
+        toast.error("Failed to delete user account");
+      }
+    } catch (e) {
+      toast.error("Error deleting user");
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+          <Users className="h-5 w-5 text-primary" />
+          Team Accounts & Portal Security
+        </h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Manage system operators, access credentials, and user authorization levels.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* User creation card */}
+        <Card className="p-5 border-border bg-card h-fit">
+          <div className="border-b pb-3 mb-4">
+            <h3 className="text-sm font-bold flex items-center gap-2">
+              <UserPlus className="h-4 w-4 text-emerald-500" />
+              Create Team Account
+            </h3>
+            <p className="text-[11px] text-muted-foreground">Provision new operator or administrator credentials.</p>
+          </div>
+
+          <form onSubmit={handleCreateUser} className="space-y-4">
+            <div className="space-y-1">
+              <Label htmlFor="create-username" className="text-xs font-semibold">Username</Label>
+              <Input
+                id="create-username"
+                placeholder="e.g. jason_operator"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                className="text-xs h-8.5 rounded"
+                disabled={submitting}
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="create-password" className="text-xs font-semibold">Password</Label>
+              <Input
+                id="create-password"
+                type="password"
+                placeholder="••••••••"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="text-xs h-8.5 rounded"
+                disabled={submitting}
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="create-role" className="text-xs font-semibold">Access Level Role</Label>
+              <Select
+                value={newRole}
+                onValueChange={(val: any) => setNewRole(val)}
+                disabled={submitting}
+              >
+                <SelectTrigger className="h-8.5 text-xs rounded bg-background">
+                  <SelectValue placeholder="Role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="operator">Operator (View & Control)</SelectItem>
+                  <SelectItem value="admin">Administrator (Full Access)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              type="submit"
+              disabled={submitting}
+              className="w-full bg-primary text-primary-foreground font-bold text-xs h-9.5 mt-2 rounded shadow-sm"
+            >
+              {submitting ? "Creating Account..." : "Create Account"}
+            </Button>
+          </form>
+        </Card>
+
+        {/* Existing Users List */}
+        <Card className="p-5 lg:col-span-2 border-border bg-card">
+          <div className="border-b pb-3 mb-4">
+            <h3 className="text-sm font-bold flex items-center gap-2">
+              <Users className="h-4 w-4 text-emerald-500" />
+              Active System Users
+            </h3>
+            <p className="text-[11px] text-muted-foreground">List of credentialed team members with system access.</p>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-8 text-xs text-muted-foreground font-mono animate-pulse">Loading accounts registry...</div>
+          ) : usersList.length === 0 ? (
+            <div className="text-center py-8 text-xs text-muted-foreground italic">No operator accounts created yet. Default admin env credential is active.</div>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-border/80">
+              <table className="w-full text-xs font-mono">
+                <thead className="bg-secondary text-secondary-foreground">
+                  <tr className="font-bold text-2xs uppercase tracking-wider text-left">
+                    <th className="px-4 py-2.5">Username</th>
+                    <th className="px-4 py-2.5">Authorization Role</th>
+                    <th className="px-4 py-2.5 text-right">Operations</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {usersList.map((usr) => (
+                    <tr key={usr.username} className="hover:bg-muted/15 transition-colors">
+                      <td className="px-4 py-2.5 font-bold text-foreground">{usr.username}</td>
+                      <td className="px-4 py-2.5">
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                            usr.role === "admin"
+                              ? "bg-emerald-500/5 text-emerald-600 border-emerald-500/20"
+                              : "bg-blue-500/5 text-blue-600 border-blue-500/20"
+                          }`}
+                        >
+                          {usr.role}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => handleDeleteUser(usr.username)}
+                          className="text-red-500 hover:text-red-600 hover:bg-red-500/5 h-7 w-7 p-0 rounded-full"
+                          title="Delete User"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin }: { onLogin: (u: string, p: string) => Promise<void> }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username || !password) return;
+    setLoading(true);
+    try {
+      await onLogin(username, password);
+    } catch (err) {
+      // toast already shown in onLogin
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 select-none">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808008_1px,transparent_1px),linear-gradient(to_bottom,#80808008_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+      <Card className="w-full max-w-md p-8 border-border bg-card relative overflow-hidden shadow-xl rounded-2xl">
+        <div className="absolute -top-10 -right-10 w-32 h-32 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="flex flex-col items-center mb-8">
+          <div className="h-12 w-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-3">
+            <Sprout className="h-6 w-6 text-primary animate-pulse" />
+          </div>
+          <h2 className="text-xl font-extrabold tracking-tight text-foreground font-sans">Smart Tower Garden</h2>
+          <p className="text-xs text-muted-foreground mt-1 font-semibold">PolyHouse Operations Control Center</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="login-username" className="text-xs font-bold text-foreground">Username</Label>
+            <div className="relative">
+              <User className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="login-username"
+                placeholder="admin"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="pl-10 text-xs bg-background border-input text-foreground placeholder-muted-foreground focus:border-primary focus:ring-primary h-9.5 rounded-lg"
+                disabled={loading}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="login-password" className="text-xs font-bold text-foreground">Password</Label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="login-password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="pl-10 text-xs bg-background border-input text-foreground placeholder-muted-foreground focus:border-primary focus:ring-primary h-9.5 rounded-lg"
+                disabled={loading}
+                required
+              />
+            </div>
+          </div>
+
+          <Button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-bold text-xs h-10 mt-3 shadow-md hover:shadow-primary/15 transition-all rounded-lg flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Sprout className="h-4 w-4 text-primary-foreground animate-spin" />
+                Logging in...
+              </>
+            ) : (
+              "Sign In"
+            )}
+          </Button>
+        </form>
+
+        <div className="mt-6 border-t border-border pt-4 text-center">
+          <span className="text-[10px] text-muted-foreground font-mono font-bold">
+            Default Admin: admin / admin123
+          </span>
+        </div>
+      </Card>
+    </div>
   );
 }
