@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -302,12 +304,14 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
       const phs = values.map(v => v.ph).filter(v => v != null) as number[];
       const ecs = values.map(v => v.ec).filter(v => v != null) as number[];
       const temps = values.map(v => v.reservoirTempC).filter(v => v != null) as number[];
+      const nftTemps = values.map(v => v.nftTempC).filter(v => v != null) as number[];
       const hums = values.map(v => v.humidityPct).filter(v => v != null) as number[];
       return {
         label: bucketLabel(timestamp, chartDays),
         ph: phs.length > 0 ? phs.reduce((a, b) => a + b, 0) / phs.length : null,
         ec: ecs.length > 0 ? ecs.reduce((a, b) => a + b, 0) / ecs.length : null,
         reservoirTempC: temps.length > 0 ? temps.reduce((a, b) => a + b, 0) / temps.length : null,
+        nftTempC: nftTemps.length > 0 ? nftTemps.reduce((a, b) => a + b, 0) / nftTemps.length : null,
         humidityPct: hums.length > 0 ? hums.reduce((a, b) => a + b, 0) / hums.length : null,
       };
     });
@@ -318,7 +322,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
 
   // EXCEL / CSV Export Rows
   const exportRows = [
-    "Timestamp,Date,Time,pH,EC Index (mS/cm),Water Temp (C),Air Humidity (%),Water Level,Ultrasonic Distance (cm),Water Volume (L)"
+    "Timestamp,Date,Time,pH,EC Index (mS/cm),Water Temp (C),NFT Temp (C),Air Humidity (%),Water Level,Ultrasonic Distance (cm),Water Volume (L)"
   ];
   for (const snapshot of filteredSensors) {
     const dt = new Date(snapshot.timestamp);
@@ -329,6 +333,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
       snapshot.ph != null ? snapshot.ph.toFixed(2) : "",
       snapshot.ec != null ? snapshot.ec.toFixed(2) : "",
       snapshot.reservoirTempC != null ? snapshot.reservoirTempC.toFixed(1) : "",
+      snapshot.nftTempC != null ? snapshot.nftTempC.toFixed(1) : "",
       snapshot.humidityPct != null ? snapshot.humidityPct.toFixed(1) : "",
       snapshot.waterLevel || "",
       snapshot.waterDistanceCm != null ? snapshot.waterDistanceCm.toFixed(1) : "",
@@ -351,6 +356,12 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
 
   const avgWaterTemp = (() => {
     const vals = filteredSensors.map((s) => s.reservoirTempC).filter((v) => typeof v === "number") as number[];
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  })();
+
+  const avgNftTemp = (() => {
+    const vals = filteredSensors.map((s) => s.nftTempC).filter((v) => typeof v === "number") as number[];
     if (!vals.length) return null;
     return vals.reduce((a, b) => a + b, 0) / vals.length;
   })();
@@ -453,7 +464,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
       </div>
 
       {/* Numerical Averages Summary Cards */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-6">
         <SummaryCard
           icon={<Gauge className="h-5 w-5 text-indigo-500" />}
           label="Average pH"
@@ -473,6 +484,12 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
           hint="Comfort band: 20°C - 26°C"
         />
         <SummaryCard
+          icon={<Thermometer className="h-5 w-5 text-amber-500" />}
+          label="Avg NFT Temp"
+          value={avgNftTemp != null ? `${avgNftTemp.toFixed(1)}°C` : "——"}
+          hint="Comfort band: 20°C - 26°C"
+        />
+        <SummaryCard
           icon={<Droplets className="h-5 w-5 text-emerald-500" />}
           label="Avg Air Humidity"
           value={avgHumidity != null ? `${avgHumidity.toFixed(1)}%` : "——"}
@@ -480,9 +497,9 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
         />
         <SummaryCard
           icon={<AlertCircle className="h-5 w-5 text-indigo-500" />}
-          label="Total Logged Points"
-          value={filteredSensors.length}
-          hint={`History window size: ${chartDays} days`}
+          label="History Window"
+          value={`${chartDays} Days`}
+          hint={`Total Logged: ${filteredSensors.length}`}
         />
       </div>
 
@@ -503,7 +520,17 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
               ph: { label: "pH Value", color: "#6366f1" },
               ec: { label: "EC Index", color: "#f59e0b" }
             }} className="h-full w-full">
-              <LineChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+              <AreaChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorHistoryPh" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorHistoryEc" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
                 <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} className="text-[10px] font-semibold" />
                 <YAxis yAxisId="left" domain={[4.5, 7.5]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
@@ -514,9 +541,9 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
                 <ReferenceLine yAxisId="left" y={6.5} stroke="#a5b4fc" strokeDasharray="4 4" />
                 <ReferenceLine yAxisId="right" y={0.8} stroke="#fde047" strokeDasharray="4 4" />
                 <ReferenceLine yAxisId="right" y={1.2} stroke="#fde047" strokeDasharray="4 4" />
-                <Line yAxisId="left" type="monotone" dataKey="ph" stroke="var(--color-ph)" strokeWidth={2} dot={false} connectNulls />
-                <Line yAxisId="right" type="monotone" dataKey="ec" stroke="var(--color-ec)" strokeWidth={2} dot={false} connectNulls />
-              </LineChart>
+                <Area yAxisId="left" type="monotone" dataKey="ph" stroke="var(--color-ph)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryPh)" dot={false} connectNulls />
+                <Area yAxisId="right" type="monotone" dataKey="ec" stroke="var(--color-ec)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryEc)" dot={false} connectNulls />
+              </AreaChart>
             </ChartContainer>
           </div>
         </Card>
@@ -525,8 +552,8 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
         <Card className="p-5 border-border bg-card">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Reservoir Temp & Air Humidity</div>
-              <div className="text-2xs text-muted-foreground mt-0.5">Water temperature logs (left) plotted against local air humidity (right)</div>
+              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Temperatures & Air Humidity</div>
+              <div className="text-2xs text-muted-foreground mt-0.5">Water and NFT temperatures (left) plotted against local air humidity (right)</div>
             </div>
             <Badge variant="outline" className="text-2xs">Comfort: 20–26°C | Humidity 40–90%</Badge>
           </div>
@@ -534,9 +561,24 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
           <div className="h-64 w-full">
             <ChartContainer config={{ 
               temp: { label: "Water Temp", color: "#0ea5e9" },
+              nftTemp: { label: "NFT Temp", color: "#f59e0b" },
               humidity: { label: "Air Humidity", color: "#10b981" }
             }} className="h-full w-full">
-              <LineChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+              <AreaChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorHistoryTemp" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorHistoryNftTemp" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorHistoryHum" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
                 <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} className="text-[10px] font-semibold" />
                 <YAxis yAxisId="left" domain={[15, 32]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
@@ -545,9 +587,10 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
                 <Legend content={<ChartLegendContent />} />
                 <ReferenceLine yAxisId="right" y={40} stroke="#6ee7b7" strokeDasharray="4 4" />
                 <ReferenceLine yAxisId="right" y={90} stroke="#6ee7b7" strokeDasharray="4 4" />
-                <Line yAxisId="left" type="monotone" dataKey="reservoirTempC" stroke="var(--color-temp)" strokeWidth={2} dot={false} connectNulls />
-                <Line yAxisId="right" type="monotone" dataKey="humidityPct" stroke="var(--color-humidity)" strokeWidth={2} dot={false} connectNulls />
-              </LineChart>
+                <Area yAxisId="left" type="monotone" dataKey="reservoirTempC" stroke="var(--color-temp)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryTemp)" dot={false} connectNulls />
+                <Area yAxisId="left" type="monotone" dataKey="nftTempC" stroke="var(--color-nftTemp)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryNftTemp)" dot={false} connectNulls />
+                <Area yAxisId="right" type="monotone" dataKey="humidityPct" stroke="var(--color-humidity)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryHum)" dot={false} connectNulls />
+              </AreaChart>
             </ChartContainer>
           </div>
         </Card>
@@ -625,6 +668,11 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
                       </td>
                       <td className="px-3 py-2 text-center font-semibold text-sky-600">
                         {snapshot.reservoirTempC != null ? `${snapshot.reservoirTempC.toFixed(1)}°C` : "——"}
+                        {snapshot.nftTempC != null && (
+                          <div className="text-[10px] text-amber-600 font-semibold mt-0.5">
+                            NFT: {snapshot.nftTempC.toFixed(1)}°C
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-center font-semibold text-emerald-600">
                         {snapshot.humidityPct != null ? `${snapshot.humidityPct.toFixed(1)}%` : "——"}

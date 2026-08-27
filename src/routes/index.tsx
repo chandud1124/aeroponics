@@ -9,6 +9,7 @@ import { GpioConfigTab } from "@/components/tower/GpioConfigTab";
 import { DashboardCharts } from "@/components/tower/DashboardCharts";
 import { NutritionTab } from "@/components/tower/NutritionTab";
 import { NftChannelsTab } from "@/components/tower/NftChannelsTab";
+import { GrowBagsTab } from "@/components/tower/GrowBagsTab";
 import { DeviceRegistryTab } from "@/components/tower/DeviceRegistryTab";
 import { CameraQrScanner } from "@/components/tower/CameraQrScanner";
 import { ManualReadings } from "@/components/tower/ManualReadings";
@@ -85,7 +86,15 @@ import {
   Plus,
   Trash2,
   Camera,
+  Package,
 } from "lucide-react";
+
+type NurseryCell = {
+  holeIndex: number;
+  crop: string;
+  plantedOn: string;
+  germinated: boolean;
+};
 
 type NurseryTray = {
   id: string;
@@ -95,6 +104,7 @@ type NurseryTray = {
   plugs: number;
   germinated: number;
   status: "empty" | "growing" | "ready";
+  cells?: NurseryCell[];
 };
 
 type NurseryHistoryEntry = {
@@ -131,6 +141,40 @@ export const Route = createFileRoute("/")({
   }),
 });
 
+const CROP_COLOR_PALETTE = [
+  { bg: "bg-emerald-500/10 dark:bg-emerald-500/25", border: "border-emerald-500", text: "text-emerald-800 dark:text-emerald-200", dot: "bg-emerald-500" },
+  { bg: "bg-sky-500/10 dark:bg-sky-500/25", border: "border-sky-500", text: "text-sky-800 dark:text-sky-200", dot: "bg-sky-500" },
+  { bg: "bg-amber-500/10 dark:bg-amber-500/25", border: "border-amber-500", text: "text-amber-800 dark:text-amber-200", dot: "bg-amber-500" },
+  { bg: "bg-purple-500/10 dark:bg-purple-500/25", border: "border-purple-500", text: "text-purple-800 dark:text-purple-200", dot: "bg-purple-500" },
+  { bg: "bg-rose-500/10 dark:bg-rose-500/25", border: "border-rose-500", text: "text-rose-800 dark:text-rose-200", dot: "bg-rose-500" },
+  { bg: "bg-teal-500/10 dark:bg-teal-500/25", border: "border-teal-500", text: "text-teal-800 dark:text-teal-200", dot: "bg-teal-500" },
+  { bg: "bg-orange-500/10 dark:bg-orange-500/25", border: "border-orange-500", text: "text-orange-800 dark:text-orange-200", dot: "bg-orange-500" },
+  { bg: "bg-fuchsia-500/10 dark:bg-fuchsia-500/25", border: "border-fuchsia-500", text: "text-fuchsia-800 dark:text-fuchsia-200", dot: "bg-fuchsia-500" },
+];
+
+function getCropStyle(cropName: string, germinated: boolean) {
+  if (!cropName) {
+    return {
+      bg: "bg-muted/10 hover:bg-muted/20 text-muted-foreground/40",
+      border: "border border-dashed border-muted-foreground/30",
+      dot: "bg-transparent",
+      text: "text-muted-foreground"
+    };
+  }
+  let hash = 0;
+  for (let i = 0; i < cropName.length; i++) {
+    hash = cropName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % CROP_COLOR_PALETTE.length;
+  const color = CROP_COLOR_PALETTE[index];
+  return {
+    bg: color.bg,
+    border: germinated ? `border-2 ${color.border}` : `border border-dashed ${color.border}`,
+    dot: color.dot,
+    text: color.text
+  };
+}
+
 function Index() {
   const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState("status");
@@ -155,6 +199,75 @@ function Index() {
   const [showGlobalScanner, setShowGlobalScanner] = useState(false);
   const [scannedChannelId, setScannedChannelId] = useState<string | null>(null);
   const [scannedRecord, setScannedRecord] = useState<{ kind: "channel" | "tray" | "not-found"; label: string; detail: string } | null>(null);
+
+  // Nursery Visual Grid and Detailed Hole Planner State
+  const [gridModeTrayId, setGridModeTrayId] = useState<string | null>(null);
+  const [selectedHoles, setSelectedHoles] = useState<number[]>([]);
+  const [cellCrop, setCellCrop] = useState("");
+  const [cellPlantedOn, setCellPlantedOn] = useState(new Date().toISOString().split("T")[0]);
+  const [cellStatus, setCellStatus] = useState<"germinated" | "planted" | "empty">("planted");
+
+  const ensureTrayCells = (tray: NurseryTray): NurseryCell[] => {
+    if (tray.cells && tray.cells.length === tray.plugs) {
+      return tray.cells;
+    }
+    const cells: NurseryCell[] = [];
+    for (let i = 0; i < tray.plugs; i++) {
+      const isGerminated = i < tray.germinated;
+      cells.push({
+        holeIndex: i,
+        crop: tray.crop || "",
+        plantedOn: tray.plantedOn || "",
+        germinated: isGerminated,
+      });
+    }
+    return cells;
+  };
+
+  const updateNurseryCells = (trayId: string, indices: number[], crop: string, plantedOn: string, status: "germinated" | "planted" | "empty") => {
+    setNurseryTrays((trays) => trays.map((tray) => {
+      if (tray.id !== trayId) return tray;
+      
+      const cells = ensureTrayCells(tray).map((cell) => {
+        if (indices.includes(cell.holeIndex)) {
+          return {
+            ...cell,
+            crop: status === "empty" ? "" : crop,
+            plantedOn: status === "empty" ? "" : plantedOn,
+            germinated: status === "germinated",
+          };
+        }
+        return cell;
+      });
+      
+      const germinatedCount = cells.filter(c => c.germinated).length;
+      
+      // Determine overall crop name representation (comma separated unique crops)
+      const activeCrops = Array.from(new Set(cells.map(c => c.crop).filter(Boolean)));
+      const cropSummary = activeCrops.join(", ");
+      
+      // Determine overall plantedOn date (earliest)
+      const activeDates = cells.map(c => c.plantedOn).filter(Boolean).sort();
+      const plantedSummary = activeDates[0] || "";
+      
+      let trayStatus: NurseryTray["status"] = "growing";
+      const totalFilled = cells.filter(c => c.crop).length;
+      if (totalFilled === 0) {
+        trayStatus = "empty";
+      } else if (germinatedCount >= totalFilled) {
+        trayStatus = "ready";
+      }
+      
+      return {
+        ...tray,
+        cells,
+        germinated: germinatedCount,
+        crop: cropSummary,
+        plantedOn: plantedSummary,
+        status: trayStatus,
+      };
+    }));
+  };
 
   useEffect(() => {
     try {
@@ -181,23 +294,61 @@ function Index() {
   }, [mounted, nurseryHistory]);
 
   const updateNurseryTray = (id: string, patch: Partial<NurseryTray>) => {
-    setNurseryTrays((trays) => trays.map((tray) => (tray.id === id ? { ...tray, ...patch } : tray)));
+    setNurseryTrays((trays) => trays.map((tray) => {
+      if (tray.id !== id) return tray;
+      
+      const updated = { ...tray, ...patch };
+      
+      let nextCells = updated.cells ? [...updated.cells] : ensureTrayCells(tray);
+      
+      if (patch.plugs !== undefined && patch.plugs !== tray.plugs) {
+        if (nextCells.length > patch.plugs) {
+          nextCells = nextCells.slice(0, patch.plugs);
+        } else {
+          for (let i = nextCells.length; i < patch.plugs; i++) {
+            nextCells.push({
+              holeIndex: i,
+              crop: updated.crop || "",
+              plantedOn: updated.plantedOn || "",
+              germinated: i < updated.germinated,
+            });
+          }
+        }
+      }
+      
+      if (patch.crop !== undefined && patch.crop !== tray.crop) {
+        nextCells = nextCells.map(c => ({ ...c, crop: patch.crop || "" }));
+      }
+      
+      if (patch.plantedOn !== undefined && patch.plantedOn !== tray.plantedOn) {
+        nextCells = nextCells.map(c => ({ ...c, plantedOn: patch.plantedOn || "" }));
+      }
+      
+      if (patch.germinated !== undefined && patch.germinated !== tray.germinated) {
+        nextCells = nextCells.map((c, idx) => ({ ...c, germinated: idx < patch.germinated! }));
+      }
+      
+      updated.cells = nextCells;
+      return updated;
+    }));
   };
 
   const addNurseryTray = () => {
     const nextNumber = nurseryTrays.length + 1;
+    const newId = `tray-${Date.now()}`;
     setNurseryTrays((trays) => [
       ...trays,
-      { id: `tray-${Date.now()}`, name: `Tray ${nextNumber}`, crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
+      { id: newId, name: `Tray ${nextNumber}`, crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
     ]);
   };
 
   const replantNurseryTray = (trayId: string) => {
     updateNurseryTray(trayId, {
       crop: "",
-      plantedOn: new Date().toISOString().split("T")[0],
+      plantedOn: "",
       germinated: 0,
-      status: "growing",
+      status: "empty",
+      cells: [],
     });
     toast.success("Tray reset for a new planting batch. Enter the crop and plug count.");
   };
@@ -277,18 +428,44 @@ function Index() {
         return;
       }
 
+      // Identify exact crops transplanted from cells
+      const nextCells = ensureTrayCells(tray).map(cell => ({ ...cell }));
+      const transplantedCropsMap: { [cropName: string]: number } = {};
+      let clearedCount = 0;
+
+      for (let i = 0; i < nextCells.length; i++) {
+        if (nextCells[i].germinated && clearedCount < transplantCount) {
+          const cName = nextCells[i].crop || tray.crop || "Unknown Crop";
+          transplantedCropsMap[cName] = (transplantedCropsMap[cName] || 0) + 1;
+          
+          nextCells[i].crop = "";
+          nextCells[i].plantedOn = "";
+          nextCells[i].germinated = false;
+          clearedCount++;
+        }
+      }
+
+      // Fallback if no specific cells were germinated/found (legacy format support)
+      if (clearedCount === 0 || Object.keys(transplantedCropsMap).length === 0) {
+        const cName = tray.crop || "Unknown Crop";
+        transplantedCropsMap[cName] = transplantCount;
+      }
+
       // Add to NFT Channel
       const currentCrops = targetChan.crops?.length
         ? [...targetChan.crops]
         : targetChan.cropName
           ? [{ cropName: targetChan.cropName, count: targetChan.currentCount ?? 0 }]
           : [];
-      const cropIndex = currentCrops.findIndex((c) => c.cropName.toLowerCase() === tray.crop.toLowerCase());
-      if (cropIndex > -1) {
-        currentCrops[cropIndex].count += transplantCount;
-      } else {
-        currentCrops.push({ cropName: tray.crop, count: transplantCount });
-      }
+
+      Object.entries(transplantedCropsMap).forEach(([cropName, count]) => {
+        const cropIndex = currentCrops.findIndex((c) => c.cropName.toLowerCase() === cropName.toLowerCase());
+        if (cropIndex > -1) {
+          currentCrops[cropIndex].count += count;
+        } else {
+          currentCrops.push({ cropName, count });
+        }
+      });
 
       const totalCount = currentCrops.reduce((sum, c) => sum + c.count, 0);
       const firstCropName = currentCrops[0]?.cropName || "";
@@ -326,17 +503,29 @@ function Index() {
       };
       setNurseryHistory((prev) => [newEntry, ...prev]);
 
-      // 3. Update the Nursery tray counts
+      // 3. Update the Nursery tray counts and cells
       const nextGerminated = Math.max(0, tray.germinated - transplantCount);
-      const nextStatus = nextGerminated === 0 ? "empty" : tray.status;
-      const nextCrop = nextGerminated === 0 ? "" : tray.crop;
-      const nextPlantedOn = nextGerminated === 0 ? "" : tray.plantedOn;
+      
+      const activeCrops = Array.from(new Set(nextCells.map(c => c.crop).filter(Boolean)));
+      const nextCrop = activeCrops.join(", ");
+      
+      const activeDates = nextCells.map(c => c.plantedOn).filter(Boolean).sort();
+      const nextPlantedOn = activeDates[0] || "";
+
+      const totalFilled = nextCells.filter(c => c.crop).length;
+      let nextStatus: NurseryTray["status"] = "growing";
+      if (totalFilled === 0) {
+        nextStatus = "empty";
+      } else if (nextGerminated >= totalFilled) {
+        nextStatus = "ready";
+      }
 
       updateNurseryTray(tray.id, {
         germinated: nextGerminated,
         status: nextStatus,
         crop: nextCrop,
         plantedOn: nextPlantedOn,
+        cells: nextCells,
       });
 
       toast.success(`Successfully transplanted ${transplantCount}x ${tray.crop} to ${targetChan.name}!`);
@@ -361,7 +550,7 @@ function Index() {
   };
 
   useEffect(() => {
-    if (activeTab === "crops" || activeTab === "history" || activeTab === "nursery" || activeTab === "nft") {
+    if (activeTab === "crops" || activeTab === "history" || activeTab === "nursery" || activeTab === "nft" || activeTab === "grow-bags") {
       loadCropsData();
     }
   }, [activeTab]);
@@ -372,6 +561,14 @@ function Index() {
 
   useEffect(() => {
     setMounted(true);
+    try {
+      const savedTab = localStorage.getItem("dashboard-active-tab");
+      if (savedTab) {
+        setActiveTab(savedTab);
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
     fetchDevices().then((d) => {
       if (d) {
         setDevices(d);
@@ -379,6 +576,16 @@ function Index() {
     });
     fetchSchedule().then((s) => s && setSchedule(s));
   }, []);
+
+  useEffect(() => {
+    if (mounted) {
+      try {
+        localStorage.setItem("dashboard-active-tab", activeTab);
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }, [mounted, activeTab]);
 
   const activeDeviceId = selectedDeviceId.trim() || status?.deviceId || null;
   const backendReachable = status !== null;
@@ -438,6 +645,7 @@ function Index() {
         { id: "crops", label: "Crops Manager", icon: Sprout, badge: "3 Active" },
         { id: "nursery", label: "Nursery Trays", icon: Warehouse },
         { id: "nft", label: "NFT Channels", icon: Grid },
+        { id: "grow-bags", label: "Grow Bags", icon: Package },
         { id: "history", label: "Channels History", icon: History },
         { id: "harvested", label: "Harvested Log", icon: TrendingUp },
       ]
@@ -709,7 +917,15 @@ function Index() {
                 }
               });
               nurseryTrays.forEach((tr) => {
-                if (tr.crop && tr.germinated > 0) {
+                if (tr.cells && tr.cells.length > 0) {
+                  tr.cells.forEach((cell) => {
+                    if (cell.crop && cell.germinated) {
+                      const key = cell.crop.trim() || "Unknown";
+                      activeCropsCountMap[key] = activeCropsCountMap[key] || { nft: 0, nursery: 0 };
+                      activeCropsCountMap[key].nursery += 1;
+                    }
+                  });
+                } else if (tr.crop && tr.germinated > 0) {
                   const key = tr.crop.trim() || "Unknown";
                   activeCropsCountMap[key] = activeCropsCountMap[key] || { nft: 0, nursery: 0 };
                   activeCropsCountMap[key].nursery += tr.germinated;
@@ -973,6 +1189,7 @@ function Index() {
             )}
 
             {activeTab === "nft" && <NftChannelsTab initialChannelId={scannedChannelId} />}
+            {activeTab === "grow-bags" && <GrowBagsTab />}
 
             {/* High-Fidelity Nursery Trays */}
             {activeTab === "nursery" && (
@@ -1056,6 +1273,268 @@ function Index() {
                               </SelectContent>
                             </Select>
                           </div>
+                          {/* Visual Grid Toggle */}
+                          <div className="pt-2 border-t border-border/40">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (gridModeTrayId === tray.id) {
+                                  setGridModeTrayId(null);
+                                  setSelectedHoles([]);
+                                } else {
+                                  setGridModeTrayId(tray.id);
+                                  setSelectedHoles([]);
+                                }
+                              }}
+                              className="w-full text-xs font-bold border-indigo-500/20 text-indigo-600 hover:bg-indigo-50/50 hover:text-indigo-700"
+                            >
+                              <Grid className="mr-1.5 h-3.5 w-3.5" />
+                              {gridModeTrayId === tray.id ? "Hide Plug Grid Planner" : "Open Visual Grid Planner"}
+                            </Button>
+                          </div>
+
+                          {gridModeTrayId === tray.id && (() => {
+                            const cells = ensureTrayCells(tray);
+                            
+                            const getGridCols = (plugsCount: number): number => {
+                              if (plugsCount === 10) return 5;
+                              if (plugsCount === 12) return 4;
+                              if (plugsCount === 15) return 5;
+                              if (plugsCount === 20) return 5;
+                              if (plugsCount === 30) return 6;
+                              if (plugsCount === 50) return 10;
+                              if (plugsCount === 72) return 12;
+                              if (plugsCount === 104) return 13;
+                              for (let cols = Math.ceil(Math.sqrt(plugsCount * 1.5)); cols >= 1; cols--) {
+                                if (plugsCount % cols === 0) return cols;
+                              }
+                              return Math.ceil(Math.sqrt(plugsCount));
+                            };
+                            
+                            const cols = getGridCols(tray.plugs);
+                            
+                            // Compute summary stats of crops in the tray
+                            const cropSummaryMap: { [cropName: string]: { total: number; germinated: number } } = {};
+                            let emptyPlugsCount = 0;
+                            cells.forEach((cell) => {
+                              if (cell.crop) {
+                                const key = cell.crop.trim();
+                                if (!cropSummaryMap[key]) {
+                                  cropSummaryMap[key] = { total: 0, germinated: 0 };
+                                }
+                                cropSummaryMap[key].total += 1;
+                                if (cell.germinated) {
+                                  cropSummaryMap[key].germinated += 1;
+                                }
+                              } else {
+                                emptyPlugsCount += 1;
+                              }
+                            });
+
+                            const suggestedCrops = Array.from(new Set([
+                              ...nurseryTrays.flatMap(t => (t.cells || []).map(c => c.crop)),
+                              ...nftChannels.flatMap(c => c.crops?.map(cr => cr.cropName) || [c.cropName]),
+                              "Green Lettuce",
+                              "Red Lettuce",
+                              "Butterhead Lettuce",
+                              "Lollo Bionda",
+                              "Romaine Lettuce",
+                              "Pak Choi",
+                              "Kale",
+                              "Swiss Chard",
+                              "Rocket / Arugula",
+                              "Spinach",
+                              "Coriander",
+                              "Basil",
+                              "Amaranth",
+                              "Capsicum Yellow",
+                              "Capsicum Red",
+                              "Capsicum Green",
+                              "Cherry Tomato Yellow",
+                              "Cherry Tomato Red"
+                            ].filter(Boolean) as string[])).sort();
+
+                            return (
+                              <div className="space-y-4 rounded-xl border border-indigo-500/10 bg-indigo-50/20 p-4 transition-all duration-200">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Visual Plugs Layout ({tray.plugs} Holes)</div>
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => setSelectedHoles(cells.map(c => c.holeIndex))}
+                                      className="h-5 px-1.5 text-[9px] font-bold text-indigo-600 hover:bg-indigo-100"
+                                    >
+                                      Select All
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => setSelectedHoles([])}
+                                      className="h-5 px-1.5 text-[9px] font-bold text-indigo-600 hover:bg-indigo-100"
+                                    >
+                                      Clear
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                {/* Crops Summary list */}
+                                <div className="flex flex-wrap gap-2 rounded-lg border border-indigo-200/40 bg-background/60 p-2.5 shadow-sm">
+                                  <div className="w-full text-[9px] font-extrabold uppercase tracking-wider text-indigo-700/80 mb-1">Tray Contents Summary</div>
+                                  {Object.entries(cropSummaryMap).map(([cropName, stats]) => {
+                                    const style = getCropStyle(cropName, true);
+                                    return (
+                                      <Badge 
+                                        key={cropName} 
+                                        variant="outline" 
+                                        className={`flex items-center gap-1.5 py-0.5 px-2 rounded-md text-[10px] font-bold ${style.bg} ${style.border} ${style.text}`}
+                                      >
+                                        <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+                                        <span>{cropName}: <strong>{stats.total}</strong> Plugs ({stats.germinated} Sprouted)</span>
+                                      </Badge>
+                                    );
+                                  })}
+                                  {emptyPlugsCount > 0 && (
+                                    <Badge 
+                                      variant="outline" 
+                                      className="flex items-center gap-1.5 py-0.5 px-2 rounded-md text-[10px] font-bold bg-muted/20 border-dashed border-muted-foreground/30 text-muted-foreground"
+                                    >
+                                      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
+                                      <span>Empty: <strong>{emptyPlugsCount}</strong> Plugs</span>
+                                    </Badge>
+                                  )}
+                                </div>
+
+                                {/* Legend */}
+                                <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <span className="h-2 w-2 rounded-full bg-indigo-600/25 border border-indigo-500" /> Planted
+                                  </span>
+                                  <span className="flex items-center gap-1 font-semibold text-emerald-600">
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Germinated Sprout
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <span className="h-2 w-2 rounded-full border border-dashed border-muted-foreground/50 bg-transparent" /> Empty
+                                  </span>
+                                  {selectedHoles.length > 0 && (
+                                    <span className="ml-auto text-indigo-700 font-bold font-mono">
+                                      {selectedHoles.length} Selected
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Visual Grid */}
+                                <div 
+                                  className="grid gap-2 border border-indigo-200/50 rounded-lg p-2.5 bg-background shadow-inner max-h-[220px] overflow-y-auto"
+                                  style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+                                >
+                                  {cells.map((cell) => {
+                                    const isSelected = selectedHoles.includes(cell.holeIndex);
+                                    const style = getCropStyle(cell.crop, cell.germinated);
+                                    const selectBorder = isSelected 
+                                      ? "ring-2 ring-indigo-600 ring-offset-1 scale-105 z-10" 
+                                      : "hover:scale-105";
+
+                                    return (
+                                      <button
+                                        key={cell.holeIndex}
+                                        type="button"
+                                        title={`${cell.crop ? `${cell.crop} (Planted: ${cell.plantedOn || "N/A"})` : "Hole Empty"} (${cell.germinated ? "Germinated" : "Planted"})`}
+                                        onClick={() => {
+                                          if (isSelected) {
+                                            setSelectedHoles(prev => prev.filter(idx => idx !== cell.holeIndex));
+                                          } else {
+                                            setSelectedHoles(prev => [...prev, cell.holeIndex]);
+                                            if (selectedHoles.length === 0) {
+                                              setCellCrop(cell.crop || "");
+                                              setCellPlantedOn(cell.plantedOn || new Date().toISOString().split("T")[0]);
+                                              setCellStatus(cell.crop ? (cell.germinated ? "germinated" : "planted") : "planted");
+                                            }
+                                          }
+                                        }}
+                                        className={`relative aspect-square flex items-center justify-center rounded-full text-[9px] font-bold font-mono cursor-pointer transition-all duration-150 ${style.bg} ${style.border} ${style.text} ${selectBorder}`}
+                                      >
+                                        {cell.holeIndex + 1}
+                                        {cell.crop && (
+                                          <span className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-background ${style.dot}`} />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Hole Details Editor */}
+                                {selectedHoles.length > 0 && (
+                                  <div className="border border-indigo-200/50 rounded-lg p-3 bg-indigo-50/50 space-y-3">
+                                    <div className="text-2xs font-extrabold text-indigo-700">Edit selected plugs ({selectedHoles.length})</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div className="space-y-1">
+                                        <Label className="text-[10px] font-semibold">Crop Variety</Label>
+                                        <Input
+                                          list="crop-list-suggestions"
+                                          placeholder="Lettuce/Basil"
+                                          value={cellCrop}
+                                          onChange={(e) => setCellCrop(e.target.value)}
+                                          className="h-7 text-xs bg-background"
+                                        />
+                                        <datalist id="crop-list-suggestions">
+                                          {suggestedCrops.map((crop) => (
+                                            <option key={crop} value={crop} />
+                                          ))}
+                                        </datalist>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label className="text-[10px] font-semibold">Planted Date</Label>
+                                        <Input
+                                          type="date"
+                                          value={cellPlantedOn}
+                                          onChange={(e) => setCellPlantedOn(e.target.value)}
+                                          className="h-7 text-xs bg-background"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-[10px] font-semibold">Hole Status</Label>
+                                      <Select value={cellStatus} onValueChange={(val: any) => setCellStatus(val)}>
+                                        <SelectTrigger className="h-7 text-xs bg-background"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="planted">Seeded / Planted</SelectItem>
+                                          <SelectItem value="germinated">Germinated (Sprout)</SelectItem>
+                                          <SelectItem value="empty">Empty / Available</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className="flex gap-2 justify-end pt-1">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setSelectedHoles([])}
+                                        className="h-7 text-xs"
+                                      >
+                                        Cancel
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => {
+                                          updateNurseryCells(tray.id, selectedHoles, cellCrop, cellPlantedOn, cellStatus);
+                                          setSelectedHoles([]);
+                                          toast.success(`Updated ${selectedHoles.length} plugs successfully!`);
+                                        }}
+                                        className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                                      >
+                                        Apply to Plugs
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
                           {tray.status === "empty" && (
                             <Button
                               type="button"

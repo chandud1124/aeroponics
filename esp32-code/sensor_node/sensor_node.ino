@@ -50,8 +50,8 @@ const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend API
 const char* API_BASE_URL = "https://hydroponics.chandugowda.site";
-const char* DEVICE_ID     = "device-ry5fbc";
-const char* DEVICE_SECRET = "32044676ac399a0f383ccc4f9693001a8163ebc228abbf2c";
+const char* DEVICE_ID     = "device-hximn";
+const char* DEVICE_SECRET = "0a7bf736a43f92acf87698f694112d9d2a39e4caa01481ee";
 
 // Timing Intervals
 const unsigned long IV_SENSOR       = 5000UL; // Read sensors every 5s
@@ -482,9 +482,9 @@ bool fetchHandshakeAndSync() {
     PIN_WATER_TEMP_SENSOR = p_wtemp;
     if (PIN_WATER_TEMP_SENSOR > 0) {
       pinMode(PIN_WATER_TEMP_SENSOR, INPUT_PULLUP);
-      oneWireWaterTemp = OneWire(PIN_WATER_TEMP_SENSOR);
-      waterTempSensor = DallasTemperature(&oneWireWaterTemp);
-      waterTempSensor.begin();
+      oneWireWaterTemp1 = OneWire(PIN_WATER_TEMP_SENSOR);
+      waterTempSensor1 = DallasTemperature(&oneWireWaterTemp1);
+      waterTempSensor1.begin();
     }
     pinChanged = true;
   }

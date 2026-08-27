@@ -809,22 +809,27 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     if (request.method === "POST") {
       const parts = url.pathname.split("/");
       const id = parts[3];
-      const payload = (await request.json()) as { notes: string; yieldQty?: number; wasteQty?: number; avgWeightGrams?: number };
+      const payload = (await request.json()) as { notes: string; yieldQty?: number; wasteQty?: number; avgWeightGrams?: number; harvestCultivar?: string };
       const measurements = [payload.yieldQty ?? 0, payload.wasteQty ?? 0, payload.avgWeightGrams ?? 0];
       if (measurements.some((value) => !Number.isFinite(value) || value < 0)) {
         return jsonResponse({ error: "Harvest yield, waste, and average weight must be non-negative numbers" }, 400);
       }
-      const updated = harvestCrop(
-        id,
-        payload.yieldQty ?? 0,
-        payload.wasteQty ?? 0,
-        payload.avgWeightGrams ?? 0,
-        payload.notes || ""
-      );
-      if (!updated) {
-        return jsonResponse({ error: "Channel not found" }, 404);
+      try {
+        const updated = harvestCrop(
+          id,
+          payload.yieldQty ?? 0,
+          payload.wasteQty ?? 0,
+          payload.avgWeightGrams ?? 0,
+          payload.notes || "",
+          payload.harvestCultivar
+        );
+        if (!updated) {
+          return jsonResponse({ error: "Channel not found" }, 404);
+        }
+        return jsonResponse(updated);
+      } catch (err: any) {
+        return jsonResponse({ error: err.message || "Failed to harvest" }, 400);
       }
-      return jsonResponse(updated);
     }
     return jsonResponse({ error: "Method not allowed" }, 405);
   }

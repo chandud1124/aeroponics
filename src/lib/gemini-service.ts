@@ -173,7 +173,9 @@ export async function analyzeSensorDataWithGemini(
     const tdsAvg = tdsVals.length ? (tdsVals.reduce((s, v) => s + v, 0) / tdsVals.length).toFixed(1) : "N/A";
     const ecAvg = ecVals.length ? (ecVals.reduce((s, v) => s + v, 0) / ecVals.length).toFixed(2) : "N/A";
 
-    const prompt = `You are an expert hydroponics and vertical farming analyst. Analyze the following smart tower garden sensor data and provide concise insights, recommendations, and risk assessment. Use the attached lettuce guide as reference — include humidity, pH, TDS/PPM, EC, ambient sunlight levels (measured by LDR sensor), pump performance, and recent manual readings. Note: This farm does NOT have grow lights installed; it only has an LDR ambient light sensor to measure natural daylight exposure. Do not recommend light automation schedules or grow light toggles.
+    const prompt = `You are an expert hydroponics and vertical farming analyst. Analyze the following smart tower garden sensor data and provide concise insights, recommendations, and risk assessment focused specifically on plant growth optimization, vegetative health, and direct crop management.
+    
+    IMPORTANT: Recommend what should be taken care of to support healthy plant growth stages (such as pH buffering, EC tuning, shading under peak heat, or transplant timing). Focus purely on actionable growth observations and environmental care. Avoid generic, non-actionable IT/hardware troubleshooting or unwanted system messages. Note: This farm does NOT have grow lights installed; it only has an LDR ambient light sensor to measure natural daylight exposure. Do not recommend light automation schedules or grow light toggles.
 
   Current Status:
   - Pump: ${currentStatus.pumpOn ? "ON" : "OFF"}

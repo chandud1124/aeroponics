@@ -565,6 +565,7 @@ function pushSensorSnapshot(nextStatus: LiveStatus) {
     deviceId: nextStatus.deviceId ?? DEFAULT_DEVICE_ID,
     timestamp: Date.now(),
     reservoirTempC: nextStatus.reservoirTempC,
+    nftTempC: nextStatus.nftTempC ?? null,
     ph: nextStatus.ph ?? null,
     ec: compEc,
     waterLevel: nextStatus.waterLevel ?? null,
@@ -1381,9 +1382,17 @@ export function harvestCrop(
   wasteQty: number,
   avgWeightGrams: number,
   notes: string,
+  harvestCultivar?: string
 ): NftChannel | null {
   const channel = nftChannels.find((c) => c.id === channelId);
   if (!channel) return null;
+
+  const totalHarvested = yieldQty + wasteQty;
+  const currentTotal = channel.currentCount ?? 0;
+
+  if (totalHarvested > currentTotal) {
+    throw new Error(`Harvest quantity (${totalHarvested}) exceeds current plant count (${currentTotal}) in channel.`);
+  }
 
   // Save crop details into historical log before resetting
   if (channel.cropName || (channel.crops && channel.crops.length > 0)) {
@@ -1392,13 +1401,13 @@ export function harvestCrop(
       id: `harv-${Date.now()}`,
       channelId: channel.id,
       channelName: channel.name,
-      cropName: channel.cropName || (channel.crops ? channel.crops.map((c) => `${c.cropName} (${c.count})`).join(", ") : ""),
-      crops: channel.crops,
+      cropName: harvestCultivar || channel.cropName || (channel.crops ? channel.crops.map((c) => `${c.cropName} (${c.count})`).join(", ") : ""),
+      crops: channel.crops ? channel.crops.filter(c => c.cropName === harvestCultivar || !harvestCultivar) : undefined,
       plantedAt: channel.plantedAt,
       harvestedAt: new Date().toISOString(),
-      notes: notes || channel.notes || "Completed harvest cycle.",
+      notes: notes || channel.notes || "Harvested crops.",
       capacity: channel.capacity,
-      currentCount: channel.currentCount,
+      currentCount: totalHarvested,
       yieldQty,
       wasteQty,
       avgWeightGrams,
@@ -1408,14 +1417,42 @@ export function harvestCrop(
     saveHarvestHistory(history);
   }
 
-  channel.harvestedAt = new Date().toISOString();
-  channel.cropName = "";
-  channel.crops = [];
-  channel.plantedAt = null;
-  channel.notes = notes;
-  channel.status = "empty";
-  channel.currentCount = 0;
-  channel.incidents = []; // Clear incidents on harvest reset
+  // Perform partial crop inventory update
+  if (channel.crops && channel.crops.length > 0) {
+    const targetCropName = harvestCultivar || channel.crops[0].cropName;
+    const cropIndex = channel.crops.findIndex(c => c.cropName.toLowerCase() === targetCropName.toLowerCase());
+    if (cropIndex > -1) {
+      const crop = channel.crops[cropIndex];
+      crop.count = Math.max(0, crop.count - totalHarvested);
+    }
+    // Drop crops with 0 count
+    channel.crops = channel.crops.filter(c => c.count > 0);
+  }
+
+  // Update total counts
+  const nextTotal = Math.max(0, currentTotal - totalHarvested);
+  channel.currentCount = nextTotal;
+
+  if (nextTotal === 0) {
+    channel.cropName = "";
+    channel.plantedAt = null;
+    channel.harvestedAt = new Date().toISOString();
+    channel.status = "empty";
+    channel.crops = [];
+    channel.incidents = []; // Clear incidents on harvest reset
+  } else {
+    // Re-combine remaining crop names
+    if (channel.crops && channel.crops.length > 0) {
+      channel.cropName = channel.crops.length > 1
+        ? channel.crops.map(c => `${c.cropName} (${c.count})`).join(", ")
+        : channel.crops[0].cropName;
+    } else {
+      channel.cropName = "";
+      channel.status = "empty";
+      channel.plantedAt = null;
+    }
+  }
+
   saveNftChannelsToDisk(nftChannels);
   return channel;
 }

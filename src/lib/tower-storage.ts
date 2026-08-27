@@ -275,10 +275,11 @@ export async function harvestCropRemote(
   wasteQty: number,
   avgWeightGrams: number,
   notes: string,
+  harvestCultivar?: string
 ): Promise<NftChannel> {
   return requestJson<NftChannel>(`/api/nft-channels/${encodeURIComponent(channelId)}/harvest`, {
     method: "POST",
-    body: JSON.stringify({ yieldQty, wasteQty, avgWeightGrams, notes }),
+    body: JSON.stringify({ yieldQty, wasteQty, avgWeightGrams, notes, harvestCultivar }),
   });
 }
 

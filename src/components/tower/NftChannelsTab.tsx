@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { QrCode, Sprout, ShoppingBag, Plus, Sparkles, Clipboard, Trash2, Edit3, Calendar, FileText, BarChart3, AlertTriangle, AlertCircle, History } from "lucide-react";
+import { QrCode, Sprout, ShoppingBag, Plus, Sparkles, Clipboard, Trash2, Edit3, Calendar, FileText, BarChart3, AlertTriangle, AlertCircle, History, Search } from "lucide-react";
 import { CameraQrScanner } from "@/components/tower/CameraQrScanner";
 import {
   fetchNftChannels,
@@ -18,11 +18,72 @@ import {
   type NftCropEntry,
 } from "@/lib/tower-storage";
 
+const SUGGESTED_CROPS_LIST = [
+  "Green Lettuce",
+  "Red Lettuce",
+  "Butterhead Lettuce",
+  "Lollo Bionda",
+  "Romaine Lettuce",
+  "Pak Choi",
+  "Kale",
+  "Swiss Chard",
+  "Rocket / Arugula",
+  "Spinach",
+  "Coriander",
+  "Basil",
+  "Amaranth",
+  "Capsicum Yellow",
+  "Capsicum Red",
+  "Capsicum Green",
+  "Cherry Tomato Yellow",
+  "Cherry Tomato Red"
+];
+
+const CROP_COLOR_PALETTE = [
+  { bg: "bg-emerald-500/10 dark:bg-emerald-500/25", border: "border-emerald-500", text: "text-emerald-800 dark:text-emerald-200", dot: "bg-emerald-500" },
+  { bg: "bg-sky-500/10 dark:bg-sky-500/25", border: "border-sky-500", text: "text-sky-800 dark:text-sky-200", dot: "bg-sky-500" },
+  { bg: "bg-amber-500/10 dark:bg-amber-500/25", border: "border-amber-500", text: "text-amber-800 dark:text-amber-200", dot: "bg-amber-500" },
+  { bg: "bg-purple-500/10 dark:bg-purple-500/25", border: "border-purple-500", text: "text-purple-800 dark:text-purple-200", dot: "bg-purple-500" },
+  { bg: "bg-rose-500/10 dark:bg-rose-500/25", border: "border-rose-500", text: "text-rose-800 dark:text-rose-200", dot: "bg-rose-500" },
+  { bg: "bg-teal-500/10 dark:bg-teal-500/25", border: "border-teal-500", text: "text-teal-800 dark:text-teal-200", dot: "bg-teal-500" },
+  { bg: "bg-orange-500/10 dark:bg-orange-500/25", border: "border-orange-500", text: "text-orange-800 dark:text-orange-200", dot: "bg-orange-500" },
+  { bg: "bg-fuchsia-500/10 dark:bg-fuchsia-500/25", border: "border-fuchsia-500", text: "text-fuchsia-800 dark:text-fuchsia-200", dot: "bg-fuchsia-500" },
+];
+
+function getCropStyle(cropName: string, active: boolean) {
+  if (!cropName || !active) {
+    return {
+      bg: "bg-muted/10 hover:bg-muted/20 border-border/80 text-muted-foreground",
+      border: "border border-dashed border-muted-foreground/30",
+      dot: "bg-transparent",
+      text: "text-muted-foreground"
+    };
+  }
+  let hash = 0;
+  for (let i = 0; i < cropName.length; i++) {
+    hash = cropName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % CROP_COLOR_PALETTE.length;
+  const color = CROP_COLOR_PALETTE[index];
+  return {
+    bg: color.bg,
+    border: `border-2 ${color.border}`,
+    dot: color.dot,
+    text: color.text
+  };
+}
+
 export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string | null } = {}) {
   const [channels, setChannels] = useState<NftChannel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedStandFilter, setSelectedStandFilter] = useState("All Stands");
   const [viewMode, setViewMode] = useState<"grid" | "cards">("grid");
+
+  // Advanced Filters State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedPolyhouse, setSelectedPolyhouse] = useState("all");
+  const [selectedBlock, setSelectedBlock] = useState("all");
+  const [selectedLevel, setSelectedLevel] = useState("all");
+  const [selectedStatus, setSelectedStatus] = useState("all");
 
   // Forms states
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
@@ -49,6 +110,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   const [yieldQty, setYieldQty] = useState<number>(0);
   const [wasteQty, setWasteQty] = useState<number>(0);
   const [avgWeightGrams, setAvgWeightGrams] = useState<number>(0);
+  const [harvestCultivar, setHarvestCultivar] = useState("");
 
   // Incident Adjustments states
   const [incidentType, setIncidentType] = useState<"incident" | "removal">("incident");
@@ -192,7 +254,18 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   const handleHarvest = async () => {
     if (!activeChannelId) return;
     try {
-      await harvestCropRemote(activeChannelId, yieldQty, wasteQty, avgWeightGrams, notes);
+      const activeChan = channels.find(c => c.id === activeChannelId);
+      const totalHarvested = yieldQty + wasteQty;
+      if (totalHarvested <= 0) {
+        toast.error("Please specify a harvest quantity greater than 0.");
+        return;
+      }
+      if (activeChan && totalHarvested > (activeChan.currentCount ?? 0)) {
+        toast.error(`Harvest quantity (${totalHarvested}) exceeds current plant count (${activeChan.currentCount ?? 0}) in this channel.`);
+        return;
+      }
+
+      await harvestCropRemote(activeChannelId, yieldQty, wasteQty, avgWeightGrams, notes, harvestCultivar || undefined);
       toast.success("Crop batch harvested successfully!");
       loadData();
       closeForm();
@@ -202,11 +275,12 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
   };
 
   const handleAddChannel = async () => {
-    const generatedName = polyhouse && block && row && level
-      ? `${polyhouse.trim().toUpperCase()}-${block.trim().toUpperCase()}-${row.trim().toUpperCase()}-${level.trim().toUpperCase()}${holeConfig ? `-${holeConfig.trim().toUpperCase()}` : ""}-C${String(channelIndex).padStart(2, "0")}`
-      : stand && level
-        ? `${stand}-${level}-Ch ${channelIndex}`
-        : `Channel-${Date.now()}`;
+    if (!polyhouse.trim() || !block.trim() || !row.trim() || !level.trim() || !channelIndex) {
+      toast.error("All coordinate values (Polyhouse, Block, Row, Level, Channel Index) must be entered.");
+      return;
+    }
+
+    const generatedName = `${polyhouse.trim().toUpperCase()}-${block.trim().toUpperCase()}-${row.trim().toUpperCase()}-${level.trim().toUpperCase()}${holeConfig ? `-${holeConfig.trim().toUpperCase()}` : ""}-C${String(channelIndex).padStart(2, "0")}`;
 
     const newId = generatedName;
 
@@ -248,8 +322,15 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
 
   const handleSaveEdit = async () => {
     if (!activeChannelId) return;
-    if (!channelName.trim()) {
-      toast.error("Channel name is required");
+    if (!polyhouse.trim() || !block.trim() || !row.trim() || !level.trim() || !channelIndex) {
+      toast.error("All coordinate values (Polyhouse, Block, Row, Level, Channel Index) must be entered.");
+      return;
+    }
+
+    const locationTag = `${polyhouse.trim().toUpperCase()}-${block.trim().toUpperCase()}-${row.trim().toUpperCase()}-${level.trim().toUpperCase()}${holeConfig ? `-${holeConfig.trim().toUpperCase()}` : ""}-C${String(channelIndex).padStart(2, "0")}`;
+
+    if (channels.some((c) => c.id === locationTag && c.id !== activeChannelId)) {
+      toast.error(`A channel with location ID "${locationTag}" already exists!`);
       return;
     }
 
@@ -266,12 +347,6 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
           const combinedCropName = validCrops.length > 1
             ? validCrops.map((vc) => `${vc.cropName} (${vc.count})`).join(", ")
             : (validCrops[0]?.cropName || "");
-
-          const locationTag = polyhouse && block && row && level
-            ? `${polyhouse.trim().toUpperCase()}-${block.trim().toUpperCase()}-${row.trim().toUpperCase()}-${level.trim().toUpperCase()}${holeConfig ? `-${holeConfig.trim().toUpperCase()}` : ""}-C${String(channelIndex).padStart(2, "0")}`
-            : stand && level
-              ? `${stand}-${level}-Ch ${channelIndex}`
-              : c.qrCode;
 
           return {
             ...c,
@@ -604,6 +679,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
     setYieldQty(0);
     setWasteQty(0);
     setAvgWeightGrams(0);
+    setHarvestCultivar("");
     setIncidentType("incident");
     setIncidentDesc("");
     setIncidentQty(1);
@@ -622,25 +698,53 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   };
 
-  // Dynamic stands extraction & grouping logic
-  const stands = Array.from(
-    new Set(
-      channels.map((c) =>
-        c.polyhouse && c.block && c.row
-          ? `${c.polyhouse}-${c.block}-${c.row}`
-          : c.stand
-      ).filter(Boolean) as string[]
-    )
-  ).sort();
+  // Dynamic coordinates extraction for filters
+  const uniquePolyhouses = Array.from(new Set(channels.map((c) => c.polyhouse).filter(Boolean) as string[])).sort();
+  const uniqueBlocks = Array.from(new Set(channels.map((c) => c.block).filter(Boolean) as string[])).sort();
+  const uniqueLevels = Array.from(new Set(channels.map((c) => c.level).filter(Boolean) as string[])).sort();
 
-  const filteredChannels = selectedStandFilter === "All Stands"
-    ? channels
-    : channels.filter((c) => {
-        const displayStand = c.polyhouse && c.block && c.row
-          ? `${c.polyhouse}-${c.block}-${c.row}`
-          : c.stand;
-        return displayStand === selectedStandFilter;
-      });
+  const resetAllFilters = () => {
+    setSearchQuery("");
+    setSelectedPolyhouse("all");
+    setSelectedBlock("all");
+    setSelectedLevel("all");
+    setSelectedStatus("all");
+  };
+
+  const filteredChannels = channels.filter((c) => {
+    // 1. Polyhouse filter
+    if (selectedPolyhouse !== "all" && c.polyhouse !== selectedPolyhouse) return false;
+    
+    // 2. Block filter
+    if (selectedBlock !== "all" && c.block !== selectedBlock) return false;
+    
+    // 3. Level filter
+    if (selectedLevel !== "all" && c.level !== selectedLevel) return false;
+    
+    // 4. Status filter
+    if (selectedStatus !== "all" && c.status !== selectedStatus) return false;
+    
+    // 6. Search query
+    if (searchQuery.trim() !== "") {
+      const query = searchQuery.toLowerCase();
+      const cropsText = c.crops?.map(cr => cr.cropName).join(" ") || "";
+      const matches = [
+        c.name,
+        c.cropName,
+        c.notes,
+        c.polyhouse,
+        c.block,
+        c.row,
+        c.stand,
+        c.level,
+        c.channelIndex?.toString(),
+        cropsText
+      ].some(val => val && val.toLowerCase().includes(query));
+      if (!matches) return false;
+    }
+    
+    return true;
+  });
 
   const groupedLayout: {
     [standName: string]: {
@@ -700,37 +804,76 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
         </div>
       </div>
 
-      {/* Stand Filters Bar */}
-      <div className="flex flex-wrap items-center gap-2 border-y border-border/50 py-3">
-        <span className="text-xs font-semibold text-muted-foreground mr-1 flex items-center gap-1">
-          <BarChart3 className="h-3.5 w-3.5" /> Filter Rack:
-        </span>
-        <Button
-          onClick={() => setSelectedStandFilter("All Stands")}
-          variant={selectedStandFilter === "All Stands" ? "default" : "outline"}
-          className="h-7 text-[11px] font-bold px-3 py-1"
-        >
-          All Stands ({channels.length})
-        </Button>
-        {stands.map((st) => {
-          const count = channels.filter((c) => {
-            const displayStand = c.polyhouse && c.block && c.row
-              ? `${c.polyhouse}-${c.block}-${c.row}`
-              : c.stand;
-            return displayStand === st;
-          }).length;
-          return (
-            <Button
-              key={st}
-              onClick={() => setSelectedStandFilter(st)}
-              variant={selectedStandFilter === st ? "default" : "outline"}
-              className="h-7 text-[11px] font-bold px-3 py-1"
-            >
-              📍 {st} ({count})
-            </Button>
-          );
-        })}
+      {/* Advanced Filters Panel */}
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-2xs md:flex-row md:items-center">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, crop, notes..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8 h-9 text-xs bg-background"
+          />
+        </div>
+
+        {/* Polyhouse Filter */}
+        <div className="w-full md:w-36">
+          <Select value={selectedPolyhouse} onValueChange={setSelectedPolyhouse}>
+            <SelectTrigger className="h-9 text-xs bg-background"><SelectValue placeholder="Polyhouse" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Polyhouses</SelectItem>
+              {uniquePolyhouses.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Block Filter */}
+        <div className="w-full md:w-36">
+          <Select value={selectedBlock} onValueChange={setSelectedBlock}>
+            <SelectTrigger className="h-9 text-xs bg-background"><SelectValue placeholder="Block" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Blocks</SelectItem>
+              {uniqueBlocks.map(b => <SelectItem key={b} value={b}>Block {b}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Level Filter */}
+        <div className="w-full md:w-36">
+          <Select value={selectedLevel} onValueChange={setSelectedLevel}>
+            <SelectTrigger className="h-9 text-xs bg-background"><SelectValue placeholder="Level" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Levels</SelectItem>
+              {uniqueLevels.map(l => <SelectItem key={l} value={l}>Level {l}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Status Filter */}
+        <div className="w-full md:w-36">
+          <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+            <SelectTrigger className="h-9 text-xs bg-background"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="growing">Growing</SelectItem>
+              <SelectItem value="empty">Empty</SelectItem>
+              <SelectItem value="harvested">Harvested</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {(searchQuery || selectedPolyhouse !== "all" || selectedBlock !== "all" || selectedLevel !== "all" || selectedStatus !== "all") && (
+          <Button
+            variant="ghost"
+            onClick={resetAllFilters}
+            className="h-9 px-2.5 text-xs font-bold text-destructive hover:bg-destructive/5 self-end md:self-center"
+          >
+            Clear Filters
+          </Button>
+        )}
       </div>
+
 
       {/* Main Grouped rack views */}
       {loading ? (
@@ -785,6 +928,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                               const isGrowing = chan.status === "growing";
                               const cap = chan.capacity ?? 50;
                               const count = chan.currentCount ?? 0;
+                              const style = getCropStyle(chan.cropName, isGrowing);
 
                               return (
                                 <Button
@@ -792,27 +936,30 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                                   type="button"
                                   onClick={() => handleOpenLogs(chan)}
                                   variant="outline"
-                                  className={`h-auto py-2.5 px-4 rounded-xl flex flex-col items-start gap-1 text-left border transition-all ${
-                                    isGrowing
-                                      ? "bg-green-500/5 hover:bg-green-500/10 border-green-500/20 hover:border-green-500/40 text-foreground"
-                                      : "bg-muted/10 hover:bg-muted/20 border-border/80 text-muted-foreground hover:text-foreground"
-                                  }`}
+                                  className={`h-auto py-2.5 px-4 rounded-xl flex flex-col items-start gap-1 text-left transition-all ${style.bg} ${style.border} ${style.text}`}
                                 >
                                   <div className="flex items-center gap-1.5 font-bold text-xs">
                                     {isGrowing ? (
-                                      <Sprout className="h-3.5 w-3.5 text-green-600 dark:text-green-400 animate-pulse" />
+                                      <Sprout className="h-3.5 w-3.5 text-primary animate-pulse" />
                                     ) : (
                                       <div className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" />
                                     )}
                                     <span>Ch {chan.channelIndex ?? 1}: {chan.name}</span>
                                   </div>
-                                  <div className="text-[10px] font-semibold text-muted-foreground">
+                                  <div className="text-[10px] font-semibold">
                                     {isGrowing ? (
-                                      <span className="text-green-700 dark:text-green-400 font-bold">
-                                        🌱 {chan.cropName} ({count}/{cap})
+                                      <span className="font-bold flex flex-col gap-0.5">
+                                        <span className="flex items-center gap-1">
+                                          <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+                                          {chan.cropName} ({count}/{cap})
+                                        </span>
+                                        {chan.holeConfig && <span className="text-[9px] text-muted-foreground/80 font-normal">Holes: {chan.holeConfig}</span>}
                                       </span>
                                     ) : (
-                                      <span>Vacant ({cap} cap)</span>
+                                      <span className="flex flex-col gap-0.5">
+                                        <span>Vacant ({cap} cap)</span>
+                                        {chan.holeConfig && <span className="text-[9px] text-muted-foreground/60">Holes: {chan.holeConfig}</span>}
+                                      </span>
                                     )}
                                   </div>
                                 </Button>
@@ -840,6 +987,11 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                                       <span className="max-w-24 text-center text-[10px] text-slate-700 font-mono font-semibold break-all leading-tight">
                                         ID: {chan.id}
                                       </span>
+                                      {chan.holeConfig && (
+                                        <Badge variant="outline" className="text-[9px] font-bold px-1.5 py-0 mt-0.5 bg-slate-50">
+                                          Holes: {chan.holeConfig}
+                                        </Badge>
+                                      )}
                                     </div>
 
                                     {/* Crop details */}
@@ -1095,7 +1247,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                       />
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     <div className="space-y-1">
                       <Label htmlFor="chan-level" className="text-xs font-semibold">NFT Level</Label>
                       <Input
@@ -1127,11 +1279,22 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                         className="text-xs"
                       />
                     </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="chan-capacity" className="text-xs font-semibold">Capacity</Label>
+                      <Input
+                        id="chan-capacity"
+                        type="number"
+                        placeholder="50"
+                        value={capacity}
+                        onChange={(e) => { const v = e.target.value; setCapacity(v === "" ? "" as any : Number(v)); }}
+                        className="text-xs"
+                      />
+                    </div>
                   </div>
                 </>
               )}
 
-              {(actionType === "plant" || actionType === "edit-channel") && (
+              {actionType === "plant" && (
                 <>
                   {/* Multi-crop rows */}
                   <div className="space-y-2 border border-border p-2.5 rounded-lg bg-muted/15">
@@ -1145,11 +1308,17 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                       {cropsList.map((crop, idx) => (
                         <div key={idx} className="flex gap-2 items-center">
                           <Input
+                            list="nft-crop-suggestions"
                             placeholder="e.g. Romaine"
                             value={crop.cropName}
                             onChange={(e) => handleCropRowChange(idx, "cropName", e.target.value)}
                             className="h-8 text-xs flex-1"
                           />
+                          <datalist id="nft-crop-suggestions">
+                            {SUGGESTED_CROPS_LIST.map((c) => (
+                              <option key={c} value={c} />
+                            ))}
+                          </datalist>
                           <Input
                             type="number"
                             placeholder="Qty"
@@ -1170,18 +1339,6 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                     </div>
                     <div className="text-[10px] text-muted-foreground text-right font-bold pt-1.5 border-t">
                       Total: {cropsList.reduce((sum, c) => sum + Number(c.count || 0), 0)} / {capacity} Plants
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="cap" className="text-xs font-semibold">Max Capacity</Label>
-                      <Input
-                        id="cap"
-                        type="number"
-                        value={capacity}
-                        onChange={(e) => { const v = e.target.value; setCapacity(v === "" ? "" as any : Number(v)); }}
-                      />
                     </div>
                   </div>
 
@@ -1207,20 +1364,32 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                 </>
               )}
 
-              {actionType === "add-channel" && (
-                <div className="space-y-1">
-                  <Label htmlFor="chan-capacity" className="text-xs font-semibold">Max Capacity (Pots)</Label>
-                  <Input
-                    id="chan-capacity"
-                    type="number"
-                    value={capacity}
-                    onChange={(e) => { const v = e.target.value; setCapacity(v === "" ? "" as any : Number(v)); }}
-                  />
-                </div>
-              )}
-
               {actionType === "harvest" && (
                 <>
+                  {(() => {
+                    const activeChan = channels.find((c) => c.id === activeChannelId);
+                    const crops = activeChan?.crops || [];
+                    if (crops.length > 0) {
+                      return (
+                        <div className="space-y-1">
+                          <Label htmlFor="harvest-cultivar" className="text-xs font-semibold">Select Variety to Harvest</Label>
+                          <Select value={harvestCultivar} onValueChange={(val) => setHarvestCultivar(val)}>
+                            <SelectTrigger id="harvest-cultivar" className="h-9 text-xs bg-background">
+                              <SelectValue placeholder="Select variety" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {crops.map((c, i) => (
+                                <SelectItem key={i} value={c.cropName}>
+                                  {c.cropName} ({c.count} available)
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label htmlFor="yield-qty" className="text-xs font-semibold">Usable Yield (Plants)</Label>
