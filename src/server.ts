@@ -401,6 +401,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         phManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
         nutritionManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
         fault?: string | null;
+        fault_2?: string | null;
         resetReason?: string | null;
         lastBootFault?: string | null;
         uptimeSec?: number | null;
@@ -484,6 +485,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         phManualMode: payload.phManualMode ?? undefined,
         nutritionManualMode: payload.nutritionManualMode ?? undefined,
         fault: payload.fault ?? undefined,
+        fault_2: payload.fault_2 ?? undefined,
         resetReason: payload.resetReason ?? undefined,
         lastBootFault: payload.lastBootFault ?? undefined,
         uptimeSec: payload.uptimeSec ?? undefined,
@@ -862,7 +864,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       };
       for (const [field, [minimum, maximum]] of Object.entries(numericLimits)) {
         const value = payload[field];
-        if (value !== undefined &&
+        if (value !== undefined && value !== null &&
             (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum)) {
           return jsonResponse({ error: `${field} must be between ${minimum} and ${maximum}` }, 400);
         }

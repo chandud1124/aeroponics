@@ -125,6 +125,21 @@ export function NextCyclePanel({
     ? (schedule.dayIntervalMinutes_2 ?? schedule.intervalMinutes_2 ?? schedule.intervalMinutes)
     : (schedule.nightIntervalMinutes_2 ?? schedule.intervalMinutes_2 ?? schedule.intervalMinutes);
 
+  const formatInterval = (minutesVal: number) => {
+    const totalSeconds = Math.round(minutesVal * 60);
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+  };
+
+  const formatDuration = (secondsVal: number) => {
+    if (secondsVal < 60) return `${secondsVal}s`;
+    const mins = Math.floor(secondsVal / 60);
+    const secs = secondsVal % 60;
+    return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+  };
+
   const [pump1State, setPump1State] = useState({ mistingRemainingSec: 0, idleCountdown: "--:--" });
   const [pump2State, setPump2State] = useState({ mistingRemainingSec: 0, idleCountdown: "--:--" });
 
@@ -222,7 +237,7 @@ export function NextCyclePanel({
                 {status.pumpOn ? `${pump1State.mistingRemainingSec}s` : pump1State.idleCountdown}
               </span>
               <span className="text-[9px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded block w-fit mx-auto mt-1">
-                Interval: {expectedOff}m | Duration: {expectedDuration}s
+                Interval: {formatInterval(expectedOff)} | Duration: {formatDuration(expectedDuration)}
               </span>
             </div>
           </div>
@@ -237,7 +252,7 @@ export function NextCyclePanel({
                 {status.pumpOn_2 ? `${pump2State.mistingRemainingSec}s` : pump2State.idleCountdown}
               </span>
               <span className="text-[9px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded block w-fit mx-auto mt-1">
-                Interval: {expectedOff_2}m | Duration: {expectedDuration_2}s
+                Interval: {formatInterval(expectedOff_2)} | Duration: {formatDuration(expectedDuration_2)}
               </span>
             </div>
           </div>
@@ -715,14 +730,29 @@ export function FaultHistoryPanel({ deviceId }: { deviceId: string | null }) {
 
 // ==================== FAULT ALERT BANNER ====================
 export function FaultAlertBanner({ status }: { status: LiveStatus }) {
-  if (!status.fault || status.fault === "NONE") return null;
+  const hasFault1 = status.fault && status.fault !== "NONE" && status.fault !== "OK";
+  const hasFault2 = status.fault_2 && status.fault_2 !== "NONE" && status.fault_2 !== "OK";
+
+  if (!hasFault1 && !hasFault2) return null;
 
   return (
-    <Alert variant="destructive" className="border-red-500/30 bg-red-500/10">
-      <AlertOctagon className="h-4 w-4 text-red-500" />
-      <AlertDescription className="text-xs text-red-700 dark:text-red-300 font-semibold font-mono">
-        CRITICAL ERROR: {status.fault} — Dosing and pump loops temporarily halted. Check reservoir lines and restart.
-      </AlertDescription>
+    <Alert variant="destructive" className="border-red-500/30 bg-red-500/10 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <AlertOctagon className="h-4 w-4 text-red-500 shrink-0 animate-pulse" />
+        <span className="text-xs font-bold text-red-700 dark:text-red-300 uppercase tracking-wider">Critical Hardware Locking Engaged</span>
+      </div>
+      <div className="space-y-1 font-mono text-[11px] pl-6 text-red-600 dark:text-red-400">
+        {hasFault1 && (
+          <div>
+            <strong>Pump 1 Fault:</strong> {status.fault} — Irrigation loop halted. Check lines/relays.
+          </div>
+        )}
+        {hasFault2 && (
+          <div>
+            <strong>Pump 2 Fault:</strong> {status.fault_2} — Secondary irrigation loop halted.
+          </div>
+        )}
+      </div>
     </Alert>
   );
 }

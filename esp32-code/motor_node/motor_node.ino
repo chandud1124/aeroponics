@@ -290,6 +290,27 @@ struct PumpEngine {
     curState     = STATE_FAULT;
   }
 
+  void onScheduleChanged(unsigned long now) {
+    Serial.printf("[SCHED P%d] Schedule changed — updating running state\n", pumpIndex);
+    if (curState == STATE_RUNNING) {
+      time_t epochNow = getCurrentEpoch();
+      int intervalMinutes = schedule.intervalMinutes;
+      int durationSeconds = schedule.durationSeconds;
+      getActivePumpProfile(epochNow, intervalMinutes, durationSeconds);
+      unsigned long elapsedMs = now - pumpStartMs;
+      unsigned long newDurationMs = (unsigned long)(durationSeconds * 1000UL);
+      if (elapsedMs >= newDurationMs) {
+        Serial.printf("[SCHED P%d] Elapsed run time (%ds) exceeds new duration (%ds) — stopping\n", 
+                      pumpIndex, elapsedMs / 1000UL, durationSeconds);
+        curState = STATE_STOPPING;
+      } else {
+        pumpScheduledEndMs = pumpStartMs + newDurationMs;
+        Serial.printf("[SCHED P%d] Updated pumpScheduledEndMs. New remaining duration: %ds\n", 
+                      pumpIndex, (pumpScheduledEndMs - now) / 1000UL);
+      }
+    }
+  }
+
   void runStateMachine(unsigned long now) {
     if (pinPumpRelay <= 0) return;
 
@@ -688,6 +709,7 @@ bool fetchHandshakeAndSync() {
     if (changed) {
       pump1.saveScheduleToNVS();
       Serial.println("[API] Pump 1 Schedule synced from backend");
+      pump1.onScheduleChanged(millis());
     }
   }
 
@@ -720,6 +742,7 @@ bool fetchHandshakeAndSync() {
     if (changed) {
       pump2.saveScheduleToNVS();
       Serial.println("[API] Pump 2 Schedule synced from backend");
+      pump2.onScheduleChanged(millis());
     }
   }
 
@@ -801,6 +824,7 @@ void postStatus() {
   body += "\"pumpOn_2\":"         + String(pump2.status.pumpOn ? "true" : "false") + ",";
   body += "\"flowing_2\":"        + String(pump2.status.flowing ? "true" : "false") + ",";
   body += "\"state_2\":\""        + String(STATE_NAMES[pump2.curState]) + "\",";
+  body += "\"fault_2\":\""        + pump2.status.fault + "\",";
   body += "\"motorManualMode_2\":\"" + String(pump2.motorManualMode == MANUAL_FORCE_ON ? "FORCED_ON" :
                                               (pump2.motorManualMode == MANUAL_FORCE_OFF ? "FORCED_OFF" : "AUTO")) + "\"";
   body += "}";

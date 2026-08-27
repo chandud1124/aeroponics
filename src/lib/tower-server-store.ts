@@ -446,10 +446,19 @@ function getLatestDeviceSignalAt(status: LiveStatus | null | undefined): number 
 
 function resolveSchedule(deviceId?: string | null): Schedule {
   const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
-  if (resolvedDeviceId && deviceSchedules[resolvedDeviceId]) {
-    return deviceSchedules[resolvedDeviceId];
-  }
-  return schedule;
+  const sched = (resolvedDeviceId && deviceSchedules[resolvedDeviceId]) ? deviceSchedules[resolvedDeviceId] : schedule;
+
+  // Legacy data migration: if interval fields are > 59, they were stored in seconds. Convert to minutes.
+  const migrated = { ...sched };
+  if (migrated.intervalMinutes > 59) migrated.intervalMinutes = migrated.intervalMinutes / 60;
+  if (migrated.dayIntervalMinutes && migrated.dayIntervalMinutes > 59) migrated.dayIntervalMinutes = migrated.dayIntervalMinutes / 60;
+  if (migrated.nightIntervalMinutes && migrated.nightIntervalMinutes > 59) migrated.nightIntervalMinutes = migrated.nightIntervalMinutes / 60;
+  
+  if (migrated.intervalMinutes_2 && migrated.intervalMinutes_2 > 59) migrated.intervalMinutes_2 = migrated.intervalMinutes_2 / 60;
+  if (migrated.dayIntervalMinutes_2 && migrated.dayIntervalMinutes_2 > 59) migrated.dayIntervalMinutes_2 = migrated.dayIntervalMinutes_2 / 60;
+  if (migrated.nightIntervalMinutes_2 && migrated.nightIntervalMinutes_2 > 59) migrated.nightIntervalMinutes_2 = migrated.nightIntervalMinutes_2 / 60;
+
+  return migrated;
 }
 
 function getModeForNow(now = new Date(), deviceId?: string | null): "DAY" | "NIGHT" {

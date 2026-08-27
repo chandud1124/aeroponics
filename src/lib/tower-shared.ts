@@ -103,6 +103,7 @@ export type LiveStatus = {
   pumpEndISO?: string | null;
   pumpEndISO_2?: string | null;
   fault: string | null;
+  fault_2?: string | null;
   plannedNextCycleISO?: string | null;
   plannedNextCycleIn?: number | null;
   plannedNextCycleISO_2?: string | null;
