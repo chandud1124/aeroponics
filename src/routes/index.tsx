@@ -678,6 +678,7 @@ function Index() {
                   deviceId={activeDeviceId}
                   online={backendReachable}
                   controlsAllowed={controlsAllowed}
+                  devices={devices}
                 />
                 <RelayStatesCard
                   status={liveStatus}

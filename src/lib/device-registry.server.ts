@@ -182,6 +182,14 @@ export function updateDevicePins(deviceId: string, pins: GpioMapping[]): boolean
   return true;
 }
 
+export function updateDeviceName(deviceId: string, name: string): boolean {
+  const found = devices.find((d) => d.deviceId === deviceId);
+  if (!found) return false;
+  found.name = name;
+  saveDevicesToDisk();
+  return true;
+}
+
 export function getDevicePins(deviceId: string): GpioMapping[] | null {
   const found = devices.find((d) => d.deviceId === deviceId);
   return found?.pins ?? null;

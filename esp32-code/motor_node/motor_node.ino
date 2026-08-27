@@ -82,7 +82,7 @@ unsigned long wifiBackoffMs        = 5000UL;
 // Dynamic pin mappings for buttons
 int PIN_AUTO_MODE_BUTTON = 23;  // Global Auto mode toggle button
 int PIN_PUMP1_BUTTON     = 19;  // Pump 1 manual toggle button
-int PIN_PUMP2_BUTTON     = 13;  // Pump 2 manual toggle button
+int PIN_PUMP2_BUTTON     = 26;  // Pump 2 manual toggle button
 
 struct DebouncedButton {
   int pin;
@@ -477,7 +477,7 @@ void setup() {
   Serial.println(F("╚══════════════════════════════════════╝\n"));
 
   pump1.init(1, 27, 19, "pump1");
-  pump2.init(2, 14, 13, "pump2");
+  pump2.init(2, 32, 26, "pump2");
 
   pump1.loadScheduleFromNVS();
   pump2.loadScheduleFromNVS();

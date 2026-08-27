@@ -49,6 +49,7 @@ import {
   resolveDeviceId,
   updateDevicePins,
   getDevicePins,
+  updateDeviceName,
 } from "./lib/device-registry.server";
 import { analyzeSensorDataWithGemini, analyzeCropImageWithGemini } from "./lib/gemini-service";
 import type { CameraSnapshot, CameraSettings, GpioMapping } from "./lib/tower-shared";
@@ -299,6 +300,20 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       
       const payload = (await request.json()) as { pins: GpioMapping[] };
       const success = updateDevicePins(deviceId, payload?.pins ?? []);
+      if (!success) return jsonResponse({ error: "Device not found" }, 404);
+      return jsonResponse({ success: true }, 200);
+    }
+
+    // Rename device name — PUT /api/admin/devices/:deviceId/name
+    if (request.method === "PUT" && url.pathname.match(/^\/api\/admin\/devices\/[^\/]+\/name$/)) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      const deviceId = parts[parts.length - 2];
+      if (!deviceId) return jsonResponse({ error: "Missing device id" }, 400);
+
+      const payload = (await request.json()) as { name: string };
+      if (!payload?.name?.trim()) return jsonResponse({ error: "Name is required" }, 400);
+
+      const success = updateDeviceName(deviceId, payload.name.trim());
       if (!success) return jsonResponse({ error: "Device not found" }, 404);
       return jsonResponse({ success: true }, 200);
     }
@@ -672,7 +687,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         durationSeconds_2: cycleProfile2.onDurationSeconds,
         ...(status ?? {}),
         pin_pump_relay: findPin("Relay - Water Pump", 27),
-        pin_pump_relay_2: findPin("Relay - Water Pump 2", 14),
+        pin_pump_relay_2: findPin("Relay - Water Pump 2", 32),
         pin_nutrition_a: findPin("Relay - Nutrition A", 33),
         pin_nutrition_b: findPin("Relay - Nutrition B", 26),
         pin_nutrition_c: findPin("Relay - Nutrition C", 0),
@@ -683,7 +698,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pin_level_sensor_rx: ultrasonic?.pin ?? findPin("Water Level Sensor", 18),
         pin_level_sensor_tx: ultrasonic?.txPin ?? (devicePins && devicePins.length > 0 ? -1 : 5),
         pin_motor_button: findPin("Motor Override Button", 19),
-        pin_motor_button_2: findPin("Motor Override Button 2", 13),
+        pin_motor_button_2: findPin("Motor Override Button 2", 26),
         emptyDistanceCm: waterCalibration?.emptyDistanceCm ?? 50,
         fullDistanceCm: waterCalibration?.fullDistanceCm ?? 10,
         tankWidthCm: waterCalibration?.tankWidthCm ?? 50,
@@ -848,33 +863,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (request.method === "PUT") {
-      // Accept the full Schedule object from the UI (including day/night overrides)
+      // Accept the full Schedule object from the UI (including day/night overrides) without restriction
       const payload = (await request.json()) as any;
-
-      const numericLimits: Record<string, [number, number]> = {
-        intervalMinutes: [5, 1440], durationSeconds: [10, 600],
-        startHour: [0, 23], endHour: [1, 24],
-        dayIntervalMinutes: [5, 1440], dayDurationSeconds: [10, 600],
-        nightIntervalMinutes: [5, 1440], nightDurationSeconds: [10, 600],
-        phDoseSeconds: [1, 60], phDoseIntervalMinutes: [5, 360],
-        ecDoseSeconds: [1, 120], ecDoseIntervalMinutes: [5, 360],
-        intervalMinutes_2: [5, 1440], durationSeconds_2: [10, 600],
-        dayIntervalMinutes_2: [5, 1440], dayDurationSeconds_2: [10, 600],
-        nightIntervalMinutes_2: [5, 1440], nightDurationSeconds_2: [10, 600],
-      };
-      for (const [field, [minimum, maximum]] of Object.entries(numericLimits)) {
-        const value = payload[field];
-        if (value !== undefined && value !== null &&
-            (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum)) {
-          return jsonResponse({ error: `${field} must be between ${minimum} and ${maximum}` }, 400);
-        }
-      }
-      if (typeof payload.startHour === "number" && typeof payload.endHour === "number") {
-        if (payload.startHour >= payload.endHour) {
-          return jsonResponse({ error: "Start hour must be earlier than end hour" }, 400);
-        }
-      }
-
       return jsonResponse(updateSchedule(payload, qDeviceId));
     }
 
@@ -1124,6 +1114,67 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     const stopped = stopManualPump(targetDevice!);
     return jsonResponse({ success: true, state: "IDLE", durationSeconds: stopped.durationSeconds }, 201);
+  }
+
+  if (url.pathname === "/api/manual-pump-2") {
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    const deviceGate = requireRegisteredDeviceForControl();
+    if (deviceGate) return deviceGate;
+
+    const payload = (await request.json()) as { action?: "start" | "stop" | "auto" | "manual"; desiredOn?: boolean };
+    if (!payload.action) {
+      return jsonResponse({ error: "Missing action" }, 400);
+    }
+
+    const targetDeviceGate = requireRegisteredTargetDevice(request);
+    if (targetDeviceGate) return targetDeviceGate;
+
+    const targetDevice = getTargetDeviceId(request);
+
+    if (payload.action === "auto") {
+      updateStatus({
+        pumpOn_2: false,
+        flowing_2: false,
+        pumpState_2: PumpState.IDLE,
+        motorManualMode_2: "AUTO",
+        lastRunISO_2: null,
+      }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, state: "AUTO" }, 201);
+    }
+
+    if (payload.action === "manual") {
+      const desiredOn = Boolean(payload.desiredOn);
+      updateStatus({
+        pumpOn_2: desiredOn,
+        flowing_2: desiredOn,
+        pumpState_2: desiredOn ? PumpState.RUNNING : PumpState.IDLE,
+        motorManualMode_2: desiredOn ? "FORCED_ON" : "FORCED_OFF",
+        lastRunISO_2: desiredOn ? new Date().toISOString() : null,
+      }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, state: "MANUAL_MODE", pumpOn_2: desiredOn }, 201);
+    }
+
+    if (payload.action === "start") {
+      updateStatus({
+        pumpOn_2: true,
+        flowing_2: true,
+        pumpState_2: PumpState.RUNNING,
+        motorManualMode_2: "FORCED_ON",
+        lastRunISO_2: new Date().toISOString(),
+      }, { deviceId: targetDevice });
+      return jsonResponse({ success: true, state: "MANUAL_MODE", pumpOn_2: true }, 201);
+    }
+
+    updateStatus({
+      pumpOn_2: false,
+      flowing_2: false,
+      pumpState_2: PumpState.IDLE,
+      motorManualMode_2: "FORCED_OFF",
+    }, { deviceId: targetDevice });
+    return jsonResponse({ success: true, state: "IDLE", pumpOn_2: false }, 201);
   }
 
   if (url.pathname === "/api/manual-ph-down") {

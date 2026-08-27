@@ -268,15 +268,23 @@ export function ManualControlPanel({
   deviceId,
   online = true,
   controlsAllowed = true,
+  devices = [],
 }: {
   status: LiveStatus | null;
   deviceId: string | null;
   online?: boolean;
   controlsAllowed?: boolean;
+  devices?: any[];
 }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [manualModes, setManualModes] = useState({ motor: "AUTO", motor_2: "AUTO", ph: "AUTO", nutrition: "AUTO" });
   const [tick, setTick] = useState(0);
+
+  const pins = devices.find((d) => d.deviceId === deviceId)?.pins ?? [];
+  const hasPump1 = pins.length === 0 || pins.some((p: any) => p.type === "Relay - Water Pump");
+  const hasPump2 = pins.some((p: any) => p.type === "Relay - Water Pump 2");
+  const hasPhDosing = pins.length === 0 || pins.some((p: any) => p.type === "Relay - pH Down");
+  const hasNutriDosing = pins.length === 0 || pins.some((p: any) => p.type.startsWith("Relay - Nutrition"));
 
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 1000);
@@ -374,194 +382,202 @@ export function ManualControlPanel({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 md:gap-6">
         {/* Irrigation Pump 1 */}
-        <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold text-foreground block">Mist Pump 1 (GPIO 27)</span>
-            <span className="text-[10px] text-muted-foreground block">Irrigation loops for main lines.</span>
-          </div>
-
-          <div className="space-y-3">
-            <div className="border-t border-border/40 pt-2 text-[10px] space-y-1">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Status:</span>
-                <span className={`font-bold ${status?.pumpOn ? "text-emerald-500" : "text-slate-400"}`}>
-                  {status?.pumpOn ? "ON" : "OFF"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">State Duration:</span>
-                <span className="font-mono font-bold">{formatDuration(status?.pumpOnUpdatedAt)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Mode Time:</span>
-                <span className="font-mono font-bold text-slate-500">{formatDuration(status?.motorManualModeUpdatedAt)}</span>
-              </div>
+        {hasPump1 && (
+          <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-foreground block">Mist Pump 1 (GPIO 27)</span>
+              <span className="text-[10px] text-muted-foreground block">Irrigation loops for main lines.</span>
             </div>
 
-            <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
-              <span className="text-[11px] font-semibold">Mode Override:</span>
-              <Button
-                variant={motorMode === "AUTO" ? "outline" : "default"}
-                onClick={() => toggleMode("motor", motorMode)}
-                disabled={loading === "motor" || !controlsAllowed}
-                className="h-7 text-[10px] px-2 font-bold"
-              >
-                {motorMode === "AUTO" ? "Switch Manual" : "Switch Auto"}
-              </Button>
-            </div>
+            <div className="space-y-3">
+              <div className="border-t border-border/40 pt-2 text-[10px] space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Status:</span>
+                  <span className={`font-bold ${status?.pumpOn ? "text-emerald-500" : "text-slate-400"}`}>
+                    {status?.pumpOn ? "ON" : "OFF"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">State Duration:</span>
+                  <span className="font-mono font-bold">{formatDuration(status?.pumpOnUpdatedAt)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Mode Time:</span>
+                  <span className="font-mono font-bold text-slate-500">{formatDuration(status?.motorManualModeUpdatedAt)}</span>
+                </div>
+              </div>
 
-            {motorMode !== "AUTO" && (
-              <div className="flex gap-2 border-t pt-2.5">
+              <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
+                <span className="text-[11px] font-semibold">Mode Override:</span>
                 <Button
-                  onClick={() => handlePulseRelay("pump", "on")}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  variant={motorMode === "AUTO" ? "outline" : "default"}
+                  onClick={() => toggleMode("motor", motorMode)}
+                  disabled={loading === "motor" || !controlsAllowed}
+                  className="h-7 text-[10px] px-2 font-bold"
                 >
-                  ON
-                </Button>
-                <Button
-                  onClick={() => handlePulseRelay("pump", "off")}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
-                >
-                  OFF
+                  {motorMode === "AUTO" ? "Switch Manual" : "Switch Auto"}
                 </Button>
               </div>
-            )}
+
+              {motorMode !== "AUTO" && (
+                <div className="flex gap-2 border-t pt-2.5">
+                  <Button
+                    onClick={() => handlePulseRelay("pump", "on")}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    ON
+                  </Button>
+                  <Button
+                    onClick={() => handlePulseRelay("pump", "off")}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    OFF
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Irrigation Pump 2 */}
-        <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold text-foreground block">Mist Pump 2 (GPIO 14)</span>
-            <span className="text-[10px] text-muted-foreground block">Irrigation loops for secondary lines.</span>
-          </div>
-
-          <div className="space-y-3">
-            <div className="border-t border-border/40 pt-2 text-[10px] space-y-1">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Status:</span>
-                <span className={`font-bold ${status?.pumpOn_2 ? "text-emerald-500" : "text-slate-400"}`}>
-                  {status?.pumpOn_2 ? "ON" : "OFF"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">State Duration:</span>
-                <span className="font-mono font-bold">{formatDuration(status?.pumpOnUpdatedAt_2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Mode Time:</span>
-                <span className="font-mono font-bold text-slate-500">{formatDuration(status?.motorManualModeUpdatedAt_2)}</span>
-              </div>
+        {hasPump2 && (
+          <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-foreground block">Mist Pump 2 (GPIO 14)</span>
+              <span className="text-[10px] text-muted-foreground block">Irrigation loops for secondary lines.</span>
             </div>
 
-            <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
-              <span className="text-[11px] font-semibold">Mode Override:</span>
-              <Button
-                variant={motor2Mode === "AUTO" ? "outline" : "default"}
-                onClick={() => toggleMode("motor_2", motor2Mode)}
-                disabled={loading === "motor_2" || !controlsAllowed}
-                className="h-7 text-[10px] px-2 font-bold"
-              >
-                {motor2Mode === "AUTO" ? "Switch Manual" : "Switch Auto"}
-              </Button>
-            </div>
+            <div className="space-y-3">
+              <div className="border-t border-border/40 pt-2 text-[10px] space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Status:</span>
+                  <span className={`font-bold ${status?.pumpOn_2 ? "text-emerald-500" : "text-slate-400"}`}>
+                    {status?.pumpOn_2 ? "ON" : "OFF"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">State Duration:</span>
+                  <span className="font-mono font-bold">{formatDuration(status?.pumpOnUpdatedAt_2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Mode Time:</span>
+                  <span className="font-mono font-bold text-slate-500">{formatDuration(status?.motorManualModeUpdatedAt_2)}</span>
+                </div>
+              </div>
 
-            {motor2Mode !== "AUTO" && (
-              <div className="flex gap-2 border-t pt-2.5">
+              <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
+                <span className="text-[11px] font-semibold">Mode Override:</span>
                 <Button
-                  onClick={() => handlePulseRelay("pump_2", "on")}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  variant={motor2Mode === "AUTO" ? "outline" : "default"}
+                  onClick={() => toggleMode("motor_2", motor2Mode)}
+                  disabled={loading === "motor_2" || !controlsAllowed}
+                  className="h-7 text-[10px] px-2 font-bold"
                 >
-                  ON
-                </Button>
-                <Button
-                  onClick={() => handlePulseRelay("pump_2", "off")}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
-                >
-                  OFF
+                  {motor2Mode === "AUTO" ? "Switch Manual" : "Switch Auto"}
                 </Button>
               </div>
-            )}
+
+              {motor2Mode !== "AUTO" && (
+                <div className="flex gap-2 border-t pt-2.5">
+                  <Button
+                    onClick={() => handlePulseRelay("pump_2", "on")}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    ON
+                  </Button>
+                  <Button
+                    onClick={() => handlePulseRelay("pump_2", "off")}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    OFF
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Nutrients Pumps */}
-        <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold text-foreground block">Nutrition Mixers (A/B/C)</span>
-            <span className="text-[10px] text-muted-foreground block">Relays pushing nutrient concentrates.</span>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
-              <span className="text-[11px] font-semibold">Mode Override:</span>
-              <Button
-                variant={nutriMode === "AUTO" ? "outline" : "default"}
-                onClick={() => toggleMode("nutrition", nutriMode)}
-                disabled={loading === "nutrition" || !controlsAllowed}
-                className="h-7 text-[10px] px-2 font-bold"
-              >
-                {nutriMode === "AUTO" ? "Switch Manual" : "Switch Auto"}
-              </Button>
+        {hasNutriDosing && (
+          <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-foreground block">Nutrition Mixers (A/B/C)</span>
+              <span className="text-[10px] text-muted-foreground block">Relays pushing nutrient concentrates.</span>
             </div>
 
-            {nutriMode !== "AUTO" && (
-              <div className="flex gap-2 border-t pt-2.5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
+                <span className="text-[11px] font-semibold">Mode Override:</span>
                 <Button
-                  onClick={() => handlePulseRelay("nutrition", "on")}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  variant={nutriMode === "AUTO" ? "outline" : "default"}
+                  onClick={() => toggleMode("nutrition", nutriMode)}
+                  disabled={loading === "nutrition" || !controlsAllowed}
+                  className="h-7 text-[10px] px-2 font-bold"
                 >
-                  ON
-                </Button>
-                <Button
-                  onClick={() => handlePulseRelay("nutrition", "off")}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
-                >
-                  OFF
+                  {nutriMode === "AUTO" ? "Switch Manual" : "Switch Auto"}
                 </Button>
               </div>
-            )}
+
+              {nutriMode !== "AUTO" && (
+                <div className="flex gap-2 border-t pt-2.5">
+                  <Button
+                    onClick={() => handlePulseRelay("nutrition", "on")}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    ON
+                  </Button>
+                  <Button
+                    onClick={() => handlePulseRelay("nutrition", "off")}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    OFF
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* pH Down Pump */}
-        <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-bold text-foreground block">pH Down Dosing Pump</span>
-            <span className="text-[10px] text-muted-foreground block">Pumps acid buffers to reservoir.</span>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
-              <span className="text-[11px] font-semibold">Mode Override:</span>
-              <Button
-                variant={phMode === "AUTO" ? "outline" : "default"}
-                onClick={() => toggleMode("ph", phMode)}
-                disabled={loading === "ph" || !controlsAllowed}
-                className="h-7 text-[10px] px-2 font-bold"
-              >
-                {phMode === "AUTO" ? "Switch Manual" : "Switch Auto"}
-              </Button>
+        {hasPhDosing && (
+          <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-foreground block">pH Down Dosing Pump</span>
+              <span className="text-[10px] text-muted-foreground block">Pumps acid buffers to reservoir.</span>
             </div>
 
-            {phMode !== "AUTO" && (
-              <div className="flex gap-2 border-t pt-2.5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
+                <span className="text-[11px] font-semibold">Mode Override:</span>
                 <Button
-                  onClick={() => handlePulseRelay("ph", "on")}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  variant={phMode === "AUTO" ? "outline" : "default"}
+                  onClick={() => toggleMode("ph", phMode)}
+                  disabled={loading === "ph" || !controlsAllowed}
+                  className="h-7 text-[10px] px-2 font-bold"
                 >
-                  ON
-                </Button>
-                <Button
-                  onClick={() => handlePulseRelay("ph", "off")}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
-                >
-                  OFF
+                  {phMode === "AUTO" ? "Switch Manual" : "Switch Auto"}
                 </Button>
               </div>
-            )}
+
+              {phMode !== "AUTO" && (
+                <div className="flex gap-2 border-t pt-2.5">
+                  <Button
+                    onClick={() => handlePulseRelay("ph", "on")}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    ON
+                  </Button>
+                  <Button
+                    onClick={() => handlePulseRelay("ph", "off")}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
+                  >
+                    OFF
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </Card>
   );

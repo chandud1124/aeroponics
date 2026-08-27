@@ -12,6 +12,7 @@ import {
   createAdminDevice,
   deleteAdminDevice,
   rotateAdminDeviceSecret,
+  updateAdminDeviceName,
   type DeviceListEntry,
   type GpioMapping,
 } from "@/lib/tower-storage";
@@ -132,6 +133,22 @@ export function DeviceRegistryTab() {
       setMacAddress("");
     } catch (e: any) {
       toast.error(e.message || "Failed to create device");
+    }
+  };
+
+  const handleRenameDevice = async (deviceId: string, currentName: string | null) => {
+    const newName = prompt("Enter new name for ESP32 device:", currentName ?? "");
+    if (newName === null) return; // User cancelled
+    if (!newName.trim()) {
+      toast.error("Device name cannot be empty");
+      return;
+    }
+    try {
+      await updateAdminDeviceName(adminPasskey, deviceId, newName.trim());
+      toast.success("Device renamed successfully");
+      loadData();
+    } catch (e: any) {
+      toast.error("Failed to rename: " + e.message);
     }
   };
 
@@ -341,7 +358,18 @@ export function DeviceRegistryTab() {
                 {/* Device identifier headers */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
-                    <span className="text-sm font-bold text-foreground block">{dev.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-bold text-foreground block">{dev.name || "Unnamed Device"}</span>
+                      <Button
+                        onClick={() => handleRenameDevice(dev.deviceId, dev.name)}
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 rounded-full hover:bg-muted text-muted-foreground p-0"
+                        title="Rename Device"
+                      >
+                        <Settings className="h-3 w-3" />
+                      </Button>
+                    </div>
                     <span className="text-[10px] font-mono text-slate-500 block">ID: {dev.deviceId}</span>
                     {dev.lastSeen && (
                       <span className="text-[9px] font-mono text-slate-400 block">

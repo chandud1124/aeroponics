@@ -236,6 +236,17 @@ export async function rotateAdminDeviceSecret(adminPasskey: string, deviceId: st
   });
 }
 
+export async function updateAdminDeviceName(adminPasskey: string, deviceId: string, name: string) {
+  return requestJson(`/api/admin/devices/${encodeURIComponent(deviceId)}/name`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-passkey": adminPasskey,
+    },
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function fetchNftChannels(): Promise<NftChannel[]> {
   try {
     return await requestJson<NftChannel[]>("/api/nft-channels", { method: "GET" });
