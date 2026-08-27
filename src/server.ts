@@ -386,6 +386,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         flowing_2?: boolean;
         pumpState_2?: string;
         state_2?: string;
+        motorManualMode?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
         motorManualMode_2?: "AUTO" | "FORCED_ON" | "FORCED_OFF";
         humidityPct?: number | null;
         ph?: number | null;
@@ -409,6 +410,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         dhtOk?: boolean;
         levelSensorOk?: boolean;
         reservoirTempC?: number | null;
+        nftTempC?: number | null;
       };
 
       // Force unmapped sensor values to null if device registry has custom pins configured
@@ -429,6 +431,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         if (!hasTemp) {
           payload.humidityPct = null;
           payload.reservoirTempC = null;
+          payload.nftTempC = null;
         }
         if (!hasLevel) {
           payload.waterLevel = null;
@@ -464,6 +467,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           }
           return payload.pumpOn_2 ? PumpState.RUNNING : PumpState.IDLE;
         })(),
+        motorManualMode: payload.motorManualMode,
         motorManualMode_2: payload.motorManualMode_2,
         humidityPct: payload.humidityPct === null ? null : (payload.humidityPct ?? undefined),
         ph: payload.ph === null ? null : (payload.ph ?? undefined),
@@ -473,6 +477,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         waterLevelPercent: payload.waterLevelPercent === null ? null : (payload.waterLevelPercent ?? undefined),
         waterVolumeLiters: payload.waterVolumeLiters === null ? null : (payload.waterVolumeLiters ?? undefined),
         reservoirTempC: payload.reservoirTempC === null ? null : (payload.reservoirTempC ?? undefined),
+        nftTempC: payload.nftTempC === null ? null : (payload.nftTempC ?? undefined),
         phDosingOn: payload.phDosingOn ?? undefined,
         nutritionADosingOn: payload.nutritionADosingOn ?? undefined,
         nutritionBDosingOn: payload.nutritionBDosingOn ?? undefined,
@@ -665,7 +670,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         durationSeconds_2: cycleProfile2.onDurationSeconds,
         ...(status ?? {}),
         pin_pump_relay: findPin("Relay - Water Pump", 27),
-        pin_pump_relay_2: findPin("Relay - Water Pump 2", -1),
+        pin_pump_relay_2: findPin("Relay - Water Pump 2", 14),
         pin_nutrition_a: findPin("Relay - Nutrition A", 33),
         pin_nutrition_b: findPin("Relay - Nutrition B", 26),
         pin_nutrition_c: findPin("Relay - Nutrition C", 0),
@@ -676,7 +681,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         pin_level_sensor_rx: ultrasonic?.pin ?? findPin("Water Level Sensor", 18),
         pin_level_sensor_tx: ultrasonic?.txPin ?? (devicePins && devicePins.length > 0 ? -1 : 5),
         pin_motor_button: findPin("Motor Override Button", 19),
-        pin_motor_button_2: findPin("Motor Override Button 2", -1),
+        pin_motor_button_2: findPin("Motor Override Button 2", 13),
         emptyDistanceCm: waterCalibration?.emptyDistanceCm ?? 50,
         fullDistanceCm: waterCalibration?.fullDistanceCm ?? 10,
         tankWidthCm: waterCalibration?.tankWidthCm ?? 50,

@@ -30,6 +30,7 @@ const SENSOR_ACTUATOR_TYPES = [
   "Water Level - Analog Sensor",
   "Humidity Sensor",
   "Water Temperature Sensor",
+  "Water Temperature Sensor 2 (NFT)",
   "Relay - Water Pump",
   "Relay - Water Pump 2",
   "Relay - Nutrition A",

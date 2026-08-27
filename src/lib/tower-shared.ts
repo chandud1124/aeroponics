@@ -92,6 +92,7 @@ export type LiveStatus = {
   waterLevelPercent?: number | null;
   waterVolumeLiters?: number | null;
   reservoirTempC: number | null;
+  nftTempC?: number | null;
   humidityPct?: number | null;
   towerTempC: number | null;
   flowRateLpm?: number | null;
@@ -128,6 +129,10 @@ export type LiveStatus = {
   vpd?: number | null;
   lightOn?: boolean | null;
   lightLux?: number | null;
+  motorManualModeUpdatedAt?: number | null;
+  motorManualModeUpdatedAt_2?: number | null;
+  pumpOnUpdatedAt?: number | null;
+  pumpOnUpdatedAt_2?: number | null;
 };
 
 export type SensorSnapshot = {
@@ -135,6 +140,7 @@ export type SensorSnapshot = {
   deviceId?: string;
   timestamp: number;
   reservoirTempC: number | null;
+  nftTempC?: number | null;
   ph: number | null;
   ec: number | null;
   waterLevel: "LOW" | "MEDIUM" | "FULL" | null;

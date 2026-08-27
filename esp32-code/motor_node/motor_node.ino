@@ -54,9 +54,9 @@ const char* WIFI_SSID     = "I am Not A Witch I am Your Wifi";
 const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend API
-const char* API_BASE_URL  = "https://hydroponics.chandugowda.site";
-const char* DEVICE_ID      = "device-w7p329";
-const char* DEVICE_SECRET  = "54364796ead0fe885adcea29c48267cf462e5c163fb1ac77";
+const char* API_BASE_URL = "https://hydroponics.chandugowda.site";
+const char* DEVICE_ID     = "device-ry5fbc";
+const char* DEVICE_SECRET = "32044676ac399a0f383ccc4f9693001a8163ebc228abbf2c";
 
 // Timing Intervals
 const unsigned long IV_SCHEDULE     = 60000UL;
@@ -78,6 +78,47 @@ unsigned long tsLastWifiCheck      = 0;
 unsigned long tsLastWifiAttempt    = 0;
 unsigned long tsLastWdtFeed        = 0;
 unsigned long wifiBackoffMs        = 5000UL;
+
+// Dynamic pin mappings for buttons
+int PIN_AUTO_MODE_BUTTON = 23;  // Global Auto mode toggle button
+int PIN_PUMP1_BUTTON     = 19;  // Pump 1 manual toggle button
+int PIN_PUMP2_BUTTON     = 13;  // Pump 2 manual toggle button
+
+struct DebouncedButton {
+  int pin;
+  unsigned long lastDebounceMs = 0;
+  bool lastReading = HIGH;
+  bool state = HIGH;
+
+  void setup(int pinNumber) {
+    pin = pinNumber;
+    if (pin > 0) {
+      pinMode(pin, INPUT_PULLUP);
+    }
+  }
+
+  bool update(unsigned long now) {
+    if (pin <= 0) return false;
+    bool readVal = digitalRead(pin);
+    if (readVal != lastReading) {
+      lastDebounceMs = now;
+      lastReading = readVal;
+    }
+    if ((now - lastDebounceMs) >= 50UL) {
+      if (readVal != state) {
+        state = readVal;
+        if (state == LOW) { // Pressed (Active Low)
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+};
+
+DebouncedButton btnAutoMode;
+DebouncedButton btnPump1;
+DebouncedButton btnPump2;
 
 // Schedule struct
 struct PumpSchedule {
@@ -136,11 +177,6 @@ struct PumpEngine {
   String faultCode = "OK";
   bool lastPumpOnState = false;
 
-  // Button Debouncing
-  unsigned long btnLastDebounceMs = 0;
-  bool btnLastReading = HIGH;
-  bool btnState = HIGH;
-
   const char* nvsNs;
 
   void init(int pumpIdx, int defaultRelayPin, int defaultBtnPin, const char* ns) {
@@ -152,11 +188,9 @@ struct PumpEngine {
 
   void setupPins() {
     if (pinPumpRelay > 0) {
+      bool level = RELAY_ACTIVE_HIGH ? false : true;
+      digitalWrite(pinPumpRelay, level);
       pinMode(pinPumpRelay, OUTPUT);
-      stopPumpCycle();
-    }
-    if (pinMotorButton > 0) {
-      pinMode(pinMotorButton, INPUT_PULLUP);
     }
   }
 
@@ -176,32 +210,6 @@ struct PumpEngine {
     }
     status.pumpOn = true;
     status.flowing = true;
-  }
-
-  void handleManualButtons(unsigned long now) {
-    if (pinMotorButton <= 0) return;
-    bool readVal = digitalRead(pinMotorButton);
-    if (readVal != btnLastReading) {
-      btnLastDebounceMs = now;
-      btnLastReading = readVal;
-    }
-    if ((now - btnLastDebounceMs) >= 50UL) {
-      if (readVal != btnState) {
-        btnState = readVal;
-        if (btnState == LOW) { // Button Pressed
-          if (motorManualMode == MANUAL_FORCE_ON) {
-            motorManualMode = MANUAL_FORCE_OFF;
-            Serial.printf("[Button P%d] Forced Pump OFF\n", pumpIndex);
-          } else if (motorManualMode == MANUAL_FORCE_OFF) {
-            motorManualMode = MANUAL_AUTO;
-            Serial.printf("[Button P%d] Resumed Auto Schedule\n", pumpIndex);
-          } else {
-            motorManualMode = MANUAL_FORCE_ON;
-            Serial.printf("[Button P%d] Forced Pump ON\n", pumpIndex);
-          }
-        }
-      }
-    }
   }
 
   void loadScheduleFromNVS() {
@@ -300,6 +308,17 @@ struct PumpEngine {
       curState = STATE_IDLE;
     }
 
+    if (!schedule.enabled) {
+      if (curState != STATE_IDLE) {
+        Serial.printf("[SCHED P%d] Auto mode disabled — stopping pump and resetting state\n", pumpIndex);
+        stopPumpCycle();
+        curState = STATE_IDLE;
+        status.fault = "OK";
+        faultCode = "OK";
+      }
+      return;
+    }
+
     if (curState != prevState) {
       Serial.printf("[SM P%d] %s → %s\n", pumpIndex, STATE_NAMES[prevState], STATE_NAMES[curState]);
       prevState = curState;
@@ -315,10 +334,13 @@ struct PumpEngine {
         break;
       }
       case STATE_CHECK_WATER: {
-        if (!sensors.levelValid || sensors.waterLevel == "LOW") {
-          Serial.printf("[CHECK P%d] Reservoir level unsafe — blocking pump\n", pumpIndex);
-          enterFault(now, sensors.levelValid ? "LOW_WATER" : "LEVEL_SENSOR_FAIL");
+        if (sensors.waterLevel == "LOW") {
+          Serial.printf("[CHECK P%d] Reservoir level low — blocking pump\n", pumpIndex);
+          enterFault(now, "LOW_WATER");
           return;
+        }
+        if (!sensors.levelValid) {
+          Serial.printf("[WARNING P%d] Level sensor invalid or missing — running anyway (no sensor mode)\n", pumpIndex);
         }
         pumpStartMs = now;
         curState    = STATE_PUMP_ON;
@@ -351,7 +373,7 @@ struct PumpEngine {
           curState = STATE_STOPPING;
         }
         
-        if (!sensors.levelValid || sensors.waterLevel == "LOW") {
+        if (sensors.waterLevel == "LOW") {
           Serial.printf("[SAFETY P%d] Reservoir went low during run! Force shutdown.\n", pumpIndex);
           enterFault(now, "DRY_RUN_TRIPPED");
         }
@@ -400,11 +422,20 @@ struct PumpEngine {
   }
 
   void stateManual(unsigned long now) {
-    (void)now;
     if (motorManualMode == MANUAL_FORCE_ON) {
-      startPumpCycle();
+      if (!status.pumpOn) {
+        Serial.printf("[MANUAL P%d] Pump started\n", pumpIndex);
+        pumpStartMs = now;
+        startPumpCycle();
+      }
     } else if (motorManualMode == MANUAL_FORCE_OFF) {
-      stopPumpCycle();
+      if (status.pumpOn) {
+        unsigned long durMs = now - pumpStartMs;
+        stopPumpCycle();
+        Serial.printf("[MANUAL P%d] Pump stopped — runtime %.1fs\n", pumpIndex, durMs / 1000.0f);
+        logPumpCycle(durMs / 1000.0f, true, "MANUAL", pumpIndex);
+        pumpStartMs = 0;
+      }
     }
   }
 };
@@ -425,13 +456,17 @@ void setup() {
   Serial.println(F("╚══════════════════════════════════════╝\n"));
 
   pump1.init(1, 27, 19, "pump1");
-  pump2.init(2, -1, -1, "pump2");
+  pump2.init(2, 14, 13, "pump2");
 
   pump1.loadScheduleFromNVS();
   pump2.loadScheduleFromNVS();
 
   pump1.setupPins();
   pump2.setupPins();
+
+  btnAutoMode.setup(PIN_AUTO_MODE_BUTTON);
+  btnPump1.setup(PIN_PUMP1_BUTTON);
+  btnPump2.setup(PIN_PUMP2_BUTTON);
 
   // Watchdog
   esp_task_wdt_config_t wdtCfg = {
@@ -455,6 +490,57 @@ void setup() {
 
   tsLastScheduleFetch = millis() - IV_SCHEDULE;
   tsLastStatusPost = millis();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+//  GLOBAL MANUAL BUTTON ACTIONS
+// ─────────────────────────────────────────────────────────────────────
+void handleGlobalButtons(unsigned long now) {
+  // 1. Auto mode button: toggles auto/manual mode on both pumps
+  if (btnAutoMode.update(now)) {
+    bool eitherManual = (pump1.motorManualMode != MANUAL_AUTO || pump2.motorManualMode != MANUAL_AUTO);
+    if (eitherManual) {
+      pump1.motorManualMode = MANUAL_AUTO;
+      pump2.motorManualMode = MANUAL_AUTO;
+      Serial.println("[Button Auto] Switched BOTH pumps to AUTO mode");
+    } else {
+      pump1.motorManualMode = MANUAL_FORCE_OFF;
+      pump2.motorManualMode = MANUAL_FORCE_OFF;
+      Serial.println("[Button Auto] Switched BOTH pumps to MANUAL mode (OFF)");
+    }
+  }
+
+  // 2. Pump 1 manual button: toggles pump 1 on/off in manual mode
+  if (btnPump1.update(now)) {
+    if (pump1.motorManualMode == MANUAL_AUTO) {
+      pump1.motorManualMode = MANUAL_FORCE_ON;
+      Serial.println("[Button P1] Switched to MANUAL mode and turned ON");
+    } else {
+      if (pump1.motorManualMode == MANUAL_FORCE_ON) {
+        pump1.motorManualMode = MANUAL_FORCE_OFF;
+        Serial.println("[Button P1] Manual mode: Turned OFF");
+      } else {
+        pump1.motorManualMode = MANUAL_FORCE_ON;
+        Serial.println("[Button P1] Manual mode: Turned ON");
+      }
+    }
+  }
+
+  // 3. Pump 2 manual button: toggles pump 2 on/off in manual mode
+  if (btnPump2.update(now)) {
+    if (pump2.motorManualMode == MANUAL_AUTO) {
+      pump2.motorManualMode = MANUAL_FORCE_ON;
+      Serial.println("[Button P2] Switched to MANUAL mode and turned ON");
+    } else {
+      if (pump2.motorManualMode == MANUAL_FORCE_ON) {
+        pump2.motorManualMode = MANUAL_FORCE_OFF;
+        Serial.println("[Button P2] Manual mode: Turned OFF");
+      } else {
+        pump2.motorManualMode = MANUAL_FORCE_ON;
+        Serial.println("[Button P2] Manual mode: Turned ON");
+      }
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -511,8 +597,7 @@ void loop() {
   }
 
   // Button override checking
-  pump1.handleManualButtons(now);
-  pump2.handleManualButtons(now);
+  handleGlobalButtons(now);
 
   // State Machine run
   pump1.runStateMachine(now);
@@ -670,13 +755,16 @@ bool fetchHandshakeAndSync() {
   bool pinChanged = false;
   if (p_pump > 0 && p_pump != pump1.pinPumpRelay) { pump1.pinPumpRelay = p_pump; pinChanged = true; }
   if (p_pump2 >= 0 && p_pump2 != pump2.pinPumpRelay) { pump2.pinPumpRelay = p_pump2; pinChanged = true; }
-  if (p_motor > 0 && p_motor != pump1.pinMotorButton) { pump1.pinMotorButton = p_motor; pinChanged = true; }
-  if (p_motor2 >= 0 && p_motor2 != pump2.pinMotorButton) { pump2.pinMotorButton = p_motor2; pinChanged = true; }
+  if (p_motor > 0 && p_motor != PIN_PUMP1_BUTTON) { PIN_PUMP1_BUTTON = p_motor; pinChanged = true; }
+  if (p_motor2 >= 0 && p_motor2 != PIN_PUMP2_BUTTON) { PIN_PUMP2_BUTTON = p_motor2; pinChanged = true; }
   
   if (pinChanged) {
     Serial.println("[GPIO] Re-configuring ESP32 pins from backend handshake...");
     pump1.setupPins();
     pump2.setupPins();
+    btnAutoMode.setup(PIN_AUTO_MODE_BUTTON);
+    btnPump1.setup(PIN_PUMP1_BUTTON);
+    btnPump2.setup(PIN_PUMP2_BUTTON);
   }
 
   // Extract status of remote sensors (pH, level, etc.) for safety check

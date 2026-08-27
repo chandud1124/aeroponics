@@ -919,6 +919,16 @@ export function updateStatus(
   const humidity = patch.humidityPct !== undefined ? patch.humidityPct : currentStatus.humidityPct;
   const calcVpd = calculateVpd(airTemp, humidity);
 
+  const motorManualModeChanged = patch.motorManualMode !== undefined && patch.motorManualMode !== currentStatus.motorManualMode;
+  const motorManualMode2Changed = patch.motorManualMode_2 !== undefined && patch.motorManualMode_2 !== currentStatus.motorManualMode_2;
+  const pumpOnChanged = patch.pumpOn !== undefined && patch.pumpOn !== currentStatus.pumpOn;
+  const pumpOn2Changed = patch.pumpOn_2 !== undefined && patch.pumpOn_2 !== currentStatus.pumpOn_2;
+
+  const motorManualModeUpdatedAt = motorManualModeChanged ? Date.now() : currentStatus.motorManualModeUpdatedAt ?? null;
+  const motorManualModeUpdatedAt_2 = motorManualMode2Changed ? Date.now() : currentStatus.motorManualModeUpdatedAt_2 ?? null;
+  const pumpOnUpdatedAt = pumpOnChanged ? Date.now() : currentStatus.pumpOnUpdatedAt ?? null;
+  const pumpOnUpdatedAt_2 = pumpOn2Changed ? Date.now() : currentStatus.pumpOnUpdatedAt_2 ?? null;
+
   const mergedStatus = {
     ...createBaseStatus(new Date(), deviceId),
     ...currentStatus,
@@ -929,6 +939,10 @@ export function updateStatus(
     telemetryUpdatedAt,
     heartbeatUpdatedAt,
     lastRunISO: resolvedLastRunISO,
+    motorManualModeUpdatedAt,
+    motorManualModeUpdatedAt_2,
+    pumpOnUpdatedAt,
+    pumpOnUpdatedAt_2,
   };
   const isOnline = isFresh(getLatestDeviceSignalAt(mergedStatus));
 

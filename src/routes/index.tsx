@@ -423,70 +423,100 @@ function Index() {
     fetchDevices().then((d) => d && setDevices(d));
   }, [mounted, activeTab]);
 
-  const navItems = [
-    { id: "status", label: "Dashboard", icon: LayoutDashboard },
-    { id: "analytics", label: "Sensor History", icon: LineChart },
-    { id: "controls", label: "Controls", icon: Settings },
-    { id: "crops", label: "Crops Manager", icon: Sprout, badge: "3 Active" },
-    { id: "nft", label: "NFT Channels", icon: Grid },
-    { id: "history", label: "Channels History", icon: History },
-    { id: "nursery", label: "Nursery Trays", icon: Warehouse },
-    { id: "harvested", label: "Harvested", icon: TrendingUp },
-    { id: "water", label: "Reservoir & Water", icon: Droplet },
-    { id: "nutrition", label: "Nutrition Dosing", icon: FlaskConical },
-    { id: "devices", label: "Hardware Remapper", icon: Cpu, badge: String(devices.length) },
-    { id: "plan", label: "Watering Plan", icon: Clock },
-    { id: "stats", label: "Irrigation Stats", icon: BarChart3 },
-    { id: "ai", label: "AI Insights", icon: Zap },
-    { id: "camera", label: "Visual AI Camera", icon: Camera },
-    { id: "readings", label: "Manual logs", icon: FileText },
+  const navCategories = [
+    {
+      title: "Overview & AI",
+      items: [
+        { id: "status", label: "Dashboard Status", icon: LayoutDashboard },
+        { id: "camera", label: "Visual AI Camera", icon: Camera },
+        { id: "ai", label: "AI Insights", icon: Zap },
+      ]
+    },
+    {
+      title: "Crop Management",
+      items: [
+        { id: "crops", label: "Crops Manager", icon: Sprout, badge: "3 Active" },
+        { id: "nursery", label: "Nursery Trays", icon: Warehouse },
+        { id: "nft", label: "NFT Channels", icon: Grid },
+        { id: "history", label: "Channels History", icon: History },
+        { id: "harvested", label: "Harvested Log", icon: TrendingUp },
+      ]
+    },
+    {
+      title: "Telemetry & Logs",
+      items: [
+        { id: "analytics", label: "Sensor History", icon: LineChart },
+        { id: "stats", label: "Irrigation Stats", icon: BarChart3 },
+        { id: "readings", label: "Manual Logs", icon: FileText },
+      ]
+    },
+    {
+      title: "Hardware & Control",
+      items: [
+        { id: "controls", label: "Actuator Controls", icon: Settings },
+        { id: "plan", label: "Watering Plan", icon: Clock },
+        { id: "nutrition", label: "Nutrition Dosing", icon: FlaskConical },
+        { id: "water", label: "Reservoir & Water", icon: Droplet },
+        { id: "devices", label: "Hardware Remapper", icon: Cpu, badge: String(devices.length) },
+      ]
+    }
   ];
+
+  const navItems = navCategories.flatMap((c) => c.items);
 
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-background flex">
         {/* Designer Sidebar */}
-        <aside className="w-64 bg-card border-r border-border flex-col justify-between shrink-0 hidden md:flex sticky top-0 h-screen z-10">
-          <div className="p-5 space-y-6 overflow-y-auto">
+        <aside className="w-64 bg-card border-r border-border flex flex-col justify-between shrink-0 hidden md:flex sticky top-0 h-screen z-10">
+          <div className="p-5 space-y-6 overflow-y-auto flex-1">
             {/* Branding Header */}
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+            <div className="flex items-center gap-3 border-b border-border/40 pb-4">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm shrink-0">
                 <Sprout className="h-5 w-5 text-emerald-300 animate-pulse" />
               </div>
               <div>
                 <h1 className="text-sm font-bold tracking-tight text-foreground">PolyHouse ERP</h1>
-                <span className="text-[10px] text-muted-foreground block font-medium">IoT Operations Center</span>
+                <span className="text-[10px] text-muted-foreground block font-semibold">IoT Operations Center</span>
               </div>
             </div>
 
-            {/* Nav list */}
-            <nav className="space-y-1">
-              {navItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold transition-all ${
-                    activeTab === item.id
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <item.icon className="h-4 w-4 shrink-0" />
-                    <span>{item.label}</span>
-                  </div>
-                  {item.badge && (
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
-                      activeTab === item.id ? "bg-white/20 text-white" : "bg-primary/10 text-primary"
-                    }`}>
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
+            {/* Nav Categories */}
+            <div className="space-y-5">
+              {navCategories.map((category) => (
+                <div key={category.title} className="space-y-1.5">
+                  <span className="text-[9px] font-bold text-muted-foreground/80 uppercase tracking-wider px-2 block">
+                    {category.title}
+                  </span>
+                  <nav className="space-y-0.5">
+                    {category.items.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => setActiveTab(item.id)}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                          activeTab === item.id
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <item.icon className="h-3.5 w-3.5 shrink-0" />
+                          <span>{item.label}</span>
+                        </div>
+                        {item.badge && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+                            activeTab === item.id ? "bg-white/20 text-white" : "bg-primary/10 text-primary"
+                          }`}>
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </nav>
+                </div>
               ))}
-            </nav>
+            </div>
           </div>
-
         </aside>
 
         {/* Main Content Area */}
@@ -494,11 +524,11 @@ function Index() {
           {/* Top Mobile Bar */}
           <header className="border-b border-border bg-card md:hidden p-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Sprout className="h-5 w-5 text-primary" />
+              <Sprout className="h-5 w-5 text-primary animate-pulse" />
               <span className="text-sm font-bold">PolyHouse ERP</span>
             </div>
             <Select value={activeTab} onValueChange={setActiveTab}>
-              <SelectTrigger className="w-40 h-8 text-xs">
+              <SelectTrigger className="w-44 h-8 text-xs">
                 <SelectValue placeholder="Module..." />
               </SelectTrigger>
               <SelectContent>

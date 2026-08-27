@@ -498,7 +498,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
             <Badge variant="outline" className="text-2xs">Target pH 5.5–6.5 | EC 0.8–1.2</Badge>
           </div>
           
-          <div className="h-80 w-full">
+          <div className="h-64 w-full">
             <ChartContainer config={{ 
               ph: { label: "pH Value", color: "#6366f1" },
               ec: { label: "EC Index", color: "#f59e0b" }
@@ -531,7 +531,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
             <Badge variant="outline" className="text-2xs">Comfort: 20–26°C | Humidity 40–90%</Badge>
           </div>
           
-          <div className="h-80 w-full">
+          <div className="h-64 w-full">
             <ChartContainer config={{ 
               temp: { label: "Water Temp", color: "#0ea5e9" },
               humidity: { label: "Air Humidity", color: "#10b981" }

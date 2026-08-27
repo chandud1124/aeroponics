@@ -14,15 +14,17 @@
 // ─────────────────────────────────────────────────────────────────────
 #define PH_PIN         2
 #define TDS_PIN        4
-#define TEMP_PIN       16   // DHT22 Air Temperature / Humidity sensor
-#define WATER_TEMP_PIN 15   // Waterproof DS18B20 Water Temperature sensor
+#define TEMP_PIN       15   // DHT22 Air Temperature / Humidity sensor
+#define TEMP1_PIN      16   // Waterproof DS18B20 Water Temperature (Tank)
+#define TEMP2_PIN      17   // Waterproof DS18B20 Water Temperature (NFT Channel)
 #define TRIG_PIN       5
 #define ECHO_PIN       18
 
 int PIN_PH_SENSOR         = PH_PIN;
 int PIN_EC_SENSOR         = TDS_PIN;
 int PIN_TEMP_SENSOR       = TEMP_PIN;
-int PIN_WATER_TEMP_SENSOR = WATER_TEMP_PIN;
+int PIN_WATER_TEMP_SENSOR = TEMP1_PIN;
+int PIN_NFT_TEMP_SENSOR   = TEMP2_PIN;
 int PIN_LEVEL_SENSOR_TX   = TRIG_PIN;
 int PIN_LEVEL_SENSOR_RX   = ECHO_PIN;
 
@@ -61,8 +63,10 @@ const unsigned long API_TIMEOUT_MS  = 8000UL;
 
 // Globals
 DHT dht(TEMP_PIN, DHT22);
-OneWire oneWireWaterTemp(WATER_TEMP_PIN);
-DallasTemperature waterTempSensor(&oneWireWaterTemp);
+OneWire oneWireWaterTemp1(TEMP1_PIN);
+DallasTemperature waterTempSensor1(&oneWireWaterTemp1);
+OneWire oneWireWaterTemp2(TEMP2_PIN);
+DallasTemperature waterTempSensor2(&oneWireWaterTemp2);
 Preferences prefs;
 const char* NVS_NS         = "sensorNode";
 const char* NVS_TIME_CACHE = "timeCache";
@@ -86,6 +90,7 @@ struct SensorState {
   float phValue     = 7.0f;
   float ecValue     = 1.0f;
   float waterTempC  = 24.5f;
+  float nftTempC    = 24.5f;
   float waterDistanceCm   = -1.0f;
   float waterLevelPercent = 0.0f;
   float waterVolumeLiters = 0.0f;
@@ -94,6 +99,7 @@ struct SensorState {
   bool phValid       = false;
   bool ecValid       = false;
   bool levelValid    = false;
+  bool nftTempValid  = false;
 } sensors;
 
 // Calibration Defaults
@@ -119,7 +125,8 @@ void setup() {
 
   setupPinModes();
   dht.begin();
-  waterTempSensor.begin();
+  waterTempSensor1.begin();
+  waterTempSensor2.begin();
 
   // Watchdog
   esp_task_wdt_config_t wdtCfg = {
@@ -229,6 +236,7 @@ void setupPinModes() {
   if (PIN_LEVEL_SENSOR_RX > 0) pinMode(PIN_LEVEL_SENSOR_RX, INPUT);
   if (PIN_TEMP_SENSOR > 0) pinMode(PIN_TEMP_SENSOR, INPUT_PULLUP);
   if (PIN_WATER_TEMP_SENSOR > 0) pinMode(PIN_WATER_TEMP_SENSOR, INPUT_PULLUP);
+  if (PIN_NFT_TEMP_SENSOR > 0) pinMode(PIN_NFT_TEMP_SENSOR, INPUT_PULLUP);
 }
 
 void readSensors() {
@@ -247,25 +255,44 @@ void readSensors() {
     Serial.printf("[DHT22] Air Hum: %.1f%% | Air Temp: %.1fC\n", hum, airTemp);
   } else {
     sensors.humidityValid = false;
-    Serial.println("[DHT22] Sensor not connected or read error");
+    Serial.println("[DHT22] Air sensor not connected or read error");
   }
 
   // Waterproof DS18B20 Water Temperature sensor (Water Tank)
   float wTemp = NAN;
   bool wTempOk = false;
   if (PIN_WATER_TEMP_SENSOR > 0) {
-    waterTempSensor.requestTemperatures();
-    wTemp = waterTempSensor.getTempCByIndex(0);
+    waterTempSensor1.requestTemperatures();
+    wTemp = waterTempSensor1.getTempCByIndex(0);
     wTempOk = (wTemp != DEVICE_DISCONNECTED_C && wTemp > -40.0f && wTemp < 85.0f);
   }
 
   if (wTempOk) {
     sensors.waterTempC = wTemp;
-    Serial.printf("[DS18B20] Waterproof Probe Water Temp: %.1fC\n", wTemp);
+    Serial.printf("[DS18B20-1] Water Tank Temp: %.1fC\n", wTemp);
   } else {
     // Fallback to DHT22 air temperature or default value
     sensors.waterTempC = (!isnan(airTemp)) ? airTemp : 24.5f;
-    Serial.printf("[DS18B20] Probe error or disabled, falling back to: %.1fC\n", sensors.waterTempC);
+    Serial.printf("[DS18B20-1] Tank Probe error or disabled, falling back to: %.1fC\n", sensors.waterTempC);
+  }
+
+  // Waterproof DS18B20 Water Temperature sensor (NFT Channel)
+  float nftTemp = NAN;
+  bool nftTempOk = false;
+  if (PIN_NFT_TEMP_SENSOR > 0) {
+    waterTempSensor2.requestTemperatures();
+    nftTemp = waterTempSensor2.getTempCByIndex(0);
+    nftTempOk = (nftTemp != DEVICE_DISCONNECTED_C && nftTemp > -40.0f && nftTemp < 85.0f);
+  }
+
+  if (nftTempOk) {
+    sensors.nftTempC = nftTemp;
+    sensors.nftTempValid = true;
+    Serial.printf("[DS18B20-2] NFT Channel Water Temp: %.1fC\n", nftTemp);
+  } else {
+    sensors.nftTempC = sensors.waterTempC; // Fallback to Water Tank Temperature
+    sensors.nftTempValid = false;
+    Serial.printf("[DS18B20-2] NFT Probe error or disabled, falling back to: %.1fC\n", sensors.nftTempC);
   }
 
   // pH (analog)
@@ -501,10 +528,16 @@ void postStatus() {
   
   if (sensors.humidityValid) {
     body += "\"humidityPct\":" + String(sensors.humidityPct, 1) + ",";
-    body += "\"reservoirTempC\":" + String(sensors.waterTempC, 1) + ",";
   } else {
     body += "\"humidityPct\":null,";
-    body += "\"reservoirTempC\":null,";
+  }
+  
+  body += "\"reservoirTempC\":" + String(sensors.waterTempC, 1) + ",";
+  
+  if (sensors.nftTempValid) {
+    body += "\"nftTempC\":" + String(sensors.nftTempC, 1) + ",";
+  } else {
+    body += "\"nftTempC\":null,";
   }
   
   if (sensors.phValid) {

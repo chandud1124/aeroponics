@@ -117,14 +117,19 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
         {/* Water Temp & Level Card */}
         <Card className="p-4 sm:p-5 flex flex-col justify-between border-border/85 bg-card/65 shadow-sm hover:border-primary/40 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold tracking-wider uppercase text-muted-foreground">Reservoir Water</span>
+            <span className="text-xs font-semibold tracking-wider uppercase text-muted-foreground">Water Temperatures</span>
             <Thermometer className="h-5 w-5 text-sky-500" />
           </div>
-          <div className="mt-4">
-            <div className="text-xl font-bold tracking-tight flex items-baseline gap-1.5">
-              <span>{status.reservoirTempC != null ? `${status.reservoirTempC.toFixed(1)}°C` : "——"}</span>
+          <div className="mt-4 space-y-1.5">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-muted-foreground font-medium">Tank Temp:</span>
+              <span className="font-bold text-foreground">{status.reservoirTempC != null ? `${status.reservoirTempC.toFixed(1)}°C` : "——"}</span>
             </div>
-            <div className="mt-1">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-muted-foreground font-medium">NFT Temp:</span>
+              <span className="font-bold text-foreground">{status.nftTempC != null ? `${status.nftTempC.toFixed(1)}°C` : "——"}</span>
+            </div>
+            <div className="mt-2 pt-1 border-t border-border/40">
               <Badge className={`border ${getWaterLevelColor(status.waterLevel)}`}>
                 Level: {status.waterLevel ?? "UNKNOWN"}
               </Badge>

@@ -210,30 +210,48 @@ export function ManualControlPanel({
   controlsAllowed?: boolean;
 }) {
   const [loading, setLoading] = useState<string | null>(null);
-  const [manualModes, setManualModes] = useState({ motor: "AUTO", ph: "AUTO", nutrition: "AUTO" });
+  const [manualModes, setManualModes] = useState({ motor: "AUTO", motor_2: "AUTO", ph: "AUTO", nutrition: "AUTO" });
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setManualModes({
       motor: status?.motorManualMode ?? "AUTO",
+      motor_2: status?.motorManualMode_2 ?? "AUTO",
       ph: status?.phManualMode ?? "AUTO",
       nutrition: status?.nutritionManualMode ?? "AUTO",
     });
-  }, [status?.motorManualMode, status?.phManualMode, status?.nutritionManualMode]);
+  }, [status?.motorManualMode, status?.motorManualMode_2, status?.phManualMode, status?.nutritionManualMode]);
 
-  const toggleMode = async (pumpKey: "motor" | "ph" | "nutrition", currentMode: string) => {
+  const toggleMode = async (pumpKey: "motor" | "motor_2" | "ph" | "nutrition", currentMode: string) => {
     if (!controlsAllowed || !deviceId) return;
     const nextMode = currentMode === "AUTO" ? "FORCED_OFF" : "AUTO";
     setLoading(pumpKey);
     try {
-      const endpoint = pumpKey === "motor" ? "/api/manual-pump" : pumpKey === "ph" ? "/api/manual-ph-down" : "/api/manual-nutrition";
+      const endpoint = pumpKey === "motor" 
+        ? "/api/manual-pump" 
+        : pumpKey === "motor_2"
+          ? "/api/manual-pump-2"
+          : pumpKey === "ph"
+            ? "/api/manual-ph-down"
+            : "/api/manual-nutrition";
+
       const headers = { "Content-Type": "application/json", "x-device-id": deviceId };
+      const body = pumpKey === "motor" || pumpKey === "motor_2"
+        ? { action: nextMode === "AUTO" ? "auto" : "manual" }
+        : { action: nextMode === "AUTO" ? "auto" : "manual", desiredOn: false };
+
       await fetch(endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify(pumpKey === "motor" ? { action: nextMode === "AUTO" ? "auto" : "manual" } : { action: nextMode === "AUTO" ? "auto" : "manual", desiredOn: false }),
+        body: JSON.stringify(body),
       });
       setManualModes((current) => ({ ...current, [pumpKey]: nextMode }));
-      toast.success(`Dosing mode updated successfully!`);
+      toast.success(`Control mode updated successfully!`);
     } catch {
       toast.error("Failed to switch pump mode");
     } finally {
@@ -241,17 +259,22 @@ export function ManualControlPanel({
     }
   };
 
-  const handlePulseRelay = async (type: "pump" | "ph" | "nutrition", action: "on" | "off") => {
+  const handlePulseRelay = async (type: "pump" | "pump_2" | "ph" | "nutrition", action: "on" | "off") => {
     if (!controlsAllowed || !deviceId) return;
-    let endpoint = "/api/manual-irrigation";
+    let endpoint = "/api/manual-pump";
+    if (type === "pump_2") endpoint = "/api/manual-pump-2";
     if (type === "ph") endpoint = "/api/manual-ph-down";
     if (type === "nutrition") endpoint = "/api/manual-nutrition";
+
+    const requestAction = (type === "pump" || type === "pump_2")
+      ? (action === "on" ? "start" : "stop")
+      : action;
 
     try {
       await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-device-id": deviceId },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action: requestAction }),
       });
       toast.success(`Triggered manual override: ${type} ${action}`);
     } catch {
@@ -259,7 +282,18 @@ export function ManualControlPanel({
     }
   };
 
+  const formatDuration = (updatedAtMs: number | null | undefined) => {
+    if (!updatedAtMs) return "N/A";
+    const diffSec = Math.max(0, Math.floor((Date.now() - updatedAtMs) / 1000));
+    if (diffSec < 60) return `${diffSec}s`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ${diffSec % 60}s`;
+    const diffHr = Math.floor(diffMin / 60);
+    return `${diffHr}h ${diffMin % 60}m`;
+  };
+
   const motorMode = manualModes.motor;
+  const motor2Mode = manualModes.motor_2;
   const phMode = manualModes.ph;
   const nutriMode = manualModes.nutrition;
 
@@ -273,15 +307,32 @@ export function ManualControlPanel({
         <p className="text-xs text-muted-foreground mt-0.5">Override automatic settings to test, flush, or prime dosing pumps.</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-6">
-        {/* Irrigation Pump */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 md:gap-6">
+        {/* Irrigation Pump 1 */}
         <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
           <div className="space-y-1">
-            <span className="text-xs font-bold text-foreground block">Irrigation Mist Pump</span>
-            <span className="text-[10px] text-muted-foreground block">Misting loops and scheduled mist runs.</span>
+            <span className="text-xs font-bold text-foreground block">Mist Pump 1 (GPIO 27)</span>
+            <span className="text-[10px] text-muted-foreground block">Irrigation loops for main lines.</span>
           </div>
 
           <div className="space-y-3">
+            <div className="border-t border-border/40 pt-2 text-[10px] space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Status:</span>
+                <span className={`font-bold ${status?.pumpOn ? "text-emerald-500" : "text-slate-400"}`}>
+                  {status?.pumpOn ? "ON" : "OFF"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">State Duration:</span>
+                <span className="font-mono font-bold">{formatDuration(status?.pumpOnUpdatedAt)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Mode Time:</span>
+                <span className="font-mono font-bold text-slate-500">{formatDuration(status?.motorManualModeUpdatedAt)}</span>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
               <span className="text-[11px] font-semibold">Mode Override:</span>
               <Button
@@ -304,6 +355,62 @@ export function ManualControlPanel({
                 </Button>
                 <Button
                   onClick={() => handlePulseRelay("pump", "off")}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
+                >
+                  OFF
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Irrigation Pump 2 */}
+        <div className="bg-muted/30 border rounded-xl p-4 space-y-4 flex flex-col justify-between">
+          <div className="space-y-1">
+            <span className="text-xs font-bold text-foreground block">Mist Pump 2 (GPIO 14)</span>
+            <span className="text-[10px] text-muted-foreground block">Irrigation loops for secondary lines.</span>
+          </div>
+
+          <div className="space-y-3">
+            <div className="border-t border-border/40 pt-2 text-[10px] space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Status:</span>
+                <span className={`font-bold ${status?.pumpOn_2 ? "text-emerald-500" : "text-slate-400"}`}>
+                  {status?.pumpOn_2 ? "ON" : "OFF"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">State Duration:</span>
+                <span className="font-mono font-bold">{formatDuration(status?.pumpOnUpdatedAt_2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Mode Time:</span>
+                <span className="font-mono font-bold text-slate-500">{formatDuration(status?.motorManualModeUpdatedAt_2)}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-border/40 pt-2.5">
+              <span className="text-[11px] font-semibold">Mode Override:</span>
+              <Button
+                variant={motor2Mode === "AUTO" ? "outline" : "default"}
+                onClick={() => toggleMode("motor_2", motor2Mode)}
+                disabled={loading === "motor_2" || !controlsAllowed}
+                className="h-7 text-[10px] px-2 font-bold"
+              >
+                {motor2Mode === "AUTO" ? "Switch Manual" : "Switch Auto"}
+              </Button>
+            </div>
+
+            {motor2Mode !== "AUTO" && (
+              <div className="flex gap-2 border-t pt-2.5">
+                <Button
+                  onClick={() => handlePulseRelay("pump_2", "on")}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white text-[10px] h-7 font-bold"
+                >
+                  ON
+                </Button>
+                <Button
+                  onClick={() => handlePulseRelay("pump_2", "off")}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] h-7 font-bold"
                 >
                   OFF

@@ -22,6 +22,7 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
         ph: status.ph,
         ec: status.ec,
         reservoirTempC: status.reservoirTempC,
+        nftTempC: status.nftTempC,
         humidityPct: status.humidityPct,
       }]
     : [];
@@ -43,6 +44,7 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
             ph: pt.ph,
             ec: pt.ec,
             reservoirTempC: pt.reservoirTempC,
+            nftTempC: pt.nftTempC,
             humidityPct: pt.humidityPct,
             isSimulated: false,
           }));
@@ -176,6 +178,10 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
                   <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.2}/>
                   <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
                 </linearGradient>
+                <linearGradient id="colorNftTemp" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2}/>
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                </linearGradient>
                 <linearGradient id="colorHum" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2}/>
                   <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
@@ -190,7 +196,8 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
                 labelStyle={{ fontWeight: "bold" }}
               />
               <Legend wrapperStyle={{ fontSize: "10px", fontWeight: "bold", paddingTop: "10px" }} />
-              <Area yAxisId="left" type="monotone" dataKey="reservoirTempC" name="Water Temp (°C)" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#colorTemp)" />
+              <Area yAxisId="left" type="monotone" dataKey="reservoirTempC" name="Tank Temp (°C)" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#colorTemp)" />
+              <Area yAxisId="left" type="monotone" dataKey="nftTempC" name="NFT Temp (°C)" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorNftTemp)" />
               <Area yAxisId="right" type="monotone" dataKey="humidityPct" name="Air Humidity (%)" stroke="#22c55e" strokeWidth={2} fillOpacity={1} fill="url(#colorHum)" />
             </AreaChart>
           </ResponsiveContainer>
