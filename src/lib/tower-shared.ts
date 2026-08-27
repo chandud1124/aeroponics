@@ -331,8 +331,6 @@ export function compensateEc(ec: number | null | undefined, tempC: number | null
 export type CameraSettings = {
   rtspUrl: string;
   liveStreamUrl?: string;
-  ezvizAppKey: string;
-  ezvizAppSecret: string;
   autoCapture: boolean;
 };
 
@@ -342,4 +340,5 @@ export type CameraSnapshot = {
   imageUrl: string;
   analysis: string;
   healthStatus: "healthy" | "warning" | "alert";
+  timeOfDay?: "morning" | "evening";
 };

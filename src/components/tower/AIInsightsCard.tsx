@@ -33,7 +33,6 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
 
   // API Key management states
   const [showSettings, setShowSettings] = useState(false);
-  const [passcode, setPasscode] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -41,15 +40,13 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
 
   const loadSettings = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/settings`, {
-        headers: { "x-admin-passkey": passcode || "0990" }
-      });
+      const res = await fetch(`${API_BASE_URL}/api/settings`);
       if (res.ok) {
         const data = await res.json();
         setApiKey(data.geminiApiKey || "");
       }
     } catch (e) {
-      // Ignore auth errors during initial key check
+      // Ignore errors during initial key check
     }
   };
 
@@ -57,7 +54,7 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
     if (showSettings) {
       loadSettings();
     }
-  }, [showSettings, passcode]);
+  }, [showSettings]);
 
   const handleSaveKey = async () => {
     setSavingSettings(true);
@@ -66,14 +63,13 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
       const res = await fetch(`${API_BASE_URL}/api/settings`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "x-admin-passkey": passcode || "0990"
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ geminiApiKey: apiKey })
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "Unauthorized passcode");
+        throw new Error(data?.error || "Failed to save key");
       }
       toast.success("Gemini API Key saved successfully!");
       setShowSettings(false);
@@ -199,19 +195,7 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
               <Badge variant="outline" className="text-[10px]">Secure Storage</Badge>
             </div>
             
-            <div className="space-y-1">
-              <Label htmlFor="settings-passcode" className="text-[11px] font-bold">Admin Passcode</Label>
-              <Input
-                id="settings-passcode"
-                type="password"
-                placeholder="Enter passcode (default 0990)"
-                value={passcode}
-                onChange={(e) => setPasscode(e.target.value)}
-                className="h-8 text-xs font-mono"
-              />
-            </div>
-
-            <div className="space-y-1">
+             <div className="space-y-1">
               <Label htmlFor="settings-apikey" className="text-[11px] font-bold">Gemini API Key</Label>
               <div className="relative">
                 <Input
