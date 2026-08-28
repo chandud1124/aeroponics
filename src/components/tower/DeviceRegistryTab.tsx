@@ -84,19 +84,13 @@ export function DeviceRegistryTab() {
 
   const loadData = () => {
     setLoading(true);
-    fetch(`${window.location.origin}/api/admin/devices`, {
-      headers: { "x-admin-passkey": adminPasskey }
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Unauthorized passcode");
-        return res.json();
-      })
+    fetchDevices()
       .then((data) => {
-        if (data && data.devices) setDevices(data.devices);
+        setDevices(data);
       })
       .catch(() => {
         setDevices([]);
-        toast.error("Failed to load devices - verify Admin Passcode");
+        toast.error("Failed to load devices - sign in with an administrator account");
       })
       .finally(() => setLoading(false));
   };
@@ -105,7 +99,7 @@ export function DeviceRegistryTab() {
     loadData();
     const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
-  }, [adminPasskey]);
+  }, []);
 
   const handleRegisterDevice = async () => {
     if (!deviceName.trim()) {
@@ -278,10 +272,10 @@ export function DeviceRegistryTab() {
     if (!selectedDevice) return;
     try {
       const res = await fetch(`${window.location.origin}/api/admin/devices/${encodeURIComponent(selectedDevice.deviceId)}/pins`, {
+        credentials: "include",
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-passkey": adminPasskey,
         },
         body: JSON.stringify({ pins: devicePins }),
       });

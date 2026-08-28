@@ -14,9 +14,12 @@ import {
   plantCropRemote,
   harvestCropRemote,
   fetchHarvestHistory,
+  appendCropLifecycleEvent,
   type NftChannel,
   type NftCropEntry,
 } from "@/lib/tower-storage";
+import type { CropConfig } from "@/lib/tower-shared";
+import type { CropLifecycleEvent } from "@/lib/tower-shared";
 
 const SUGGESTED_CROPS_LIST = [
   "Green Lettuce",
@@ -50,7 +53,7 @@ const CROP_COLOR_PALETTE = [
   { bg: "bg-fuchsia-500/10 dark:bg-fuchsia-500/25", border: "border-fuchsia-500", text: "text-fuchsia-800 dark:text-fuchsia-200", dot: "bg-fuchsia-500" },
 ];
 
-function getCropStyle(cropName: string, active: boolean) {
+function getCropStyle(cropName: string, active: boolean, cropConfigs: CropConfig[]) {
   if (!cropName || !active) {
     return {
       bg: "bg-muted/10 hover:bg-muted/20 border-border/80 text-muted-foreground",
@@ -65,10 +68,7 @@ function getCropStyle(cropName: string, active: boolean) {
   let found = false;
 
   try {
-    const savedConfigs = typeof window !== "undefined" ? localStorage.getItem("polyhouse-crop-configs") : null;
-    if (savedConfigs) {
-      const configs = JSON.parse(savedConfigs) as { name: string; colorKey: string }[];
-      const config = configs.find((c) => c.name.toLowerCase() === nameKey.toLowerCase());
+      const config = cropConfigs.find((c) => c.name.toLowerCase() === nameKey.toLowerCase());
       if (config) {
         const keyMap: { [key: string]: number } = {
           emerald: 0,
@@ -86,7 +86,6 @@ function getCropStyle(cropName: string, active: boolean) {
           found = true;
         }
       }
-    }
   } catch (e) {
     // Ignore and fallback
   }
@@ -108,7 +107,19 @@ function getCropStyle(cropName: string, active: boolean) {
   };
 }
 
-export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string | null } = {}) {
+function channelLocation(channel: NftChannel) {
+  return {
+    polyhouse: channel.polyhouse,
+    block: channel.block,
+    row: channel.row,
+    stand: channel.stand,
+    level: channel.level,
+    channelIndex: channel.channelIndex,
+    holeConfig: channel.holeConfig,
+  };
+}
+
+export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initialChannelId?: string | null; cropConfigs?: CropConfig[] } = {}) {
   const [channels, setChannels] = useState<NftChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"grid" | "cards">("grid");
@@ -280,6 +291,19 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
 
       const updatedList = channels.map((c) => c.id === activeChannelId ? updatedChan : c);
       await saveNftChannels(updatedList);
+      for (const [index, crop] of validCrops.entries()) {
+        await appendCropLifecycleEvent({
+          id: `lifecycle-planted-${Date.now()}-${index}`,
+          type: "planted",
+          timestamp: new Date().toISOString(),
+          cropName: crop.cropName.trim(),
+          quantity: crop.count,
+          destinationId: updatedChan.id,
+          destinationName: updatedChan.name,
+          location: channelLocation(updatedChan),
+          notes: notes || "NFT channel planted",
+        });
+      }
       toast.success("Crop batch planted successfully!");
       loadData();
       closeForm();
@@ -303,6 +327,32 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
       }
 
       await harvestCropRemote(activeChannelId, yieldQty, wasteQty, avgWeightGrams, notes, harvestCultivar || undefined);
+      if (yieldQty > 0) {
+        await appendCropLifecycleEvent({
+          id: `lifecycle-harvested-${Date.now()}`,
+          type: "harvested",
+          timestamp: new Date().toISOString(),
+          cropName: harvestCultivar || activeChan?.cropName || "Unknown crop",
+          quantity: yieldQty,
+          sourceId: activeChannelId,
+          sourceName: activeChan?.name,
+          location: activeChan ? channelLocation(activeChan) : undefined,
+          notes: notes || "NFT crop harvested",
+        });
+      }
+      if (wasteQty > 0) {
+        await appendCropLifecycleEvent({
+          id: `lifecycle-removed-${Date.now()}`,
+          type: "removed",
+          timestamp: new Date().toISOString(),
+          cropName: harvestCultivar || activeChan?.cropName || "Unknown crop",
+          quantity: wasteQty,
+          sourceId: activeChannelId,
+          sourceName: activeChan?.name,
+          location: activeChan ? channelLocation(activeChan) : undefined,
+          notes: notes || "NFT harvest waste or defects",
+        });
+      }
       toast.success("Crop batch harvested successfully!");
       loadData();
       closeForm();
@@ -497,6 +547,20 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
       });
 
       await saveNftChannels(updatedList);
+      if (incidentType === "removal") {
+        const removedChannel = channels.find((channel) => channel.id === activeChannelId);
+        await appendCropLifecycleEvent({
+          id: `lifecycle-removed-${Date.now()}`,
+          type: "removed",
+          timestamp: new Date().toISOString(),
+          cropName: incidentCultivar,
+          quantity: incidentQty,
+          sourceId: activeChannelId,
+          sourceName: removedChannel?.name,
+          location: removedChannel ? channelLocation(removedChannel) : undefined,
+          notes: incidentDesc,
+        });
+      }
       toast.success(incidentType === "removal" ? "Plants removed & logged!" : "Incident logged successfully!");
       loadData();
       closeForm();
@@ -645,6 +709,19 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
       });
 
       await saveNftChannels(updatedList);
+      await appendCropLifecycleEvent({
+        id: `lifecycle-transferred-${Date.now()}`,
+        type: "transferred",
+        timestamp: new Date().toISOString(),
+        cropName: transferCultivar,
+        quantity: transferCount,
+        sourceId: sourceChan.id,
+        sourceName: sourceChan.name,
+        destinationId: targetChan.id,
+        destinationName: targetChan.name,
+        location: channelLocation(updatedTarget),
+        notes: "Transferred between NFT channels",
+      });
       toast.success(`Successfully shipped ${transferCount}x ${transferCultivar}!`);
       loadData();
       closeForm();
@@ -854,7 +931,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
       {/* Advanced Filters Panel */}
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-2xs md:flex-row md:items-center">
         {/* Search */}
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative flex-1 min-w-50">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search by name, crop, notes..."
@@ -975,7 +1052,7 @@ export function NftChannelsTab({ initialChannelId }: { initialChannelId?: string
                               const isGrowing = chan.status === "growing";
                               const cap = chan.capacity ?? 50;
                               const count = chan.currentCount ?? 0;
-                              const style = getCropStyle(chan.cropName, isGrowing);
+                              const style = getCropStyle(chan.cropName, isGrowing, cropConfigs);
 
                               return (
                                 <Button

@@ -8,11 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { QrCode, Sprout, ShoppingBag, Plus, Sparkles, Clipboard, Trash2, Edit3, Calendar, FileText, BarChart3, AlertTriangle, AlertCircle, History, Search } from "lucide-react";
 import { CameraQrScanner } from "@/components/tower/CameraQrScanner";
-
-export type GrowBagCropEntry = {
-  cropName: string;
-  count: number;
-};
+import {
+  fetchGrowBags,
+  fetchHarvestHistory,
+  saveGrowBags,
+  saveHarvestHistoryRemote,
+  appendCropLifecycleEvent,
+} from "@/lib/tower-storage";
+import { normalizeGrowBag } from "@/lib/tower-shared";
+import type { GrowBag, GrowBagCropEntry, GrowBagGrowthStage } from "@/lib/tower-shared";
 
 const SUGGESTED_CROPS_LIST = [
   "Green Lettuce",
@@ -35,23 +39,11 @@ const SUGGESTED_CROPS_LIST = [
   "Cherry Tomato Red"
 ];
 
-export type GrowBag = {
-  id: string;
-  name: string;
-  qrCode: string;
-  cropName: string;
-  crops?: GrowBagCropEntry[];
-  plantedAt: string | null;
-  harvestedAt: string | null;
-  notes: string;
-  status: "empty" | "growing" | "harvested";
-  capacity?: number;
-  currentCount?: number;
-  expectedHarvestISO?: string | null;
-  polyhouse?: string;
-  block?: string;
-  bagIndex?: string;
-};
+function growthStageLabel(stage?: GrowBagGrowthStage) {
+  if (stage === "ready-to-harvest") return "Ready to harvest";
+  if (stage === "fruiting") return "Fruiting";
+  return "Growing";
+}
 
 export function GrowBagsTab() {
   const [bags, setBags] = useState<GrowBag[]>([]);
@@ -66,7 +58,7 @@ export function GrowBagsTab() {
 
   // Forms states
   const [activeBagId, setActiveBagId] = useState<string | null>(null);
-  const [actionType, setActionType] = useState<"plant" | "harvest" | "add-bag" | "edit-bag" | "logs" | null>(null);
+  const [actionType, setActionType] = useState<"plant" | "harvest" | "add-bag" | "edit-bag" | "logs" | "details" | null>(null);
 
   const [bagIndexInput, setBagIndexInput] = useState("");
   const [cropName, setCropName] = useState("");
@@ -86,32 +78,29 @@ export function GrowBagsTab() {
 
   // Harvest measurements
   const [yieldQty, setYieldQty] = useState<number>(0);
+  const [yieldKg, setYieldKg] = useState<number>(0);
   const [wasteQty, setWasteQty] = useState<number>(0);
   const [avgWeightGrams, setAvgWeightGrams] = useState<number>(0);
   const [bagHarvestHistory, setBagHarvestHistory] = useState<any[]>([]);
 
-  const loadData = () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const savedBags = localStorage.getItem("polyhouse-grow-bags");
-      if (savedBags) {
-        setBags(JSON.parse(savedBags) as GrowBag[]);
-      } else {
-        // Seed default grow bags if none exist
-        const defaults: GrowBag[] = [
-          { id: "PH01-B01-Bag 1", name: "PH01-B01-Bag 1", qrCode: "PH01-B01-Bag 1", cropName: "Cherry Tomatoes", status: "growing", capacity: 8, currentCount: 6, plantedAt: new Date().toISOString(), polyhouse: "PH01", block: "B01", bagIndex: "1", notes: "Healthy growth" },
-          { id: "PH01-B01-Bag 2", name: "PH01-B01-Bag 2", qrCode: "PH01-B01-Bag 2", cropName: "", status: "empty", capacity: 8, currentCount: 0, polyhouse: "PH01", block: "B01", bagIndex: "2", notes: "" },
-        ];
-        setBags(defaults);
-        localStorage.setItem("polyhouse-grow-bags", JSON.stringify(defaults));
+      const [serverBags, savedHistory] = await Promise.all([fetchGrowBags(), fetchHarvestHistory()]);
+      const legacyBags = localStorage.getItem("polyhouse-grow-bags");
+      const bags = legacyBags ? JSON.parse(legacyBags) as GrowBag[] : serverBags;
+      if (legacyBags) {
+        await saveGrowBags(bags);
+        localStorage.removeItem("polyhouse-grow-bags");
       }
-
-      const savedHist = localStorage.getItem("polyhouse-harvest-history");
-      if (savedHist) {
-        setHarvestHistory(JSON.parse(savedHist));
+      const normalizedBags = bags.map(normalizeGrowBag);
+      if (JSON.stringify(normalizedBags) !== JSON.stringify(bags)) {
+        await saveGrowBags(normalizedBags);
       }
-    } catch {
-      // ignore
+      setBags(normalizedBags);
+      setHarvestHistory(savedHistory);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load grow-bag records");
     }
     setLoading(false);
   };
@@ -121,8 +110,8 @@ export function GrowBagsTab() {
   }, []);
 
   const saveBagsList = async (updatedList: GrowBag[]) => {
-    setBags(updatedList);
-    localStorage.setItem("polyhouse-grow-bags", JSON.stringify(updatedList));
+    const saved = await saveGrowBags(updatedList);
+    setBags(saved);
   };
 
   const closeForm = () => {
@@ -135,6 +124,7 @@ export function GrowBagsTab() {
     setBagIndexInput("");
     setCropsList([]);
     setYieldQty(0);
+    setYieldKg(0);
     setWasteQty(0);
     setAvgWeightGrams(0);
   };
@@ -153,6 +143,7 @@ export function GrowBagsTab() {
     setActiveBagId(bag.id);
     setActionType("harvest");
     setYieldQty(bag.currentCount || 0);
+    setYieldKg(0);
     setWasteQty(0);
     setAvgWeightGrams(0);
     setNotes("");
@@ -175,6 +166,25 @@ export function GrowBagsTab() {
     setBagHarvestHistory(filtered);
   };
 
+  const openDetailsForm = (bag: GrowBag) => {
+    setActiveBagId(bag.id);
+    setActionType("details");
+  };
+
+  const handleStageChange = async (bag: GrowBag, growthStage: GrowBagGrowthStage) => {
+    if (bag.growthStage === growthStage) return;
+    const changedAt = new Date().toISOString();
+    const updatedList = bags.map((item) => item.id === bag.id
+      ? {
+          ...item,
+          growthStage,
+          stageHistory: [...(item.stageHistory || []), { stage: growthStage, changedAt }],
+        }
+      : item);
+    await saveBagsList(updatedList);
+    toast.success(`${bag.name} stage changed to ${growthStage === "ready-to-harvest" ? "Ready to harvest" : growthStage}.`);
+  };
+
   const handlePlantConfirm = async () => {
     if (!activeBagId) return;
     if (!cropName.trim()) {
@@ -189,6 +199,8 @@ export function GrowBagsTab() {
         return {
           ...b,
           status: "growing" as const,
+          growthStage: "growing" as const,
+          stageHistory: [...(b.stageHistory || []), { stage: "growing" as const, changedAt: new Date().toISOString() }],
           cropName: cropName.trim(),
           crops: [{ cropName: cropName.trim(), count: 1 }],
           currentCount: 1,
@@ -202,6 +214,17 @@ export function GrowBagsTab() {
     });
 
     await saveBagsList(updatedList);
+    await appendCropLifecycleEvent({
+      id: `lifecycle-planted-${Date.now()}`,
+      type: "planted",
+      timestamp: new Date().toISOString(),
+      cropName: cropName.trim(),
+      quantity: 1,
+      destinationId: bag.id,
+      destinationName: bag.name,
+      location: { polyhouse: bag.polyhouse, block: bag.block },
+      notes: notes || "Grow bag planted",
+    });
     toast.success("Grow bag planted successfully!");
     closeForm();
   };
@@ -212,7 +235,7 @@ export function GrowBagsTab() {
     if (!bag) return;
 
     try {
-      // Record in harvest logs localstorage
+      // Record this destination in the shared harvest history.
       const newLog = {
         id: `bag-harv-${Date.now()}`,
         channelId: bag.id,
@@ -224,33 +247,53 @@ export function GrowBagsTab() {
         yieldQty,
         wasteQty,
         avgWeightGrams,
+        yieldKg,
         notes: notes || "Harvested from Grow Bag",
         capacity: bag.capacity,
       };
 
       const updatedHistory = [newLog, ...harvestHistory];
-      localStorage.setItem("polyhouse-harvest-history", JSON.stringify(updatedHistory));
+      await saveHarvestHistoryRemote(updatedHistory);
       setHarvestHistory(updatedHistory);
+      if (yieldQty > 0) {
+        await appendCropLifecycleEvent({
+          id: `lifecycle-harvested-${Date.now()}`,
+          type: "harvested",
+          timestamp: new Date().toISOString(),
+          cropName: bag.cropName || "Unknown crop",
+          quantity: yieldQty,
+          sourceId: bag.id,
+          sourceName: bag.name,
+          location: { polyhouse: bag.polyhouse, block: bag.block },
+          notes: notes || "Grow bag harvested",
+        });
+      }
+      if (wasteQty > 0) {
+        await appendCropLifecycleEvent({
+          id: `lifecycle-removed-${Date.now()}`,
+          type: "removed",
+          timestamp: new Date().toISOString(),
+          cropName: bag.cropName || "Unknown crop",
+          quantity: wasteQty,
+          sourceId: bag.id,
+          sourceName: bag.name,
+          location: { polyhouse: bag.polyhouse, block: bag.block },
+          notes: notes || "Grow bag harvest waste or defects",
+        });
+      }
 
-      // Reset the bag status to empty
-      const updatedList = bags.map((b) => {
-        if (b.id === activeBagId) {
-          return {
+      // Picking fruit does not end the plant's growing cycle.
+      const updatedList = bags.map((b) => b.id === activeBagId
+        ? {
             ...b,
-            status: "empty" as const,
-            cropName: "",
-            crops: [],
-            currentCount: 0,
-            plantedAt: null,
-            expectedHarvestISO: null,
-            notes: "",
-          };
-        }
-        return b;
-      });
+            harvestedAt: new Date().toISOString(),
+            growthStage: "fruiting" as const,
+            stageHistory: [...(b.stageHistory || []), { stage: "fruiting" as const, changedAt: new Date().toISOString() }],
+          }
+        : b);
 
       await saveBagsList(updatedList);
-      toast.success("Grow bag harvested!");
+      toast.success(`Picking recorded: ${yieldKg.toFixed(2)} kg`);
       closeForm();
     } catch {
       toast.error("Failed to harvest grow bag");
@@ -338,6 +381,38 @@ export function GrowBagsTab() {
     const updatedList = bags.filter((b) => b.id !== id);
     await saveBagsList(updatedList);
     toast.success("Grow bag removed.");
+  };
+
+  const handleRemovePlant = async (bag: GrowBag) => {
+    if (!window.confirm(`Remove the ${bag.cropName || "plant"} from ${bag.name}? The grow bag will remain available.`)) return;
+    const removedAt = new Date().toISOString();
+    const updatedList = bags.map((item) => item.id === bag.id
+      ? {
+          ...item,
+          status: "empty" as const,
+          cropName: "",
+          crops: [],
+          currentCount: 0,
+          plantedAt: null,
+          harvestedAt: removedAt,
+          expectedHarvestISO: null,
+          growthStage: undefined,
+          notes: "",
+        }
+      : item);
+    await saveBagsList(updatedList);
+    await appendCropLifecycleEvent({
+      id: `lifecycle-removed-${Date.now()}`,
+      type: "removed",
+      timestamp: removedAt,
+      cropName: bag.cropName || "Unknown crop",
+      quantity: 1,
+      sourceId: bag.id,
+      sourceName: bag.name,
+      location: { polyhouse: bag.polyhouse, block: bag.block },
+      notes: "Plant removed from grow bag due to plant problem",
+    });
+    toast.success("Plant removed. Grow bag is available for replanting.");
   };
 
   // Dynamic filter values
@@ -432,7 +507,7 @@ export function GrowBagsTab() {
       {/* Advanced Filters Panel */}
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-2xs md:flex-row md:items-center">
         {/* Search */}
-        <div className="relative flex-1 min-w-[200px]">
+        <div className="relative flex-1 min-w-50">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search by name, crop variety, bag id..."
@@ -516,13 +591,13 @@ export function GrowBagsTab() {
                     <div className="text-xs font-bold text-foreground/80">Block: {blockName}</div>
                     
                     {viewMode === "grid" ? (
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
                         {bagsList.map((bag) => {
                           const isGrowing = bag.status === "growing";
                           return (
                             <Card 
                               key={bag.id}
-                              className={`p-3 relative overflow-hidden transition-all duration-200 border-border/80 hover:border-primary/50 shadow-sm flex flex-col justify-between min-h-[145px] h-auto select-none ${
+                              className={`p-3 relative overflow-hidden transition-all duration-200 border-border/80 hover:border-primary/50 shadow-sm flex flex-col justify-between min-h-47.5 h-auto select-none ${
                                 isGrowing ? "bg-emerald-50/5 dark:bg-emerald-500/5 border-emerald-500/25" : "bg-card/45"
                               }`}
                             >
@@ -531,24 +606,38 @@ export function GrowBagsTab() {
                                   Bag {bag.bagIndex}
                                 </span>
                                 <Badge className={`h-4.5 text-[9px] uppercase font-bold py-0 ${
-                                  isGrowing ? "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-muted text-muted-foreground"
+                                  isGrowing ? bag.growthStage === "ready-to-harvest" ? "bg-amber-500 hover:bg-amber-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-muted text-muted-foreground"
                                 }`}>
-                                  {bag.status}
+                                  {isGrowing ? growthStageLabel(bag.growthStage) : bag.status}
                                 </Badge>
                               </div>
+
+                              <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=${encodeURIComponent(bag.qrCode || bag.id)}`}
+                                alt={`QR code for ${bag.name}`}
+                                className="mx-auto h-16 w-16 rounded border border-border bg-white p-1"
+                              />
 
                               <div className="my-1.5 min-w-0 flex-1 flex flex-col justify-center">
                                 {isGrowing ? (
                                   <>
                                     <div className="text-2xs font-bold text-foreground truncate">{bag.cropName}</div>
                                     <div className="text-[10px] text-muted-foreground mt-0.5 font-semibold">1 Plant Capacity</div>
+                                    <Select value={bag.growthStage || "growing"} onValueChange={(value) => handleStageChange(bag, value as GrowBagGrowthStage)}>
+                                      <SelectTrigger className="mt-1 h-6 w-full text-[9px] font-bold"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="growing">Growing</SelectItem>
+                                        <SelectItem value="fruiting">Fruiting</SelectItem>
+                                        <SelectItem value="ready-to-harvest">Ready to harvest</SelectItem>
+                                      </SelectContent>
+                                    </Select>
                                   </>
                                 ) : (
                                   <div className="text-2xs text-muted-foreground/60 italic font-medium">Vacant</div>
                                 )}
                               </div>
 
-                              <div className="flex gap-1 border-t border-border/40 pt-1.5 justify-end">
+                              <div className="flex flex-wrap gap-1 border-t border-border/40 pt-1.5 justify-end">
                                 <Button
                                   size="icon"
                                   variant="ghost"
@@ -576,6 +665,26 @@ export function GrowBagsTab() {
                                 >
                                   <History className="h-3.5 w-3.5 text-blue-500" />
                                 </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteBag(bag.id)}
+                                  title="Delete grow bag"
+                                  className="h-6 w-6 text-destructive hover:bg-destructive/5"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                                {isGrowing && (
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleRemovePlant(bag)}
+                                    title="Remove plant from grow bag"
+                                    className="h-6 w-6 text-amber-600 hover:bg-amber-500/10"
+                                  >
+                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
                               </div>
                             </Card>
                           );
@@ -594,21 +703,45 @@ export function GrowBagsTab() {
                                   <span className="text-sm font-extrabold text-foreground block">Bag ID: {bag.bagIndex}</span>
                                 </div>
                                 <Badge className={`text-2xs font-extrabold uppercase ${
-                                  isGrowing ? "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-muted text-muted-foreground"
+                                  isGrowing ? bag.growthStage === "ready-to-harvest" ? "bg-amber-500 hover:bg-amber-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-muted text-muted-foreground"
                                 }`}>
-                                  {bag.status}
+                                  {isGrowing ? growthStageLabel(bag.growthStage) : bag.status}
                                 </Badge>
                               </div>
 
                               <div className="space-y-1.5 border-y border-border/50 py-3 text-xs">
+                                <div className="flex items-center gap-3">
+                                  <img
+                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(bag.qrCode || bag.id)}`}
+                                    alt={`QR code for ${bag.name}`}
+                                    className="h-20 w-20 rounded border border-border bg-white p-1"
+                                  />
+                                  <div className="text-[10px] text-muted-foreground">
+                                    <div className="font-semibold text-foreground">Scan to identify this bag</div>
+                                    <div className="mt-1 break-all font-mono">{bag.qrCode || bag.id}</div>
+                                  </div>
+                                </div>
                                 <div className="flex justify-between text-muted-foreground font-medium">
                                   <span>Planted Crop:</span>
                                   <span className="font-bold text-foreground">{bag.cropName || "—"}</span>
                                 </div>
                                 <div className="flex justify-between text-muted-foreground font-medium">
                                   <span>Plant Count:</span>
-                                  <span className="font-bold text-foreground">{bag.currentCount || 0} / 1 Plant</span>
+                                  <span className="font-bold text-foreground">{Math.min(1, bag.currentCount || 0)} / 1 Plant</span>
                                 </div>
+                                {isGrowing && (
+                                  <div className="flex items-center justify-between gap-2 text-muted-foreground font-medium">
+                                    <span>Growth Stage:</span>
+                                    <Select value={bag.growthStage || "growing"} onValueChange={(value) => handleStageChange(bag, value as GrowBagGrowthStage)}>
+                                      <SelectTrigger className="h-7 w-36 text-[10px] font-bold"><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="growing">Growing</SelectItem>
+                                        <SelectItem value="fruiting">Fruiting</SelectItem>
+                                        <SelectItem value="ready-to-harvest">Ready to harvest</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
                                 {bag.plantedAt && (
                                   <div className="flex justify-between text-muted-foreground font-medium">
                                     <span>Seeded Date:</span>
@@ -622,7 +755,7 @@ export function GrowBagsTab() {
                                 )}
                               </div>
 
-                              <div className="flex gap-2 justify-end pt-1">
+                              <div className="flex flex-wrap gap-2 justify-end pt-1">
                                 {isGrowing ? (
                                   <Button onClick={() => openHarvestForm(bag)} size="sm" className="bg-amber-600 hover:bg-amber-700 text-white font-semibold text-2xs h-7.5 flex items-center gap-1">
                                     <ShoppingBag className="h-3 w-3" /> Harvest
@@ -638,9 +771,17 @@ export function GrowBagsTab() {
                                 <Button onClick={() => openLogsForm(bag)} size="sm" variant="ghost" className="text-2xs h-7.5 text-blue-500 hover:bg-blue-50/50">
                                   <History className="h-3.5 w-3.5" />
                                 </Button>
+                                <Button onClick={() => openDetailsForm(bag)} size="sm" variant="ghost" className="text-2xs h-7.5 text-muted-foreground hover:bg-muted">
+                                  <FileText className="h-3.5 w-3.5" />
+                                </Button>
                                 <Button onClick={() => handleDeleteBag(bag.id)} size="sm" variant="ghost" className="text-2xs h-7.5 text-destructive hover:bg-destructive/5 hover:text-destructive">
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
+                                {isGrowing && (
+                                  <Button onClick={() => handleRemovePlant(bag)} size="sm" variant="ghost" className="text-2xs h-7.5 text-amber-600 hover:bg-amber-50">
+                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
                               </div>
                             </Card>
                           );
@@ -742,13 +883,13 @@ export function GrowBagsTab() {
           {actionType === "harvest" && (
             <Card className="p-6 max-w-sm w-full border-border/80 shadow-lg space-y-4 max-h-[95vh] overflow-y-auto">
               <div>
-                <span className="font-bold text-base text-foreground block">Harvest Grow Bag</span>
-                <span className="text-xs text-muted-foreground block mt-0.5">Log crop yields and weight statistics.</span>
+                <span className="font-bold text-base text-foreground block">Record Grow Bag Picking</span>
+                <span className="text-xs text-muted-foreground block mt-0.5">Record one picking. The plant stays growing for future pickings.</span>
               </div>
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-xs">Usable Yield (Qty)</Label>
+                    <Label className="text-xs">Fruit Count (optional)</Label>
                     <Input type="number" min={0} value={yieldQty} onChange={(e) => setYieldQty(Number(e.target.value))} className="h-9 text-xs bg-background text-center font-bold" />
                   </div>
                   <div className="space-y-1">
@@ -757,7 +898,11 @@ export function GrowBagsTab() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Avg Plant Weight (grams)</Label>
+                  <Label className="text-xs">Usable Yield (kg)</Label>
+                  <Input type="number" min={0} step="0.01" value={yieldKg} onChange={(e) => setYieldKg(Number(e.target.value))} className="h-9 text-xs bg-background text-center font-bold" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Average Fruit Weight (grams)</Label>
                   <Input type="number" min={0} value={avgWeightGrams} onChange={(e) => setAvgWeightGrams(Number(e.target.value))} className="h-9 text-xs bg-background" />
                 </div>
                 <div className="space-y-1">
@@ -767,7 +912,7 @@ export function GrowBagsTab() {
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
                 <Button onClick={closeForm} variant="outline" className="text-xs font-semibold px-4 h-9">Cancel</Button>
-                <Button onClick={handleHarvestConfirm} className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 h-9">Complete Harvest</Button>
+                <Button onClick={handleHarvestConfirm} className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 h-9">Record Picking</Button>
               </div>
             </Card>
           )}
@@ -779,7 +924,7 @@ export function GrowBagsTab() {
                 <span className="font-bold text-base text-foreground block">Grow Bag Audit History</span>
                 <span className="text-xs text-muted-foreground block mt-0.5">Tabular logs of crop harvests.</span>
               </div>
-              <div className="space-y-3 font-mono text-xs max-h-[280px] overflow-y-auto border rounded-lg p-2.5 bg-muted/10">
+              <div className="space-y-3 font-mono text-xs max-h-70 overflow-y-auto border rounded-lg p-2.5 bg-muted/10">
                 {bagHarvestHistory.length === 0 ? (
                   <div className="text-center py-6 text-xs text-muted-foreground italic">No harvests logged yet.</div>
                 ) : (
@@ -787,7 +932,7 @@ export function GrowBagsTab() {
                     <div key={item.id} className="p-2 border bg-background rounded-md text-[10px] space-y-1.5">
                       <div className="flex justify-between items-center font-bold">
                         <span>{item.cropName}</span>
-                        <Badge className="h-4 py-0 text-[8px] bg-emerald-500 text-white">Yield: {item.yieldQty}</Badge>
+                        <Badge className="h-4 py-0 text-[8px] bg-emerald-500 text-white">Yield: {item.yieldQty || 0} ({(item.yieldKg ?? ((item.yieldQty || 0) * (item.avgWeightGrams || 0)) / 1000).toFixed(2)} kg)</Badge>
                       </div>
                       <div className="text-muted-foreground">Harvested: {new Date(item.harvestedAt).toLocaleDateString()}</div>
                       {item.notes && <div className="text-slate-500 italic mt-0.5">Notes: {item.notes}</div>}
@@ -800,6 +945,44 @@ export function GrowBagsTab() {
               </div>
             </Card>
           )}
+
+          {actionType === "details" && activeBagId && (() => {
+            const bag = bags.find((item) => item.id === activeBagId);
+            if (!bag) return null;
+            const stageHistory = bag.stageHistory || [];
+            return (
+              <Card className="p-6 max-w-sm w-full border-border/80 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto">
+                <div>
+                  <span className="font-bold text-base text-foreground block">Complete Grow Bag Details</span>
+                  <span className="text-xs text-muted-foreground block mt-0.5">{bag.name}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div><span className="text-muted-foreground">Crop</span><strong className="block">{bag.cropName || "Empty"}</strong></div>
+                  <div><span className="text-muted-foreground">Current stage</span><strong className="block">{bag.growthStage === "ready-to-harvest" ? "Ready to harvest" : bag.growthStage || "Empty"}</strong></div>
+                  <div><span className="text-muted-foreground">Plant count</span><strong className="block">{bag.currentCount || 0} / 1</strong></div>
+                  <div><span className="text-muted-foreground">Planted</span><strong className="block">{bag.plantedAt ? new Date(bag.plantedAt).toLocaleDateString() : "-"}</strong></div>
+                </div>
+                <div className="space-y-2 border-t border-border/60 pt-3">
+                  <span className="text-xs font-bold">Stage change history</span>
+                  {stageHistory.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">No stage changes recorded yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {[...stageHistory].reverse().map((change, index) => (
+                        <div key={`${change.changedAt}-${index}`} className="flex items-center justify-between gap-3 rounded border bg-muted/20 p-2 text-[10px]">
+                          <span className="font-semibold">{change.stage === "ready-to-harvest" ? "Ready to harvest" : change.stage}</span>
+                          <span className="text-muted-foreground">{new Date(change.changedAt).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-end border-t border-border/60 pt-2">
+                  <Button onClick={closeForm} className="text-xs font-semibold px-4 h-9">Close</Button>
+                </div>
+              </Card>
+            );
+          })()}
         </div>
       )}
     </div>

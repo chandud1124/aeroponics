@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { createHmac, randomBytes } from "crypto";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
@@ -30,6 +31,12 @@ import {
   saveGpioMappings,
   getHarvestHistory,
   saveHarvestHistory,
+  getGrowBags,
+  saveGrowBags,
+  getNurseryStore,
+  saveNurseryStore,
+  getCropLifecycleEvents,
+  saveCropLifecycleEvents,
   getGeminiApiKey,
   saveGeminiApiKey,
   getCameraSettings,
@@ -39,6 +46,8 @@ import {
   getUsers,
   addUser,
   deleteUser,
+  hashUserPassword,
+  verifyUserPassword,
 } from "./lib/tower-server-store";
 
 import { sendPtzCommand } from "./lib/onvif-ptz";
@@ -68,6 +77,45 @@ type ManualPumpSession = {
   startedAtMs: number;
   logId: string | null;
 };
+
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const SESSION_SECRET = process.env.SESSION_SECRET ?? (IS_PRODUCTION ? "" : "farmnexus-local-development-session-secret");
+const SESSION_COOKIE_ATTRIBUTES = `HttpOnly; SameSite=Lax; Path=/${IS_PRODUCTION ? "; Secure" : ""}`;
+if (IS_PRODUCTION && (!process.env.ADMIN_USERNAME || !process.env.ADMIN_PASSWORD || !process.env.SESSION_SECRET)) {
+  throw new Error("Production requires ADMIN_USERNAME, ADMIN_PASSWORD, and SESSION_SECRET");
+}
+
+function base64Url(value: string): string {
+  return Buffer.from(value).toString("base64url");
+}
+
+function createSessionToken(username: string, role: "admin" | "operator"): string {
+  const payload = base64Url(JSON.stringify({ username, role, exp: Date.now() + 8 * 60 * 60 * 1000 }));
+  const signature = createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function getSessionCookie(request: Request): string | null {
+  const cookies = request.headers.get("cookie")?.split(";") ?? [];
+  const session = cookies.find((cookie) => cookie.trim().startsWith("farmnexus_session="));
+  return session ? decodeURIComponent(session.trim().slice("farmnexus_session=".length)) : null;
+}
+
+function getCookieUser(request: Request): { username: string; role: "admin" | "operator" } | null {
+  const token = getSessionCookie(request);
+  if (!token) return null;
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  if (signature !== expected) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { username?: string; role?: "admin" | "operator"; exp?: number };
+    if (!claims.username || !claims.role || !claims.exp || claims.exp < Date.now()) return null;
+    return { username: claims.username, role: claims.role };
+  } catch {
+    return null;
+  }
+}
 
 const manualPumpSessions = new Map<string, ManualPumpSession>();
 
@@ -178,10 +226,10 @@ function brandedErrorResponse(): Response {
   });
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -240,24 +288,34 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
   // Admin credentials read from the env
   const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "admin";
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin123";
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? (IS_PRODUCTION ? "" : "admin123");
   const DEVICE_SECRET_PIN = process.env.DEVICE_SECRET_PIN ?? "";
 
   function getUserFromRequest(request: Request) {
+    const cookieUser = getCookieUser(request);
+    if (cookieUser) {
+      if (cookieUser.username.toLowerCase() === ADMIN_USERNAME.toLowerCase() && cookieUser.role === "admin") {
+        return cookieUser;
+      }
+      const found = getUsers().find((u) => u.username.toLowerCase() === cookieUser.username.toLowerCase());
+      if (found && found.role === cookieUser.role) return { username: found.username, role: found.role };
+    }
+
     const authHeader = request.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
     const token = authHeader.substring(7).trim();
-    if (token === `admin:${ADMIN_PASSWORD}`) {
-      return { username: ADMIN_USERNAME, role: "admin" };
-    }
-    if (token.startsWith("user:")) {
-      const parts = token.split(":");
-      const username = parts[1];
-      const pwd = parts[2];
-      const found = getUsers().find(u => u.username.toLowerCase() === username.toLowerCase() && u.passwordHash === pwd);
-      if (found) {
-        return { username: found.username, role: found.role };
-      }
+    const [payload, signature] = token.split(".");
+    if (!payload || !signature) return null;
+    const expected = createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+    if (signature !== expected) return null;
+    try {
+      const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { username?: string; role?: "admin" | "operator"; exp?: number };
+      if (!claims.username || !claims.role || !claims.exp || claims.exp < Date.now()) return null;
+      if (claims.username.toLowerCase() === ADMIN_USERNAME.toLowerCase() && claims.role === "admin") return { username: ADMIN_USERNAME, role: "admin" };
+      const found = getUsers().find((u) => u.username.toLowerCase() === claims.username?.toLowerCase() && u.role === claims.role);
+      if (found) return { username: found.username, role: found.role };
+    } catch {
+      return null;
     }
     return null;
   }
@@ -296,17 +354,20 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase() && password === ADMIN_PASSWORD) {
         return jsonResponse({
           success: true,
-          token: `admin:${ADMIN_PASSWORD}`,
           user: { username: ADMIN_USERNAME, role: "admin" }
-        });
+        }, 200, { "Set-Cookie": `farmnexus_session=${encodeURIComponent(createSessionToken(ADMIN_USERNAME, "admin"))}; ${SESSION_COOKIE_ATTRIBUTES}` });
       }
-      const found = getUsers().find(u => u.username.toLowerCase() === username.toLowerCase() && u.passwordHash === password);
-      if (found) {
+      const found = getUsers().find((u) => u.username.toLowerCase() === username.toLowerCase());
+      const passwordCheck = found ? verifyUserPassword(password, found.passwordHash) : { valid: false, needsMigration: false };
+      if (found && passwordCheck.valid) {
+        if (passwordCheck.needsMigration) {
+          found.passwordHash = hashUserPassword(password);
+          saveStateToDiskForAuth();
+        }
         return jsonResponse({
           success: true,
-          token: `user:${found.username}:${found.passwordHash}`,
           user: { username: found.username, role: found.role }
-        });
+        }, 200, { "Set-Cookie": `farmnexus_session=${encodeURIComponent(createSessionToken(found.username, found.role))}; ${SESSION_COOKIE_ATTRIBUTES}` });
       }
       return jsonResponse({ error: "Invalid username or password" }, 401);
     } catch (e: any) {
@@ -320,6 +381,10 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       return jsonResponse({ authenticated: false }, 401);
     }
     return jsonResponse({ authenticated: true, user });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/logout") {
+    return jsonResponse({ success: true }, 200, { "Set-Cookie": `farmnexus_session=; Max-Age=0; ${SESSION_COOKIE_ATTRIBUTES}` });
   }
 
   if (request.method === "POST" && url.pathname === "/api/admin/users") {
@@ -336,7 +401,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
         return jsonResponse({ error: "Cannot create user with admin username" }, 400);
       }
-      addUser({ username, passwordHash: password, role });
+      addUser({ username, passwordHash: hashUserPassword(password), role });
       return jsonResponse({ success: true });
     } catch (e: any) {
       return jsonResponse({ error: e.message || "Failed to add user" }, 400);
@@ -962,6 +1027,38 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
+  if (url.pathname === "/api/grow-bags") {
+    if (request.method === "GET") return jsonResponse(getGrowBags());
+    if (request.method === "PUT") {
+      const payload = (await request.json()) as unknown;
+      if (!Array.isArray(payload)) return jsonResponse({ error: "Grow bags must be an array" }, 400);
+      return jsonResponse(saveGrowBags(payload));
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/nursery") {
+    if (request.method === "GET") return jsonResponse(getNurseryStore());
+    if (request.method === "PUT") {
+      const payload = (await request.json()) as { trays?: unknown; history?: unknown; configs?: unknown };
+      if (!Array.isArray(payload.trays) || !Array.isArray(payload.history) || !Array.isArray(payload.configs)) {
+        return jsonResponse({ error: "Nursery payload must contain trays, history, and configs arrays" }, 400);
+      }
+      return jsonResponse(saveNurseryStore(payload as never));
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/crop-lifecycle-events") {
+    if (request.method === "GET") return jsonResponse(getCropLifecycleEvents());
+    if (request.method === "PUT") {
+      const payload = (await request.json()) as unknown;
+      if (!Array.isArray(payload)) return jsonResponse({ error: "Lifecycle events must be an array" }, 400);
+      return jsonResponse(saveCropLifecycleEvents(payload));
+    }
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
   if (url.pathname === "/api/gpio-mappings") {
     if (request.method === "GET") {
       return jsonResponse(getGpioMappings());
@@ -1051,6 +1148,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         onDurationSeconds?: number;
         offIntervalMinutes?: number;
         volumeLiters?: number;
+        pumpIndex?: number;
       };
 
       if (typeof payload.durationSeconds !== "number" || typeof payload.flowed !== "boolean") {
@@ -1065,6 +1163,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         onDurationSeconds: payload.onDurationSeconds ?? payload.durationSeconds,
         offIntervalMinutes: payload.offIntervalMinutes ?? getCycleProfile().offIntervalMinutes,
         volumeLiters: payload.volumeLiters ?? null,
+        pumpIndex: payload.pumpIndex === 2 ? 2 : 1,
         deviceId: resolvedDeviceId,
       });
 

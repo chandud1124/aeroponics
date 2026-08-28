@@ -40,7 +40,7 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
 
   const loadSettings = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/settings`);
+      const res = await fetch(`${API_BASE_URL}/api/settings`, withDeviceHeaders({ method: "GET" }));
       if (res.ok) {
         const data = await res.json();
         setApiKey(data.geminiApiKey || "");
@@ -60,13 +60,13 @@ export function AIInsightsCard({ deviceId }: { deviceId?: string | null }) {
     setSavingSettings(true);
     setSettingsError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/settings`, {
+      const res = await fetch(`${API_BASE_URL}/api/settings`, withDeviceHeaders({
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ geminiApiKey: apiKey })
-      });
+      }));
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Failed to save key");

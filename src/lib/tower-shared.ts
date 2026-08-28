@@ -323,7 +323,123 @@ export type HarvestHistoryEntry = {
   yieldQty?: number;
   wasteQty?: number;
   avgWeightGrams?: number;
+  yieldKg?: number;
   incidents?: NftIncidentLog[];
+};
+
+export type CropLifecycleEventType = "planted" | "harvested" | "removed" | "transferred";
+
+export type CropLocationSnapshot = {
+  polyhouse?: string;
+  block?: string;
+  row?: string;
+  stand?: string;
+  level?: string;
+  channelIndex?: number;
+  holeConfig?: string;
+};
+
+export type CropLifecycleEvent = {
+  id: string;
+  type: CropLifecycleEventType;
+  timestamp: string;
+  cropName: string;
+  quantity: number;
+  sourceId?: string;
+  sourceName?: string;
+  destinationId?: string;
+  destinationName?: string;
+  location?: CropLocationSnapshot;
+  notes?: string;
+};
+
+export type GrowBagCropEntry = {
+  cropName: string;
+  count: number;
+};
+
+export type GrowBagGrowthStage = "growing" | "fruiting" | "ready-to-harvest";
+
+export type GrowBagStageChange = {
+  stage: GrowBagGrowthStage;
+  changedAt: string;
+};
+
+export type GrowBag = {
+  id: string;
+  name: string;
+  qrCode: string;
+  cropName: string;
+  crops?: GrowBagCropEntry[];
+  plantedAt: string | null;
+  harvestedAt: string | null;
+  notes: string;
+  status: "empty" | "growing" | "harvested";
+  capacity?: number;
+  currentCount?: number;
+  expectedHarvestISO?: string | null;
+  growthStage?: GrowBagGrowthStage;
+  stageHistory?: GrowBagStageChange[];
+  polyhouse?: string;
+  block?: string;
+  bagIndex?: string;
+};
+
+export function normalizeGrowBag(bag: GrowBag): GrowBag {
+  if (bag.status === "growing") {
+    return {
+      ...bag,
+      capacity: 1,
+      currentCount: 1,
+      crops: [{ cropName: bag.cropName, count: 1 }],
+      growthStage: bag.growthStage || "growing",
+      stageHistory: bag.stageHistory || [],
+    };
+  }
+  return { ...bag, capacity: 1, currentCount: 0, crops: [] };
+}
+
+export type NurseryCell = {
+  holeIndex: number;
+  crop: string;
+  plantedOn: string;
+  germinated: boolean;
+};
+
+export type NurseryTray = {
+  id: string;
+  name: string;
+  crop: string;
+  plantedOn: string;
+  plugs: number;
+  germinated: number;
+  status: "empty" | "growing" | "ready";
+  cells?: NurseryCell[];
+};
+
+export type NurseryHistoryEntry = {
+  id: string;
+  trayId: string;
+  trayName: string;
+  crop: string;
+  plantedOn: string;
+  transplantedOn: string;
+  plugs: number;
+  germinated: number;
+  notes: string;
+  channelId?: string;
+  channelName?: string;
+};
+
+export type CropConfig = {
+  name: string;
+  colorKey: string;
+};
+
+export type NurseryStore = {
+  trays: NurseryTray[];
+  history: NurseryHistoryEntry[];
+  configs: CropConfig[];
 };
 
 export function calculateVpd(tempC: number | null | undefined, humidityPct: number | null | undefined): number | null {

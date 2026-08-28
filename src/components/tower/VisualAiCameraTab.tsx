@@ -41,7 +41,7 @@ export function VisualAiCameraTab({ activeDeviceId }: { activeDeviceId?: string 
   const fetchSnapshots = async () => {
     setLoadingSnapshots(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/camera/snapshots`);
+      const res = await fetch(`${API_BASE_URL}/api/camera/snapshots`, withDeviceHeaders({ method: "GET" }, activeDeviceId));
       if (res.ok) {
         const data = await res.json();
         setSnapshots(data.snapshots || []);

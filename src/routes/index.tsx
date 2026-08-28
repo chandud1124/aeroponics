@@ -24,7 +24,13 @@ import {
   fetchStatusEnvelope,
   fetchNftChannels,
   fetchHarvestHistory,
+  fetchGrowBags,
+  fetchCropLifecycleEvents,
+  saveGrowBags,
   saveHarvestHistoryRemote,
+  fetchNurseryStore,
+  saveNurseryStore,
+  appendCropLifecycleEvent,
   saveNftChannels,
   harvestCropRemote,
   API_BASE_URL,
@@ -34,6 +40,16 @@ import {
   type NftChannel,
   type HarvestHistoryEntry,
 } from "@/lib/tower-storage";
+import type {
+  CropConfig,
+  NurseryCell,
+  NurseryHistoryEntry,
+  NurseryStore,
+  NurseryTray,
+  GrowBag,
+  CropLifecycleEvent,
+} from "@/lib/tower-shared";
+import { normalizeGrowBag } from "@/lib/tower-shared";
 import {
   FaultAlertBanner,
   FaultHistoryPanel,
@@ -89,6 +105,7 @@ import {
   Trash2,
   Camera,
   Package,
+  ShoppingBag,
   Users,
   Lock,
   User,
@@ -97,38 +114,6 @@ import {
   Search,
   Palette,
 } from "lucide-react";
-
-type NurseryCell = {
-  holeIndex: number;
-  crop: string;
-  plantedOn: string;
-  germinated: boolean;
-};
-
-type NurseryTray = {
-  id: string;
-  name: string;
-  crop: string;
-  plantedOn: string;
-  plugs: number;
-  germinated: number;
-  status: "empty" | "growing" | "ready";
-  cells?: NurseryCell[];
-};
-
-type NurseryHistoryEntry = {
-  id: string;
-  trayId: string;
-  trayName: string;
-  crop: string;
-  plantedOn: string;
-  transplantedOn: string;
-  plugs: number;
-  germinated: number;
-  notes: string;
-  channelId?: string;
-  channelName?: string;
-};
 
 const DEFAULT_NURSERY_TRAYS: NurseryTray[] = [
   { id: "tray-1", name: "Tray 1", crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
@@ -220,26 +205,13 @@ function Index() {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const token = localStorage.getItem("tower_auth_token");
-      if (!token) {
-        setAuthLoading(false);
-        return;
-      }
       try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-          headers: {
-            "Authorization": `Bearer ${token}`,
-          }
-        });
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, { credentials: "include" });
         if (response.ok) {
           const data = await response.json();
           if (data.authenticated) {
             setUser(data.user);
-          } else {
-            localStorage.removeItem("tower_auth_token");
           }
-        } else {
-          localStorage.removeItem("tower_auth_token");
         }
       } catch (e) {
         console.error("Auth validation failed", e);
@@ -254,6 +226,7 @@ function Index() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: usernameInput, password: passwordInput })
       });
@@ -262,7 +235,6 @@ function Index() {
         throw new Error(data.error || "Invalid credentials");
       }
       const data = await response.json();
-      localStorage.setItem("tower_auth_token", data.token);
       setUser(data.user);
       toast.success(`Welcome back, ${data.user.username}!`);
     } catch (e: any) {
@@ -272,14 +244,16 @@ function Index() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("tower_auth_token");
+    fetch(`${API_BASE_URL}/api/auth/logout`, { method: "POST", credentials: "include" }).catch(() => undefined);
     setUser(null);
     toast.success("Logged out successfully");
   };
 
   const [devices, setDevices] = useState<DeviceListEntry[]>([]);
   const [nftChannels, setNftChannels] = useState<NftChannel[]>([]);
+  const [growBags, setGrowBags] = useState<GrowBag[]>([]);
   const [harvestHistory, setHarvestHistory] = useState<HarvestHistoryEntry[]>([]);
+  const [cropLifecycleEvents, setCropLifecycleEvents] = useState<CropLifecycleEvent[]>([]);
   const [loadingCrops, setLoadingCrops] = useState(true);
   const [harvestSearch, setHarvestSearch] = useState("");
   const [harvestStart, setHarvestStart] = useState("");
@@ -288,7 +262,8 @@ function Index() {
   const [harvestPage, setHarvestPage] = useState(0);
   const [nurseryTrays, setNurseryTrays] = useState<NurseryTray[]>(DEFAULT_NURSERY_TRAYS);
   const [nurseryHistory, setNurseryHistory] = useState<NurseryHistoryEntry[]>([]);
-  const [cropConfigs, setCropConfigs] = useState<{ name: string; colorKey: string }[]>([]);
+  const [cropConfigs, setCropConfigs] = useState<CropConfig[]>([]);
+  const [nurseryLoaded, setNurseryLoaded] = useState(false);
   const [cropManagerOpen, setCropManagerOpen] = useState(false);
 
   // Nursery-to-NFT Transplant Modal States
@@ -304,7 +279,7 @@ function Index() {
   const [globalScanInput, setGlobalScanInput] = useState("");
   const [showGlobalScanner, setShowGlobalScanner] = useState(false);
   const [scannedChannelId, setScannedChannelId] = useState<string | null>(null);
-  const [scannedRecord, setScannedRecord] = useState<{ kind: "channel" | "tray" | "not-found"; label: string; detail: string } | null>(null);
+  const [scannedRecord, setScannedRecord] = useState<{ kind: "channel" | "tray" | "bag" | "not-found"; label: string; detail: string } | null>(null);
 
   // Nursery Visual Grid and Detailed Hole Planner State
   const [gridModeTrayId, setGridModeTrayId] = useState<string | null>(null);
@@ -376,70 +351,45 @@ function Index() {
   };
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("polyhouse-nursery-trays");
-      if (saved) setNurseryTrays(JSON.parse(saved) as NurseryTray[]);
-      
-      const savedHistory = localStorage.getItem("polyhouse-nursery-history");
-      if (savedHistory) setNurseryHistory(JSON.parse(savedHistory) as NurseryHistoryEntry[]);
-
-      const savedConfigs = localStorage.getItem("polyhouse-crop-configs");
-      if (savedConfigs) {
-        setCropConfigs(JSON.parse(savedConfigs) as { name: string; colorKey: string }[]);
-      } else {
-        const defaults = [
-          "Green Lettuce",
-          "Red Lettuce",
-          "Butterhead Lettuce",
-          "Lollo Bionda",
-          "Romaine Lettuce",
-          "Pak Choi",
-          "Kale",
-          "Swiss Chard",
-          "Rocket / Arugula",
-          "Spinach",
-          "Coriander",
-          "Basil",
-          "Amaranth",
-          "Capsicum Yellow",
-          "Capsicum Red",
-          "Capsicum Green",
-          "Cherry Tomato Yellow",
-          "Cherry Tomato Red"
-        ].map(name => {
-          let hash = 0;
-          for (let i = 0; i < name.length; i++) {
-            hash = name.charCodeAt(i) + ((hash << 5) - hash);
-          }
-          const keys = ["emerald", "sky", "amber", "purple", "rose", "teal", "orange", "fuchsia"];
-          const index = Math.abs(hash) % keys.length;
-          return { name, colorKey: keys[index] };
-        });
-        setCropConfigs(defaults);
-        localStorage.setItem("polyhouse-crop-configs", JSON.stringify(defaults));
-      }
-    } catch {
-      // Keep the default trays when local storage is unavailable or invalid.
-    }
-  }, []);
+    if (!user) return;
+    fetchNurseryStore()
+      .then((store) => {
+        const legacyTrays = localStorage.getItem("polyhouse-nursery-trays");
+        const legacyHistory = localStorage.getItem("polyhouse-nursery-history");
+        const legacyConfigs = localStorage.getItem("polyhouse-crop-configs");
+        const nextStore: NurseryStore = {
+          trays: legacyTrays ? JSON.parse(legacyTrays) as NurseryTray[] : store.trays,
+          history: legacyHistory ? JSON.parse(legacyHistory) as NurseryHistoryEntry[] : store.history,
+          configs: legacyConfigs ? JSON.parse(legacyConfigs) as CropConfig[] : store.configs,
+        };
+        setNurseryTrays(nextStore.trays);
+        setNurseryHistory(nextStore.history);
+        setCropConfigs(nextStore.configs);
+        if (legacyTrays || legacyHistory || legacyConfigs) {
+          localStorage.removeItem("polyhouse-nursery-trays");
+          localStorage.removeItem("polyhouse-nursery-history");
+          localStorage.removeItem("polyhouse-crop-configs");
+          saveNurseryStore(nextStore).catch(() => undefined);
+        }
+        setNurseryLoaded(true);
+      })
+      .catch((error) => {
+        setNurseryLoaded(true);
+        toast.error(error instanceof Error ? error.message : "Failed to load nursery records");
+      });
+  }, [user]);
 
   useEffect(() => {
-    if (mounted) {
-      localStorage.setItem("polyhouse-nursery-trays", JSON.stringify(nurseryTrays));
-    }
-  }, [mounted, nurseryTrays]);
-
-  useEffect(() => {
-    if (mounted) {
-      localStorage.setItem("polyhouse-nursery-history", JSON.stringify(nurseryHistory));
-    }
-  }, [mounted, nurseryHistory]);
-
-  useEffect(() => {
-    if (mounted) {
-      localStorage.setItem("polyhouse-crop-configs", JSON.stringify(cropConfigs));
-    }
-  }, [mounted, cropConfigs]);
+    if (!mounted || !user || !nurseryLoaded) return;
+    const store: NurseryStore = {
+      trays: nurseryTrays,
+      history: nurseryHistory,
+      configs: cropConfigs,
+    };
+    saveNurseryStore(store).catch((error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to save nursery records");
+    });
+  }, [cropConfigs, mounted, nurseryHistory, nurseryLoaded, nurseryTrays, user]);
 
   const updateNurseryTray = (id: string, patch: Partial<NurseryTray>) => {
     setNurseryTrays((trays) => trays.map((tray) => {
@@ -528,7 +478,6 @@ function Index() {
         };
       });
       setNurseryTrays(updatedTrays);
-      localStorage.setItem("polyhouse-nursery-trays", JSON.stringify(updatedTrays));
 
       // 2. Update Nursery History
       const updatedNurseryHistory = nurseryHistory.map((item) => {
@@ -538,7 +487,6 @@ function Index() {
         return item;
       });
       setNurseryHistory(updatedNurseryHistory);
-      localStorage.setItem("polyhouse-nursery-history", JSON.stringify(updatedNurseryHistory));
 
       // 3. Update NFT Channels
       const updatedChannels = nftChannels.map((chan) => {
@@ -621,6 +569,14 @@ function Index() {
       setShowGlobalScanner(false);
       return;
     }
+    const bag = growBags.find((item) => [item.id, item.qrCode, item.name].some((match) => match.trim().toLowerCase() === scanned));
+    if (bag) {
+      setScannedChannelId(null);
+      setScannedRecord({ kind: "bag", label: bag.name, detail: `${bag.status} · ${bag.cropName || "No crop planted"} · ${bag.currentCount || 0} plants` });
+      setActiveTab("grow-bags");
+      setShowGlobalScanner(false);
+      return;
+    }
     setScannedChannelId(null);
     setScannedRecord({ kind: "not-found", label: "No matching record", detail: `No NFT channel or nursery tray matches "${value.trim()}".` });
     toast.warning(`No nursery tray or NFT channel matches "${value}".`);
@@ -640,8 +596,111 @@ function Index() {
     }
 
     try {
+      const targetBagId = targetChannelId.startsWith("bag:") ? targetChannelId.slice(4) : null;
+      const selectedBag = targetBagId ? growBags.find((bag) => bag.id === targetBagId) : null;
+      if (selectedBag) {
+        const bagCapacity = 1;
+        const bagCount = Math.min(1, selectedBag.currentCount ?? 0);
+        if (transplantCount + bagCount > bagCapacity) {
+          toast.error(`Grow bag capacity exceeded. Available space: ${Math.max(0, bagCapacity - bagCount)} plants.`);
+          return;
+        }
+        if (selectedBag.status === "growing" && selectedBag.cropName.trim().toLowerCase() !== tray.crop.trim().toLowerCase()) {
+          const shouldHarvest = window.confirm(
+            `${selectedBag.name} contains ${bagCount} existing plants. Record them as harvested before planting ${tray.crop}?`,
+          );
+          if (!shouldHarvest) return;
+          const existingHistory = await fetchHarvestHistory();
+          await saveHarvestHistoryRemote([
+            {
+              id: `bag-harv-${Date.now()}`,
+              channelId: selectedBag.id,
+              channelName: selectedBag.name,
+              cropName: selectedBag.cropName,
+              plantedAt: selectedBag.plantedAt,
+              harvestedAt: new Date().toISOString(),
+              currentCount: bagCount,
+              yieldQty: bagCount,
+              wasteQty: 0,
+              avgWeightGrams: 0,
+              notes: `Auto-recorded before nursery transplant from ${tray.name}.`,
+              capacity: bagCapacity,
+            },
+            ...existingHistory,
+          ]);
+        }
+
+        const updatedBag: GrowBag = {
+          ...selectedBag,
+          status: "growing",
+          cropName: tray.crop,
+          crops: [{ cropName: tray.crop, count: 1 }],
+          currentCount: 1,
+          capacity: 1,
+          growthStage: selectedBag.growthStage || "growing",
+          stageHistory: selectedBag.stageHistory || [{ stage: "growing", changedAt: new Date().toISOString() }],
+          plantedAt: selectedBag.plantedAt || new Date().toISOString(),
+          harvestedAt: null,
+          notes: selectedBag.notes ? `${selectedBag.notes}\nTransplanted ${transplantCount}x ${tray.crop} from ${tray.name}` : `Transplanted ${transplantCount}x ${tray.crop} from ${tray.name}`,
+        };
+        await saveGrowBags(growBags.map((bag) => bag.id === selectedBag.id ? updatedBag : bag));
+        setGrowBags((bags) => bags.map((bag) => bag.id === selectedBag.id ? updatedBag : bag));
+        await appendCropLifecycleEvent({
+          id: `lifecycle-transferred-${Date.now()}`,
+          type: "transferred",
+          timestamp: new Date().toISOString(),
+          cropName: tray.crop || "Unknown crop",
+          quantity: transplantCount,
+          sourceId: tray.id,
+          sourceName: tray.name,
+          destinationId: selectedBag.id,
+          destinationName: selectedBag.name,
+          location: { polyhouse: selectedBag.polyhouse, block: selectedBag.block },
+          notes: transplantNotes || `Transferred from Nursery Tray ${tray.name}`,
+        });
+
+        const newEntry: NurseryHistoryEntry = {
+          id: `nurs-transfer-${Date.now()}`,
+          trayId: tray.id,
+          trayName: tray.name,
+          crop: tray.crop,
+          plantedOn: tray.plantedOn,
+          transplantedOn: new Date().toISOString().split("T")[0],
+          plugs: tray.plugs,
+          germinated: transplantCount,
+          notes: transplantNotes || `Shifted to Grow Bag: ${selectedBag.name}`,
+          channelId: selectedBag.id,
+          channelName: selectedBag.name,
+        };
+        setNurseryHistory((prev) => [newEntry, ...prev]);
+        const nextCells = ensureTrayCells(tray).map((cell) => ({ ...cell }));
+        let clearedCount = 0;
+        nextCells.forEach((cell) => {
+          if (cell.germinated && clearedCount < transplantCount) {
+            cell.crop = "";
+            cell.plantedOn = "";
+            cell.germinated = false;
+            clearedCount += 1;
+          }
+        });
+        const nextGerminated = Math.max(0, tray.germinated - transplantCount);
+        const totalFilled = nextCells.filter((cell) => cell.crop).length;
+        updateNurseryTray(tray.id, {
+          germinated: nextGerminated,
+          status: totalFilled === 0 ? "empty" : nextGerminated >= totalFilled ? "ready" : "growing",
+          crop: Array.from(new Set(nextCells.map((cell) => cell.crop).filter(Boolean))).join(", "),
+          plantedOn: nextCells.map((cell) => cell.plantedOn).filter(Boolean).sort()[0] || "",
+          cells: nextCells,
+        });
+        toast.success(`Successfully transplanted ${transplantCount}x ${tray.crop} to ${selectedBag.name}!`);
+        setTransplantDialogOpen(false);
+        loadCropsData();
+        return;
+      }
+
       // 1. Update the NFT channel on the server
-      const selectedTarget = nftChannels.find((c) => c.id === targetChannelId);
+      const targetNftId = targetChannelId.startsWith("nft:") ? targetChannelId.slice(4) : targetChannelId;
+      const selectedTarget = nftChannels.find((c) => c.id === targetNftId);
       if (!selectedTarget) {
         toast.error("Target channel not found");
         return;
@@ -730,7 +789,7 @@ function Index() {
       };
 
       // Call API to save NFT channels
-      const allUpdatedChans = nftChannels.map((c) => c.id === targetChannelId ? updatedChan : c);
+      const allUpdatedChans = nftChannels.map((c) => c.id === targetNftId ? updatedChan : c);
       await saveNftChannels(allUpdatedChans);
 
       // 2. Log in Nursery history
@@ -786,10 +845,18 @@ function Index() {
     setLoadingCrops(true);
     Promise.all([
       fetchNftChannels(),
-      fetchHarvestHistory()
-    ]).then(([chans, hist]) => {
+      fetchHarvestHistory(),
+      fetchGrowBags(),
+      fetchCropLifecycleEvents(),
+    ]).then(([chans, hist, bags, events]) => {
       setNftChannels(chans || []);
       setHarvestHistory(hist || []);
+      const normalizedBags = (bags || []).map(normalizeGrowBag);
+      if (JSON.stringify(normalizedBags) !== JSON.stringify(bags || [])) {
+        saveGrowBags(normalizedBags).catch(() => undefined);
+      }
+      setGrowBags(normalizedBags);
+      setCropLifecycleEvents(events || []);
     }).catch(() => {
       // ignore
     }).finally(() => setLoadingCrops(false));
@@ -945,7 +1012,7 @@ function Index() {
     <ErrorBoundary>
       <div className="min-h-screen bg-background flex">
         {/* Designer Sidebar */}
-        <aside className="w-64 bg-card border-r border-border flex flex-col justify-between shrink-0 hidden md:flex sticky top-0 h-screen z-10">
+        <aside className="w-64 bg-card border-r border-border flex-col justify-between shrink-0 hidden md:flex sticky top-0 h-screen z-10">
           <div className="p-5 space-y-6 overflow-y-auto flex-1">
             {/* Branding Header */}
             <div className="flex items-center gap-3 border-b border-border/40 pb-4">
@@ -1079,11 +1146,11 @@ function Index() {
               )}
               {scannedRecord && (
                 <div className={`mt-3 flex flex-col gap-2 rounded-lg border p-3 text-xs sm:flex-row sm:items-center sm:justify-between ${scannedRecord.kind === "not-found" ? "border-red-500/30 bg-red-500/5" : "border-primary/20 bg-background"}`}>
-                  <span><Badge variant="outline" className="mr-2">{scannedRecord.kind === "channel" ? "NFT channel" : scannedRecord.kind === "tray" ? "Nursery tray" : "Not found"}</Badge><strong>{scannedRecord.label}</strong></span>
+                  <span><Badge variant="outline" className="mr-2">{scannedRecord.kind === "channel" ? "NFT channel" : scannedRecord.kind === "tray" ? "Nursery tray" : scannedRecord.kind === "bag" ? "Grow bag" : "Not found"}</Badge><strong>{scannedRecord.label}</strong></span>
                   <span className="text-muted-foreground">{scannedRecord.detail}</span>
                   {scannedRecord.kind !== "not-found" && (
-                    <Button type="button" variant="outline" className="h-7 shrink-0 text-[11px]" onClick={() => setActiveTab(scannedRecord.kind === "channel" ? "history" : "nursery")}>
-                      {scannedRecord.kind === "channel" ? "View history" : "View tray"}
+                    <Button type="button" variant="outline" className="h-7 shrink-0 text-[11px]" onClick={() => setActiveTab(scannedRecord.kind === "channel" ? "history" : scannedRecord.kind === "bag" ? "grow-bags" : "nursery")}>
+                      {scannedRecord.kind === "channel" ? "View history" : scannedRecord.kind === "bag" ? "View grow bag" : "View tray"}
                     </Button>
                   )}
                 </div>
@@ -1434,7 +1501,7 @@ function Index() {
                     {/* Filter Inputs block */}
                     <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/20 p-3 mb-4 md:flex-row md:items-center text-xs">
                       {/* Search */}
-                      <div className="relative flex-1 min-w-[150px]">
+                      <div className="relative flex-1 min-w-37.5">
                         <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
                         <Input
                           placeholder="Search batch..."
@@ -1624,11 +1691,16 @@ function Index() {
                   </h2>
                   <p className="text-xs text-muted-foreground mt-0.5">Review current production by stand and row, with crop populations and upcoming harvests.</p>
                 </div>
-                <CropOperationsDashboard mode="channels" channels={nftChannels} harvestHistory={harvestHistory} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} />
+                <CropOperationsDashboard mode="channels" channels={nftChannels} harvestHistory={harvestHistory} lifecycleEvents={cropLifecycleEvents} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} growBags={growBags} />
+                <div className="space-y-3 border-t border-border/60 pt-5">
+                  <h3 className="text-base font-bold text-foreground">Grow Bag Yield History</h3>
+                  <p className="text-xs text-muted-foreground">Recurring fruit pickings are tracked separately from one-time NFT crop harvests.</p>
+                  <CropOperationsDashboard mode="harvested" channels={nftChannels} harvestHistory={harvestHistory} lifecycleEvents={cropLifecycleEvents} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} growBags={growBags} />
+                </div>
               </div>
             )}
 
-            {activeTab === "nft" && <NftChannelsTab initialChannelId={scannedChannelId} />}
+            {activeTab === "nft" && <NftChannelsTab initialChannelId={scannedChannelId} cropConfigs={cropConfigs} />}
             {activeTab === "grow-bags" && <GrowBagsTab />}
 
             {/* High-Fidelity Nursery Trays */}
@@ -1676,7 +1748,10 @@ function Index() {
                             }}>
                               <History className="h-4 w-4 text-blue-500" />
                             </Button>
-                            <Button variant="ghost" size="icon" title="Remove tray" onClick={() => setNurseryTrays((trays) => trays.filter((item) => item.id !== tray.id))}>
+                            <Button variant="ghost" size="icon" title="Remove tray" onClick={() => {
+                              if (!window.confirm(`Are you sure you want to remove nursery tray "${tray.name}"?`)) return;
+                              setNurseryTrays((trays) => trays.filter((item) => item.id !== tray.id));
+                            }}>
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </div>
@@ -1872,7 +1947,7 @@ function Index() {
 
                                 {/* Visual Grid */}
                                 <div 
-                                  className="grid gap-2 border border-indigo-200/50 rounded-lg p-2.5 bg-background shadow-inner max-h-[220px] overflow-y-auto"
+                                  className="grid gap-2 border border-indigo-200/50 rounded-lg p-2.5 bg-background shadow-inner max-h-55 overflow-y-auto"
                                   style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
                                 >
                                   {cells.map((cell) => {
@@ -1991,19 +2066,38 @@ function Index() {
                             </Button>
                           )}
                           {tray.crop && tray.germinated > 0 && (
-                            <Button
-                              onClick={() => {
-                                setActiveTrayId(tray.id);
-                                setTransplantCount(tray.germinated);
-                                setTargetChannelId(nftChannels[0]?.id || "");
-                                setTransplantNotes("");
-                                setScanQrInput("");
-                                setTransplantDialogOpen(true);
-                              }}
-                              className="w-full bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1.5 h-8 mt-2 flex items-center gap-1.5 shadow-sm"
-                            >
-                              <Sprout className="h-4 w-4" /> Shift to NFT Channel
-                            </Button>
+                            <>
+                              <Button
+                                onClick={() => {
+                                  setActiveTrayId(tray.id);
+                                  setTransplantCount(tray.germinated);
+                                  setTargetChannelId(nftChannels[0] ? `nft:${nftChannels[0].id}` : growBags[0] ? `bag:${growBags[0].id}` : "");
+                                  setTransplantNotes("");
+                                  setScanQrInput("");
+                                  setTransplantDialogOpen(true);
+                                }}
+                                className="w-full bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1.5 h-8 mt-2 flex items-center gap-1.5 shadow-sm"
+                              >
+                                <Sprout className="h-4 w-4" /> Shift to NFT Channel
+                              </Button>
+                              {growBags.length > 0 && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setActiveTrayId(tray.id);
+                                    setTransplantCount(tray.germinated);
+                                    setTargetChannelId(`bag:${growBags[0].id}`);
+                                    setTransplantNotes("");
+                                    setScanQrInput("");
+                                    setTransplantDialogOpen(true);
+                                  }}
+                                  className="h-7 w-full text-[11px] font-semibold text-green-700 border-green-600/30 hover:bg-green-50"
+                                >
+                                  <ShoppingBag className="mr-1.5 h-3.5 w-3.5" /> Shift to Grow Bag
+                                </Button>
+                              )}
+                            </>
                           )}
                         </div>
                       </Card>
@@ -2047,7 +2141,7 @@ function Index() {
                                     (c.stand && c.level && `${c.stand}-${c.level}-Ch ${c.channelIndex}`.toLowerCase() === val.trim().toLowerCase())
                                   );
                                   if (matched) {
-                                    setTargetChannelId(matched.id);
+                                    setTargetChannelId(`nft:${matched.id}`);
                                     toast.success(`Matched Target Channel: ${matched.name}!`);
                                   } else {
                                     toast.warning(`Scanned: "${val}", but no matching channel found.`);
@@ -2073,7 +2167,7 @@ function Index() {
                                 (c.stand && c.level && `${c.stand}-${c.level}-Ch ${c.channelIndex}`.toLowerCase() === val.trim().toLowerCase())
                               );
                               if (matched) {
-                                setTargetChannelId(matched.id);
+                                setTargetChannelId(`nft:${matched.id}`);
                                 toast.success(`Auto-matched target channel: ${matched.name}!`);
                               }
                             }}
@@ -2082,13 +2176,18 @@ function Index() {
                         </div>
 
                         <div className="space-y-1">
-                          <Label htmlFor="trans-channel" className="text-xs font-semibold">Target NFT Channel</Label>
+                          <Label htmlFor="trans-channel" className="text-xs font-semibold">Target NFT Channel or Grow Bag</Label>
                           <Select value={targetChannelId} onValueChange={(val) => setTargetChannelId(val)}>
                             <SelectTrigger id="trans-channel" className="h-9 text-xs"><SelectValue placeholder="Select target gully..." /></SelectTrigger>
                             <SelectContent>
                               {nftChannels.map((chan) => (
-                                <SelectItem key={chan.id} value={chan.id}>
+                                <SelectItem key={`nft:${chan.id}`} value={`nft:${chan.id}`}>
                                   {chan.name} {chan.stand ? `(📍 ${chan.stand}-${chan.level})` : ""} - {chan.status === "growing" ? `Active: ${chan.cropName}` : "Empty"}
+                                </SelectItem>
+                              ))}
+                              {growBags.map((bag) => (
+                                <SelectItem key={`bag:${bag.id}`} value={`bag:${bag.id}`}>
+                                  {bag.name} - {bag.status === "growing" ? `Active: ${bag.cropName}` : "Empty"}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -2499,9 +2598,8 @@ function TeamManagementTab() {
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem("tower_auth_token");
       const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
-        headers: { "Authorization": `Bearer ${token}` }
+        credentials: "include",
       });
       if (response.ok) {
         const data = await response.json();
@@ -2528,12 +2626,11 @@ function TeamManagementTab() {
     }
     setSubmitting(true);
     try {
-      const token = localStorage.getItem("tower_auth_token");
       const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
           username: newUsername.trim(),
@@ -2563,10 +2660,9 @@ function TeamManagementTab() {
       return;
     }
     try {
-      const token = localStorage.getItem("tower_auth_token");
       const response = await fetch(`${API_BASE_URL}/api/admin/users/${encodeURIComponent(usernameToDelete)}`, {
         method: "DELETE",
-        headers: { "Authorization": `Bearer ${token}` }
+        credentials: "include",
       });
       if (response.ok) {
         toast.success(`User "${usernameToDelete}" deleted`);
@@ -2740,7 +2836,7 @@ function LoginScreen({ onLogin }: { onLogin: (u: string, p: string) => Promise<v
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4 select-none">
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808008_1px,transparent_1px),linear-gradient(to_bottom,#80808008_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808008_1px,transparent_1px),linear-gradient(to_bottom,#80808008_1px,transparent_1px)] bg-size-[32px_32px] pointer-events-none" />
       <Card className="w-full max-w-md p-8 border-border bg-card relative overflow-hidden shadow-xl rounded-2xl">
         <div className="absolute -top-10 -right-10 w-32 h-32 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
@@ -2805,7 +2901,7 @@ function LoginScreen({ onLogin }: { onLogin: (u: string, p: string) => Promise<v
 
         <div className="mt-6 border-t border-border pt-4 text-center">
           <span className="text-[10px] text-muted-foreground font-mono font-bold">
-            Default Admin: admin / admin123
+            FarmNexus secure access
           </span>
         </div>
       </Card>

@@ -1,6 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
 import {
   PumpState,
@@ -22,6 +23,9 @@ import {
   compensateEc,
   type CameraSettings,
   type CameraSnapshot,
+  type GrowBag,
+  type NurseryStore,
+  type CropLifecycleEvent,
 } from "./tower-shared";
 import { supabaseAdmin } from "../integrations/supabase/client.server";
 
@@ -51,12 +55,51 @@ const STATE_FILE = process.env.TOWER_STATE_FILE ?? path.join(DATA_DIR, "tower-st
 const NFT_CHANNELS_FILE = process.env.TOWER_NFT_CHANNELS_FILE ?? path.join(DATA_DIR, "nft-channels.json");
 const GPIO_MAPPINGS_FILE = process.env.TOWER_GPIO_MAPPINGS_FILE ?? path.join(DATA_DIR, "gpio-mappings.json");
 const HARVEST_HISTORY_FILE = process.env.TOWER_HARVEST_HISTORY_FILE ?? path.join(DATA_DIR, "harvest-history.json");
+const GROW_BAGS_FILE = process.env.TOWER_GROW_BAGS_FILE ?? path.join(DATA_DIR, "grow-bags.json");
+const NURSERY_FILE = process.env.TOWER_NURSERY_FILE ?? path.join(DATA_DIR, "nursery.json");
+const CROP_LIFECYCLE_EVENTS_FILE = process.env.TOWER_CROP_LIFECYCLE_EVENTS_FILE ?? path.join(DATA_DIR, "crop-lifecycle-events.json");
 const EVENTS_TABLE = "tower_events";
 
 const HAS_SUPABASE_EVENTS = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 let nftChannels: NftChannel[] = [];
 let gpioMappings: GpioMapping[] = [];
+
+const DEFAULT_GROW_BAGS: GrowBag[] = [
+  { id: "PH01-B01-Bag 1", name: "PH01-B01-Bag 1", qrCode: "PH01-B01-Bag 1", cropName: "Cherry Tomatoes", status: "growing", capacity: 8, currentCount: 6, plantedAt: new Date().toISOString(), harvestedAt: null, polyhouse: "PH01", block: "B01", bagIndex: "1", notes: "Healthy growth" },
+  { id: "PH01-B01-Bag 2", name: "PH01-B01-Bag 2", qrCode: "PH01-B01-Bag 2", cropName: "", status: "empty", capacity: 8, currentCount: 0, plantedAt: null, harvestedAt: null, polyhouse: "PH01", block: "B01", bagIndex: "2", notes: "" },
+];
+
+const DEFAULT_NURSERY_STORE: NurseryStore = { trays: [
+  { id: "tray-1", name: "Tray 1", crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
+  { id: "tray-2", name: "Tray 2", crop: "", plantedOn: "", plugs: 30, germinated: 0, status: "empty" },
+], history: [], configs: [] };
+
+function loadJsonFile<T>(file: string, fallback: T): T {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+  } catch (error) {
+    console.error(`Failed to load ${file}:`, error);
+  }
+  return fallback;
+}
+
+function saveJsonFile<T>(file: string, value: T) {
+  try {
+    ensureDataDir();
+    const temporaryFile = `${file}.tmp`;
+    fs.writeFileSync(temporaryFile, JSON.stringify(value, null, 2), "utf8");
+    fs.renameSync(temporaryFile, file);
+  } catch (error) {
+    console.error(`Failed to save ${file}:`, error);
+    throw error;
+  }
+}
+
+let growBags: GrowBag[] = [];
+let nurseryStore: NurseryStore = DEFAULT_NURSERY_STORE;
+let cropLifecycleEvents: CropLifecycleEvent[] = [];
 
 const DEFAULT_NFT_CHANNELS: NftChannel[] = [
   { id: "PH01-B01-R01-L01-C01", name: "PH01-B01-R01-L01-C01", qrCode: "PH01-B01-R01-L01-C01", cropName: "", plantedAt: null, harvestedAt: null, notes: "", status: "empty", polyhouse: "PH01", block: "B01", row: "R01", level: "L01", channelIndex: 1, capacity: 50 },
@@ -112,6 +155,9 @@ function saveGpioMappingsToDisk(mappings: GpioMapping[]) {
 // Initial NVS load equivalent on backend boot
 nftChannels = loadNftChannelsFromDisk();
 gpioMappings = loadGpioMappingsFromDisk();
+growBags = loadJsonFile(GROW_BAGS_FILE, DEFAULT_GROW_BAGS);
+nurseryStore = loadJsonFile(NURSERY_FILE, DEFAULT_NURSERY_STORE);
+cropLifecycleEvents = loadJsonFile(CROP_LIFECYCLE_EVENTS_FILE, []);
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -168,6 +214,24 @@ export type UserEntry = {
   passwordHash: string;
   role: "admin" | "operator";
 };
+
+export function hashUserPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const derivedKey = scryptSync(password, salt, 64).toString("hex");
+  return `scrypt$${salt}$${derivedKey}`;
+}
+
+export function verifyUserPassword(password: string, storedValue: string): { valid: boolean; needsMigration: boolean } {
+  if (!storedValue.startsWith("scrypt$")) {
+    return { valid: password === storedValue, needsMigration: password === storedValue };
+  }
+
+  const [, salt, expectedHex] = storedValue.split("$");
+  if (!salt || !expectedHex) return { valid: false, needsMigration: false };
+  const actual = scryptSync(password, salt, 64);
+  const expected = Buffer.from(expectedHex, "hex");
+  return { valid: actual.length === expected.length && timingSafeEqual(actual, expected), needsMigration: false };
+}
 
 type PersistedTowerState = {
   status?: LiveStatus | null;
@@ -256,6 +320,10 @@ export function addUser(user: UserEntry) {
     throw new Error("User already exists");
   }
   users.push(user);
+  saveStateToDisk();
+}
+
+export function saveStateToDiskForAuth() {
   saveStateToDisk();
 }
 
@@ -1405,6 +1473,42 @@ export function saveHarvestHistory(history: HarvestHistoryEntry[]) {
   } catch (error) {
     console.error("Failed to save harvest history to disk:", error);
   }
+}
+
+export function getGrowBags(): GrowBag[] {
+  return growBags;
+}
+
+export function saveGrowBags(nextBags: GrowBag[]): GrowBag[] {
+  growBags = nextBags;
+  saveJsonFile(GROW_BAGS_FILE, growBags);
+  return growBags;
+}
+
+export function getNurseryStore(): NurseryStore {
+  return nurseryStore;
+}
+
+export function saveNurseryStore(nextStore: NurseryStore): NurseryStore {
+  nurseryStore = nextStore;
+  saveJsonFile(NURSERY_FILE, nurseryStore);
+  return nurseryStore;
+}
+
+export function getCropLifecycleEvents(): CropLifecycleEvent[] {
+  return cropLifecycleEvents;
+}
+
+export function saveCropLifecycleEvents(nextEvents: CropLifecycleEvent[]): CropLifecycleEvent[] {
+  cropLifecycleEvents = nextEvents;
+  saveJsonFile(CROP_LIFECYCLE_EVENTS_FILE, cropLifecycleEvents);
+  return cropLifecycleEvents;
+}
+
+export function appendCropLifecycleEvent(event: CropLifecycleEvent): CropLifecycleEvent {
+  cropLifecycleEvents = [...cropLifecycleEvents, event];
+  saveJsonFile(CROP_LIFECYCLE_EVENTS_FILE, cropLifecycleEvents);
+  return event;
 }
 
 export function harvestCrop(

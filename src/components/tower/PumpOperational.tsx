@@ -34,6 +34,7 @@ import {
   PUMP_STATE_COLORS,
   fetchFaultHistory,
   fetchPumpLogs,
+  withDeviceHeaders,
   type LiveStatus,
   type Schedule,
 } from "@/lib/tower-storage";
@@ -318,11 +319,11 @@ export function ManualControlPanel({
         ? { action: nextMode === "AUTO" ? "auto" : "manual" }
         : { action: nextMode === "AUTO" ? "auto" : "manual", desiredOn: false };
 
-      await fetch(endpoint, {
+      await fetch(endpoint, withDeviceHeaders({
         method: "POST",
         headers,
         body: JSON.stringify(body),
-      });
+      }, deviceId));
       setManualModes((current) => ({ ...current, [pumpKey]: nextMode }));
       toast.success(`Control mode updated successfully!`);
     } catch {
@@ -344,11 +345,11 @@ export function ManualControlPanel({
       : action;
 
     try {
-      await fetch(endpoint, {
+      await fetch(endpoint, withDeviceHeaders({
         method: "POST",
         headers: { "Content-Type": "application/json", "x-device-id": deviceId },
         body: JSON.stringify({ action: requestAction }),
-      });
+      }, deviceId));
       toast.success(`Triggered manual override: ${type} ${action}`);
     } catch {
       toast.error("Override request failed");

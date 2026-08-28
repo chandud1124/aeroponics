@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { HarvestHistoryEntry, NftChannel } from "@/lib/tower-storage";
+import type { CropLifecycleEvent, GrowBag } from "@/lib/tower-shared";
 
 type NurseryTray = {
   id: string;
@@ -40,6 +41,8 @@ type Props = {
   harvestHistory: HarvestHistoryEntry[];
   nurseryTrays: NurseryTray[];
   nurseryHistory: Array<{ crop: string; germinated: number }>;
+  lifecycleEvents?: CropLifecycleEvent[];
+  growBags?: GrowBag[];
 };
 
 const chartColors = ["#0f766e", "#f59e0b", "#2563eb", "#db2777", "#65a30d", "#7c3aed"];
@@ -50,9 +53,12 @@ export function CropOperationsDashboard({
   harvestHistory,
   nurseryTrays,
   nurseryHistory,
+  lifecycleEvents = [],
+  growBags = [],
 }: Props) {
   const [groupFilter, setGroupFilter] = useState("ALL");
   const [chartGrouping, setChartGrouping] = useState<"crop" | "stand">("crop");
+  const [historyRange, setHistoryRange] = useState<"today" | "7" | "30" | "all">("today");
   const [nurseryFilter, setNurseryFilter] = useState("ALL");
 
   const activeChannels = channels.filter((channel) => channel.status === "growing");
@@ -78,41 +84,109 @@ export function CropOperationsDashboard({
             : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`;
           return displayGroup === groupFilter;
         });
-  const holeStatusData = useMemo(() => {
-    const channelGroups = new Map<string, { empty: number; growing: number }>();
+  const currentOccupancyData = useMemo(() => {
+    const channelGroups = new Map<string, { totalHoles: number; plantedNow: number; emptyNow: number }>();
     selectedChannels.forEach((channel) => {
-      const group = chartGrouping === "crop"
-        ? (channel.cropName || channel.crops?.[0]?.cropName || "Unassigned crop")
-        : (channel.polyhouse && channel.block && channel.row
-          ? `${channel.polyhouse}-${channel.block}-${channel.row}`
-          : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`);
-      const current = channelGroups.get(group) || { empty: 0, growing: 0 };
-      const capacity = channel.capacity || 0;
+      const capacity = Math.max(0, channel.capacity || 0);
       const occupied = Math.min(capacity, channel.currentCount || 0);
-      current.empty += Math.max(0, capacity - occupied);
-      current.growing += occupied;
-      channelGroups.set(group, current);
-    });
+      const standGroup = channel.polyhouse && channel.block && channel.row
+        ? `${channel.polyhouse}-${channel.block}-${channel.row}`
+        : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`;
+      if (chartGrouping === "stand") {
+        const current = channelGroups.get(standGroup) || { totalHoles: 0, plantedNow: 0, emptyNow: 0 };
+        current.totalHoles += capacity;
+        current.emptyNow += Math.max(0, capacity - occupied);
+        current.plantedNow += occupied;
+        channelGroups.set(standGroup, current);
+        return;
+      }
 
-    const harvestedByGroup = new Map<string, number>();
-    harvestHistory.forEach((entry) => {
-      const channel = channels.find((item) => item.id === entry.channelId);
+      const entries = channel.crops?.length
+        ? channel.crops
+        : channel.cropName
+          ? [{ cropName: channel.cropName.split(",")[0].split("(")[0].trim(), count: occupied }]
+          : [{ cropName: "Unassigned crop", count: 0 }];
+      entries.forEach((entry, index) => {
+        const group = entry.cropName.trim() || "Unassigned crop";
+        const current = channelGroups.get(group) || { totalHoles: 0, plantedNow: 0, emptyNow: 0 };
+        current.plantedNow += Math.min(occupied, entry.count || 0);
+        if (index === 0) {
+          current.totalHoles += capacity;
+          current.emptyNow += Math.max(0, capacity - occupied);
+        }
+        channelGroups.set(group, current);
+      });
+    });
+    return Array.from(channelGroups, ([name, value]) => ({ name, ...value })).sort(
+      (a, b) => b.totalHoles - a.totalHoles,
+    );
+  }, [chartGrouping, selectedChannels]);
+
+  const historicalActivityData = useMemo(() => {
+    const cutoff = historyRange === "today"
+      ? new Date(new Date().setHours(0, 0, 0, 0)).getTime()
+      : historyRange === "all" ? 0 : Date.now() - Number(historyRange) * 24 * 60 * 60 * 1000;
+    const totals = new Map<string, { planted: number; harvested: number; removed: number; transferred: number }>();
+    const legacyEvents = lifecycleEvents.length === 0
+      ? harvestHistory.flatMap((entry) => {
+        const channel = channels.find((item) => item.id === entry.channelId);
+        const location = channel ? {
+          polyhouse: channel.polyhouse,
+          block: channel.block,
+          row: channel.row,
+          stand: channel.stand,
+          level: channel.level,
+          channelIndex: channel.channelIndex,
+          holeConfig: channel.holeConfig,
+        } : undefined;
+        const events: CropLifecycleEvent[] = [];
+        if ((entry.yieldQty || 0) > 0) events.push({ id: `legacy-harvested-${entry.id}`, type: "harvested", timestamp: entry.harvestedAt, cropName: entry.cropName, quantity: entry.yieldQty || 0, sourceId: entry.channelId, sourceName: entry.channelName, location });
+        if ((entry.wasteQty || 0) > 0) events.push({ id: `legacy-removed-${entry.id}`, type: "removed", timestamp: entry.harvestedAt, cropName: entry.cropName, quantity: entry.wasteQty || 0, sourceId: entry.channelId, sourceName: entry.channelName, location });
+        return events;
+      })
+      : [];
+    const filteredEvents = [...lifecycleEvents, ...legacyEvents].filter((event) => new Date(event.timestamp).getTime() >= cutoff);
+    filteredEvents.forEach((event) => {
+      const location = event.location || {};
       const group = chartGrouping === "crop"
-        ? (entry.cropName || "Unknown crop").split("(")[0].trim()
-        : channel?.polyhouse && channel.block && channel.row
-          ? `${channel.polyhouse}-${channel.block}-${channel.row}`
-          : `${channel?.stand || "Unassigned"} / ${channel?.level || "Unassigned"}`;
-      harvestedByGroup.set(group, (harvestedByGroup.get(group) || 0) + (entry.yieldQty || 0) + (entry.wasteQty || 0));
+        ? (event.cropName || "Unknown crop").split("(")[0].trim()
+        : location.polyhouse && location.block && location.row
+          ? `${location.polyhouse}-${location.block}-${location.row}`
+          : `${location.stand || "Unassigned"} / ${location.level || "Unassigned"}`;
+      const current = totals.get(group) || { planted: 0, harvested: 0, removed: 0, transferred: 0 };
+      current[event.type] += event.quantity;
+      totals.set(group, current);
     });
+    return Array.from(totals, ([name, value]) => ({ name, ...value })).sort(
+      (a, b) => (b.planted + b.harvested + b.removed + b.transferred) - (a.planted + a.harvested + a.removed + a.transferred),
+    );
+  }, [chartGrouping, channels, harvestHistory, historyRange, lifecycleEvents]);
 
-    const groups = new Set([...channelGroups.keys(), ...harvestedByGroup.keys()]);
-    return Array.from(groups, (name) => ({
-      name,
-      empty: channelGroups.get(name)?.empty || 0,
-      growing: channelGroups.get(name)?.growing || 0,
-      harvested: harvestedByGroup.get(name) || 0,
-    })).sort((a, b) => (b.empty + b.growing + b.harvested) - (a.empty + a.growing + a.harvested));
-  }, [chartGrouping, channels, harvestHistory, selectedChannels]);
+  const currentTotals = currentOccupancyData.reduce(
+    (totals, group) => ({
+      totalHoles: totals.totalHoles + group.totalHoles,
+      plantedNow: totals.plantedNow + group.plantedNow,
+      emptyNow: totals.emptyNow + group.emptyNow,
+    }),
+    { totalHoles: 0, plantedNow: 0, emptyNow: 0 },
+  );
+
+  const historyEvents = lifecycleEvents.length ? lifecycleEvents : harvestHistory.flatMap((entry) => {
+    const channel = channels.find((item) => item.id === entry.channelId);
+    const location = channel ? {
+      polyhouse: channel.polyhouse,
+      block: channel.block,
+      row: channel.row,
+      stand: channel.stand,
+      level: channel.level,
+      channelIndex: channel.channelIndex,
+      holeConfig: channel.holeConfig,
+    } : undefined;
+    return [
+      ...(entry.yieldQty ? [{ id: `legacy-harvested-${entry.id}`, type: "harvested" as const, timestamp: entry.harvestedAt, cropName: entry.cropName, quantity: entry.yieldQty, sourceId: entry.channelId, sourceName: entry.channelName, location }] : []),
+      ...(entry.wasteQty ? [{ id: `legacy-removed-${entry.id}`, type: "removed" as const, timestamp: entry.harvestedAt, cropName: entry.cropName, quantity: entry.wasteQty, sourceId: entry.channelId, sourceName: entry.channelName, location }] : []),
+    ];
+  });
 
   const nurseryCrops = useMemo(() => {
     const totals = new Map<string, { trays: number; plugs: number; ready: number }>();
@@ -133,12 +207,13 @@ export function CropOperationsDashboard({
 
   const yieldByCrop = useMemo(() => {
     const totals = new Map<string, { yieldQty: number; wasteQty: number; yieldKg: number; wasteKg: number; harvests: number }>();
-    harvestHistory.forEach((entry) => {
+    const growBagIds = new Set(growBags.map((bag) => bag.id));
+    harvestHistory.filter((entry) => growBagIds.has(entry.channelId) || entry.id.startsWith("bag-harv-")).forEach((entry) => {
       const name = entry.cropName || entry.crops?.[0]?.cropName || "Unknown crop";
       const current = totals.get(name) || { yieldQty: 0, wasteQty: 0, yieldKg: 0, wasteKg: 0, harvests: 0 };
       
       const wGrams = entry.avgWeightGrams || 150; // default 150 grams per plant
-      const yKg = ((entry.yieldQty || 0) * wGrams) / 1000;
+      const yKg = entry.yieldKg ?? ((entry.yieldQty || 0) * wGrams) / 1000;
       const wKg = ((entry.wasteQty || 0) * wGrams) / 1000;
 
       current.yieldQty += entry.yieldQty || 0;
@@ -151,7 +226,7 @@ export function CropOperationsDashboard({
     return Array.from(totals, ([name, value]) => ({ name, ...value })).sort(
       (a, b) => b.yieldKg - a.yieldKg,
     );
-  }, [harvestHistory]);
+  }, [growBags, harvestHistory]);
 
   if (mode === "nursery") {
     const totalPlugs = nurseryTrays.reduce((sum, tray) => sum + tray.plugs, 0);
@@ -279,8 +354,8 @@ export function CropOperationsDashboard({
         <Card className="p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="font-semibold">Hole status and harvest volume</h3>
-              <p className="mt-1 text-xs text-muted-foreground">Compare empty holes, growing plants, and harvested plants.</p>
+              <h3 className="font-semibold">Current NFT hole occupancy</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Live capacity only. Empty holes are available now, not historical harvests.</p>
             </div>
             <Select value={chartGrouping} onValueChange={(value) => setChartGrouping(value as "crop" | "stand")}>
               <SelectTrigger className="w-full sm:w-44">
@@ -292,19 +367,92 @@ export function CropOperationsDashboard({
               </SelectContent>
             </Select>
           </div>
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <Metric icon={Warehouse} label="Total holes" value={currentTotals.totalHoles} />
+            <Metric icon={Sprout} label="Planted now" value={currentTotals.plantedNow} />
+            <Metric icon={PackageCheck} label="Empty / available now" value={currentTotals.emptyNow} />
+          </div>
           <div className="mt-4 h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={holeStatusData}>
+              <BarChart data={currentOccupancyData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="empty" name="Empty holes" stackId="holes" fill="#94a3b8" />
-                <Bar dataKey="growing" name="Growing plants" stackId="holes" fill="#0f766e" />
-                <Bar dataKey="harvested" name="Harvested plants" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="totalHoles" name="Total holes" fill="#cbd5e1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="plantedNow" name="Planted now" fill="#0f766e" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="emptyNow" name="Empty / available now" fill="#94a3b8" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+          </div>
+        </Card>
+        <Card className="p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-semibold">Daily crop movement</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Historical activity is separate from current hole occupancy.</p>
+            </div>
+            <Select value={historyRange} onValueChange={(value) => setHistoryRange(value as "today" | "7" | "30" | "all")}>
+              <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="7">Last 7 days</SelectItem>
+                <SelectItem value="30">Last 30 days</SelectItem>
+                <SelectItem value="all">All history</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="mt-4 h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={historicalActivityData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="planted" name="Planted" fill="#2563eb" />
+                <Bar dataKey="harvested" name="Harvested" fill="#f59e0b" />
+                <Bar dataKey="removed" name="Removed / waste" fill="#ef4444" />
+                <Bar dataKey="transferred" name="Transferred" fill="#7c3aed" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-4 overflow-x-auto rounded-lg border">
+            <table className="w-full min-w-175 text-xs">
+              <thead className="bg-muted/40 text-left">
+                <tr>
+                  <th className="px-3 py-2">Time</th>
+                  <th className="px-3 py-2">Event</th>
+                  <th className="px-3 py-2">Crop</th>
+                  <th className="px-3 py-2">Quantity</th>
+                  <th className="px-3 py-2">From / to</th>
+                  <th className="px-3 py-2">Location</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {historyEvents
+                  .filter((event) => {
+                    const cutoff = historyRange === "today"
+                      ? new Date(new Date().setHours(0, 0, 0, 0)).getTime()
+                      : historyRange === "all" ? 0 : Date.now() - Number(historyRange) * 24 * 60 * 60 * 1000;
+                    return new Date(event.timestamp).getTime() >= cutoff;
+                  })
+                  .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+                  .slice(0, 30)
+                  .map((event) => (
+                    <tr key={event.id}>
+                      <td className="whitespace-nowrap px-3 py-2">{new Date(event.timestamp).toLocaleString()}</td>
+                      <td className="px-3 py-2 capitalize">{event.type}</td>
+                      <td className="px-3 py-2">{event.cropName}</td>
+                      <td className="px-3 py-2 font-mono">{event.quantity}</td>
+                      <td className="px-3 py-2">{event.sourceName || "-"} {"destinationName" in event && event.destinationName ? `→ ${event.destinationName}` : ""}</td>
+                      <td className="px-3 py-2">{event.location?.polyhouse || "-"} {event.location?.row || ""} {event.location?.holeConfig || ""}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            {!historyEvents.length && <EmptyState text="No crop movement events recorded yet." />}
           </div>
         </Card>
       </div>
@@ -316,36 +464,34 @@ export function CropOperationsDashboard({
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric icon={PackageCheck} label="Harvest records" value={harvestHistory.length} />
+        <Metric icon={PackageCheck} label="Picking records" value={harvestHistory.filter((entry) => growBags.some((bag) => bag.id === entry.channelId)).length} />
         <Metric icon={Leaf} label="Yield" value={`${totalYieldKg.toFixed(1)} kg`} />
         <Metric icon={BarChart3} label="Waste" value={`${totalWasteKg.toFixed(1)} kg`} />
-        <Metric icon={Sprout} label="Growing now" value={activeChannels.length} />
+        <Metric icon={Sprout} label="Plants growing" value={growBags.filter((bag) => bag.status === "growing").reduce((sum, bag) => sum + (bag.currentCount || 0), 0)} />
       </div>
       <Card className="p-5">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="font-semibold">Current crop status</h3>
-          <Badge variant="outline">{activeChannels.length} active channels</Badge>
+          <h3 className="font-semibold">Current grow-bag plants</h3>
+          <Badge variant="outline">{growBags.filter((bag) => bag.status === "growing").length} active bags</Badge>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {activeChannels.length ? (
-            activeChannels.map((channel) => (
-              <div key={channel.id} className="border rounded-lg p-3 text-sm">
+          {growBags.filter((bag) => bag.status === "growing").length ? (
+            growBags.filter((bag) => bag.status === "growing").map((bag) => (
+              <div key={bag.id} className="border rounded-lg p-3 text-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <strong>{channel.cropName || "Unnamed crop"}</strong>
-                  <Badge variant="secondary">{channel.currentCount || 0} plants</Badge>
+                  <strong>{bag.cropName || "Unnamed crop"}</strong>
+                  <Badge variant="secondary">{bag.currentCount || 0} plants</Badge>
                 </div>
                 <p className="mt-1 text-xs font-semibold text-muted-foreground font-mono">
-                  {channel.name}
+                  {bag.name}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {channel.expectedHarvestISO
-                    ? `Expected ${new Date(channel.expectedHarvestISO).toLocaleDateString()}`
-                    : "Harvest date not set"}
+                  {bag.plantedAt ? `Planted ${new Date(bag.plantedAt).toLocaleDateString()}` : "Planting date not set"}
                 </p>
               </div>
             ))
           ) : (
-            <EmptyState text="No crops are currently marked as growing." />
+            <EmptyState text="No grow-bag plants are currently marked as growing." />
           )}
         </div>
       </Card>

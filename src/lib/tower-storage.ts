@@ -16,6 +16,9 @@ import type {
   GpioMapping,
   HarvestHistoryEntry,
   NftCropEntry,
+  GrowBag,
+  NurseryStore,
+  CropLifecycleEvent,
 } from "./tower-shared";
 
 export {
@@ -36,6 +39,9 @@ export type {
   GpioMapping,
   HarvestHistoryEntry,
   NftCropEntry,
+  GrowBag,
+  NurseryStore,
+  CropLifecycleEvent,
 };
 
 export type StatusEnvelope = {
@@ -53,24 +59,18 @@ export function withDeviceHeaders(init: RequestInit = {}, deviceId?: string | nu
     headers.set("x-device-id", trimmedDeviceId);
   }
 
-  return { ...init, headers };
+  return { ...init, headers, credentials: "include" };
 }
 
 async function requestJson<T>(path: string, init?: RequestInit, deviceId?: string | null): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("tower_auth_token") : null;
-  const authHeaders: Record<string, string> = {};
-  if (token) {
-    authHeaders["Authorization"] = `Bearer ${token}`;
-  }
-
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...withDeviceHeaders(init, deviceId),
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders,
       ...Object.fromEntries(new Headers(init?.headers ?? {}).entries()),
       ...(deviceId?.trim() ? { "x-device-id": deviceId.trim() } : {}),
     },
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -207,17 +207,14 @@ export async function fetchAdminDevices(adminPasskey: string): Promise<DeviceLis
 }
 
 export async function createAdminDevice(adminPasskey: string, name?: string, macAddress?: string, ipAddress?: string): Promise<DeviceCreateResult> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("tower_auth_token") : null;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "x-admin-passkey": adminPasskey,
   };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
   const response = await fetch(`${API_BASE_URL}/api/admin/devices`, {
     method: "POST",
     headers,
+    credentials: "include",
     body: JSON.stringify({ name, macAddress, ipAddress }),
   });
 
@@ -323,5 +320,44 @@ export async function saveHarvestHistoryRemote(history: HarvestHistoryEntry[]): 
     method: "PUT",
     body: JSON.stringify(history),
   });
+}
+
+export async function fetchGrowBags(): Promise<GrowBag[]> {
+  return requestJson<GrowBag[]>("/api/grow-bags", { method: "GET" });
+}
+
+export async function saveGrowBags(bags: GrowBag[]): Promise<GrowBag[]> {
+  return requestJson<GrowBag[]>("/api/grow-bags", {
+    method: "PUT",
+    body: JSON.stringify(bags),
+  });
+}
+
+export async function fetchNurseryStore(): Promise<NurseryStore> {
+  return requestJson<NurseryStore>("/api/nursery", { method: "GET" });
+}
+
+export async function saveNurseryStore(store: NurseryStore): Promise<NurseryStore> {
+  return requestJson<NurseryStore>("/api/nursery", {
+    method: "PUT",
+    body: JSON.stringify(store),
+  });
+}
+
+export async function fetchCropLifecycleEvents(): Promise<CropLifecycleEvent[]> {
+  return requestJson<CropLifecycleEvent[]>("/api/crop-lifecycle-events", { method: "GET" });
+}
+
+export async function saveCropLifecycleEvents(events: CropLifecycleEvent[]): Promise<CropLifecycleEvent[]> {
+  return requestJson<CropLifecycleEvent[]>("/api/crop-lifecycle-events", {
+    method: "PUT",
+    body: JSON.stringify(events),
+  });
+}
+
+export async function appendCropLifecycleEvent(event: CropLifecycleEvent): Promise<CropLifecycleEvent> {
+  const events = await fetchCropLifecycleEvents();
+  await saveCropLifecycleEvents([...events, event]);
+  return event;
 }
 

@@ -10,7 +10,9 @@ import { toast } from "sonner";
 import { FlaskConical, Gauge, Activity, Settings, Zap, ShieldAlert, Sparkles, AlertCircle } from "lucide-react";
 import {
   fetchSchedule,
+  fetchDevices,
   saveScheduleRemote,
+  withDeviceHeaders,
   type Schedule,
   type LiveStatus,
   type GpioMapping,
@@ -59,16 +61,11 @@ export function NutritionTab({ status, schedule, onScheduleChange, deviceId, con
 
   const loadDevices = async () => {
     try {
-      const res = await fetch(`${window.location.origin}/api/admin/devices`, {
-        headers: { "x-admin-passkey": "admin123" }
-      });
-      const data = await res.json();
-      if (data && data.devices) {
-        setDevices(data.devices);
-        if (data.devices.length > 0) {
-          setSelectedDeviceId(data.devices[0].deviceId);
+      const nextDevices = await fetchDevices();
+      setDevices(nextDevices);
+      if (nextDevices.length > 0) {
+          setSelectedDeviceId(deviceId || nextDevices[0].deviceId);
         }
-      }
     } catch {
       // ignore
     } finally {
@@ -78,7 +75,7 @@ export function NutritionTab({ status, schedule, onScheduleChange, deviceId, con
 
   useEffect(() => {
     loadDevices();
-    fetchSchedule().then((fetched) => {
+    fetchSchedule(deviceId).then((fetched) => {
       setS(fetched);
     });
   }, []);
@@ -118,20 +115,20 @@ export function NutritionTab({ status, schedule, onScheduleChange, deviceId, con
     }
 
     try {
-      await fetch(apiEndpoint, {
+      await fetch(apiEndpoint, withDeviceHeaders({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "on", deviceId: selectedDeviceId }),
-      });
+      }, selectedDeviceId));
       
       toast.info(`Pulse dosing ${ml} mL (${durationSeconds}s) via pump...`);
 
       setTimeout(async () => {
-        await fetch(apiEndpoint, {
+        await fetch(apiEndpoint, withDeviceHeaders({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "off", deviceId: selectedDeviceId }),
-        });
+        }, selectedDeviceId));
         setDosingActive((prev) => ({ ...prev, [pumpType]: false }));
         toast.success(`Dosing pulse complete.`);
       }, durationSeconds * 1000);
@@ -155,7 +152,7 @@ export function NutritionTab({ status, schedule, onScheduleChange, deviceId, con
     };
 
     try {
-      await saveScheduleRemote(updatedSchedule);
+      await saveScheduleRemote(updatedSchedule, selectedDeviceId || deviceId);
       onScheduleChange(updatedSchedule);
       toast.success("Dosing configurations & automation rules saved!");
     } catch (e: any) {
