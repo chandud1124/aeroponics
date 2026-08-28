@@ -319,11 +319,14 @@ export function ManualControlPanel({
         ? { action: nextMode === "AUTO" ? "auto" : "manual" }
         : { action: nextMode === "AUTO" ? "auto" : "manual", desiredOn: false };
 
-      await fetch(endpoint, withDeviceHeaders({
+      const response = await fetch(endpoint, withDeviceHeaders({
         method: "POST",
         headers,
         body: JSON.stringify(body),
       }, deviceId));
+      if (!response.ok) {
+        throw new Error((await response.text()) || `Request failed with status ${response.status}`);
+      }
       setManualModes((current) => ({ ...current, [pumpKey]: nextMode }));
       toast.success(`Control mode updated successfully!`);
     } catch {
@@ -345,11 +348,14 @@ export function ManualControlPanel({
       : action;
 
     try {
-      await fetch(endpoint, withDeviceHeaders({
+      const response = await fetch(endpoint, withDeviceHeaders({
         method: "POST",
         headers: { "Content-Type": "application/json", "x-device-id": deviceId },
         body: JSON.stringify({ action: requestAction }),
       }, deviceId));
+      if (!response.ok) {
+        throw new Error((await response.text()) || `Request failed with status ${response.status}`);
+      }
       toast.success(`Triggered manual override: ${type} ${action}`);
     } catch {
       toast.error("Override request failed");

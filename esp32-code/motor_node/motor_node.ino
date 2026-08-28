@@ -59,7 +59,7 @@ const char* DEVICE_ID     = "device-sxdvr3";
 const char* DEVICE_SECRET = "e97ab526fe885f000b33c434133b1f899120303bd4ba2792";
 
 // Timing Intervals
-const unsigned long IV_SCHEDULE     = 60000UL;
+const unsigned long IV_SCHEDULE     = 5000UL; // Poll remote motor commands every 5s
 const unsigned long IV_WDT_FEED     = 5000UL;
 const unsigned long IV_WIFI_CHECK   = 10000UL;
 const unsigned long WIFI_BACKOFF_MAX = 60000UL;

@@ -118,6 +118,30 @@ function getCookieUser(request: Request): { username: string; role: "admin" | "o
 }
 
 const manualPumpSessions = new Map<string, ManualPumpSession>();
+const pendingMotorCommands = new Map<string, { motor?: string; motor_2?: string }>();
+
+function setPendingMotorCommand(deviceId: string, pumpIndex: 1 | 2, mode: "AUTO" | "FORCED_ON" | "FORCED_OFF") {
+  const pending = pendingMotorCommands.get(deviceId) ?? {};
+  if (pumpIndex === 1) pending.motor = mode;
+  else pending.motor_2 = mode;
+  pendingMotorCommands.set(deviceId, pending);
+}
+
+function reconcileMotorCommand(deviceId: string, reportedMode: string | undefined, pumpIndex: 1 | 2) {
+  const pending = pendingMotorCommands.get(deviceId);
+  if (!pending) return reportedMode;
+
+  const key = pumpIndex === 1 ? "motor" : "motor_2";
+  const requestedMode = pending[key];
+  if (!requestedMode) return reportedMode;
+  if (reportedMode === requestedMode) {
+    delete pending[key];
+    if (!pending.motor && !pending.motor_2) pendingMotorCommands.delete(deviceId);
+    else pendingMotorCommands.set(deviceId, pending);
+    return reportedMode;
+  }
+  return requestedMode;
+}
 
 function getManualPumpSession(deviceId: string): ManualPumpSession | null {
   return manualPumpSessions.get(deviceId) ?? null;
@@ -143,6 +167,7 @@ function clearManualPumpSession(deviceId: string) {
 
 function startManualPump(deviceId: string) {
   const session = beginManualPumpSession(deviceId);
+  setPendingMotorCommand(deviceId, 1, "FORCED_ON");
 
   updateStatus(
     {
@@ -172,6 +197,7 @@ function stopManualPump(deviceId: string) {
   const startedAtMs = session?.startedAtMs ?? Date.now();
   const endedAtMs = Date.now();
   const durationSeconds = Math.max(0, Math.round((endedAtMs - startedAtMs) / 1000));
+  setPendingMotorCommand(deviceId, 1, "FORCED_OFF");
 
   updateStatus(
     {
@@ -611,6 +637,13 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         reservoirTempC?: number | null;
         nftTempC?: number | null;
       };
+
+      if (payload.motorManualMode !== undefined) {
+        payload.motorManualMode = reconcileMotorCommand(resolvedDeviceId, payload.motorManualMode, 1) as typeof payload.motorManualMode;
+      }
+      if (payload.motorManualMode_2 !== undefined) {
+        payload.motorManualMode_2 = reconcileMotorCommand(resolvedDeviceId, payload.motorManualMode_2, 2) as typeof payload.motorManualMode_2;
+      }
 
       // Force unmapped sensor values to null if device registry has custom pins configured
       const devicePins = getDevicePins(resolvedDeviceId);
@@ -1318,6 +1351,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     if (payload.action === "auto") {
       clearManualPumpSession(targetDevice!);
+      setPendingMotorCommand(targetDevice!, 1, "AUTO");
       updateStatus({
         pumpOn: false,
         flowing: false,
@@ -1366,6 +1400,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     const targetDevice = getTargetDeviceId(request);
 
     if (payload.action === "auto") {
+      setPendingMotorCommand(targetDevice!, 2, "AUTO");
       updateStatus({
         pumpOn_2: false,
         flowing_2: false,
@@ -1378,6 +1413,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
 
     if (payload.action === "manual") {
       const desiredOn = Boolean(payload.desiredOn);
+      setPendingMotorCommand(targetDevice!, 2, desiredOn ? "FORCED_ON" : "FORCED_OFF");
       updateStatus({
         pumpOn_2: desiredOn,
         flowing_2: desiredOn,
@@ -1389,6 +1425,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     if (payload.action === "start") {
+      setPendingMotorCommand(targetDevice!, 2, "FORCED_ON");
       updateStatus({
         pumpOn_2: true,
         flowing_2: true,
@@ -1405,6 +1442,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
       pumpState_2: PumpState.IDLE,
       motorManualMode_2: "FORCED_OFF",
     }, { deviceId: targetDevice });
+    setPendingMotorCommand(targetDevice!, 2, "FORCED_OFF");
     return jsonResponse({ success: true, state: "IDLE", pumpOn_2: false }, 201);
   }
 
