@@ -55,8 +55,8 @@ const char* WIFI_PASS     = "Whoareu@0000";
 
 // Backend API
 const char* API_BASE_URL = "https://hydroponics.chandugowda.site";
-const char* DEVICE_ID     = "device-ry5fbc";
-const char* DEVICE_SECRET = "32044676ac399a0f383ccc4f9693001a8163ebc228abbf2c";
+const char* DEVICE_ID     = "device-sxdvr3";
+const char* DEVICE_SECRET = "e97ab526fe885f000b33c434133b1f899120303bd4ba2792";
 
 // Timing Intervals
 const unsigned long IV_SCHEDULE     = 60000UL;
@@ -657,7 +657,6 @@ int httpRequest(const char* method, const char* path, const String& body = "") {
   http.begin(String(API_BASE_URL) + path);
   http.addHeader("Content-Type", "application/json");
   // Authenticate with the device ID registered in Admin > Devices.
-  // The board MAC is only diagnostic unless it is registered as the device MAC.
   String finalDeviceID = String(DEVICE_ID);
   http.addHeader("X-Device-ID",  finalDeviceID);
   http.addHeader("X-API-Key",    DEVICE_SECRET);
@@ -665,8 +664,16 @@ int httpRequest(const char* method, const char* path, const String& body = "") {
   int code = -1;
   if (strcmp(method, "POST") == 0) code = http.POST(body);
   if (strcmp(method, "PUT")  == 0) code = http.PUT(body);
+  if (code < 0) {
+    Serial.printf("[API] ERROR: %s %s failed. Connection error code: %d (%s)\n",
+                  method, path, code, http.errorToString(code).c_str());
+  } else if (code >= 400) {
+    String response = http.getString();
+    Serial.printf("[API] Response body: %s\n", response.c_str());
+  }
   http.end();
-  Serial.printf("[API] %s %s -> HTTP %d\n", method, path, code);
+  Serial.printf("[API] %s: %s %s -> HTTP %d\n",
+                code >= 200 && code < 300 ? "SUCCESS" : "FAILED", method, path, code);
   return code;
 }
 
@@ -682,6 +689,7 @@ bool fetchHandshakeAndSync() {
 
   int code = http.GET();
   if (code != 200) {
+    Serial.printf("[API] Handshake failed HTTP %d: %s\n", code, http.getString().c_str());
     http.end();
     return false;
   }

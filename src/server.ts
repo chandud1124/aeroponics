@@ -426,8 +426,14 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
   const isTelemetry = url.pathname === "/api/telemetry";
   const isSchedulePublic = url.pathname === "/api/schedule" && request.method === "GET";
   const isWaterEvent = url.pathname === "/api/water-event";
+  const isDeviceAuthRoute =
+    (url.pathname === "/api/status" && (request.method === "PUT" || request.method === "PATCH")) ||
+    (url.pathname === "/api/device/handshake" && request.method === "GET") ||
+    (url.pathname === "/api/heartbeat" && (request.method === "POST" || request.method === "PUT")) ||
+    (url.pathname === "/api/pump-log" && request.method === "POST") ||
+    (url.pathname === "/api/pump-log/start" && request.method === "POST");
 
-  if (!isTelemetry && !isSchedulePublic && !isWaterEvent) {
+  if (!isTelemetry && !isSchedulePublic && !isWaterEvent && !isDeviceAuthRoute) {
     const authCheck = requireUserAuth(request);
     if (authCheck instanceof Response) return authCheck;
   }
