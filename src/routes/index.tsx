@@ -24,6 +24,7 @@ import {
   fetchStatusEnvelope,
   fetchNftChannels,
   fetchHarvestHistory,
+  saveHarvestHistoryRemote,
   saveNftChannels,
   harvestCropRemote,
   API_BASE_URL,
@@ -93,6 +94,8 @@ import {
   User,
   Eye,
   EyeOff,
+  Search,
+  Palette,
 } from "lucide-react";
 
 type NurseryCell = {
@@ -136,11 +139,11 @@ export const Route = createFileRoute("/")({
   component: Index,
   head: () => ({
     meta: [
-      { title: "PolyHouse ERP — IoT Hydroponic Dashboard" },
+      { title: "FarmNexus — Farm Operations Center" },
       {
         name: "description",
         content:
-          "Designer-grade ESP32 IoT operations center for commercial and gravity-fed vertical aeroponic systems.",
+          "FarmNexus farm operations center for commercial and gravity-fed vertical aeroponic systems.",
       },
     ],
     links: [{ rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
@@ -158,7 +161,7 @@ const CROP_COLOR_PALETTE = [
   { bg: "bg-fuchsia-500/10 dark:bg-fuchsia-500/25", border: "border-fuchsia-500", text: "text-fuchsia-800 dark:text-fuchsia-200", dot: "bg-fuchsia-500" },
 ];
 
-function getCropStyle(cropName: string, germinated: boolean) {
+function getCropStyle(cropName: string, germinated: boolean, customConfigs?: { name: string; colorKey: string }[]) {
   if (!cropName) {
     return {
       bg: "bg-muted/10 hover:bg-muted/20 text-muted-foreground/40",
@@ -167,12 +170,40 @@ function getCropStyle(cropName: string, germinated: boolean) {
       text: "text-muted-foreground"
     };
   }
-  let hash = 0;
-  for (let i = 0; i < cropName.length; i++) {
-    hash = cropName.charCodeAt(i) + ((hash << 5) - hash);
+  const nameKey = cropName.trim();
+  let color = CROP_COLOR_PALETTE[0];
+  let found = false;
+
+  if (customConfigs) {
+    const config = customConfigs.find((c) => c.name.toLowerCase() === nameKey.toLowerCase());
+    if (config) {
+      const keyMap: { [key: string]: number } = {
+        emerald: 0,
+        sky: 1,
+        amber: 2,
+        purple: 3,
+        rose: 4,
+        teal: 5,
+        orange: 6,
+        fuchsia: 7
+      };
+      const idx = keyMap[config.colorKey];
+      if (idx !== undefined) {
+        color = CROP_COLOR_PALETTE[idx];
+        found = true;
+      }
+    }
   }
-  const index = Math.abs(hash) % CROP_COLOR_PALETTE.length;
-  const color = CROP_COLOR_PALETTE[index];
+
+  if (!found) {
+    let hash = 0;
+    for (let i = 0; i < nameKey.length; i++) {
+      hash = nameKey.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % CROP_COLOR_PALETTE.length;
+    color = CROP_COLOR_PALETTE[index];
+  }
+
   return {
     bg: color.bg,
     border: germinated ? `border-2 ${color.border}` : `border border-dashed ${color.border}`,
@@ -257,6 +288,8 @@ function Index() {
   const [harvestPage, setHarvestPage] = useState(0);
   const [nurseryTrays, setNurseryTrays] = useState<NurseryTray[]>(DEFAULT_NURSERY_TRAYS);
   const [nurseryHistory, setNurseryHistory] = useState<NurseryHistoryEntry[]>([]);
+  const [cropConfigs, setCropConfigs] = useState<{ name: string; colorKey: string }[]>([]);
+  const [cropManagerOpen, setCropManagerOpen] = useState(false);
 
   // Nursery-to-NFT Transplant Modal States
   const [activeTrayId, setActiveTrayId] = useState<string | null>(null);
@@ -349,6 +382,42 @@ function Index() {
       
       const savedHistory = localStorage.getItem("polyhouse-nursery-history");
       if (savedHistory) setNurseryHistory(JSON.parse(savedHistory) as NurseryHistoryEntry[]);
+
+      const savedConfigs = localStorage.getItem("polyhouse-crop-configs");
+      if (savedConfigs) {
+        setCropConfigs(JSON.parse(savedConfigs) as { name: string; colorKey: string }[]);
+      } else {
+        const defaults = [
+          "Green Lettuce",
+          "Red Lettuce",
+          "Butterhead Lettuce",
+          "Lollo Bionda",
+          "Romaine Lettuce",
+          "Pak Choi",
+          "Kale",
+          "Swiss Chard",
+          "Rocket / Arugula",
+          "Spinach",
+          "Coriander",
+          "Basil",
+          "Amaranth",
+          "Capsicum Yellow",
+          "Capsicum Red",
+          "Capsicum Green",
+          "Cherry Tomato Yellow",
+          "Cherry Tomato Red"
+        ].map(name => {
+          let hash = 0;
+          for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+          }
+          const keys = ["emerald", "sky", "amber", "purple", "rose", "teal", "orange", "fuchsia"];
+          const index = Math.abs(hash) % keys.length;
+          return { name, colorKey: keys[index] };
+        });
+        setCropConfigs(defaults);
+        localStorage.setItem("polyhouse-crop-configs", JSON.stringify(defaults));
+      }
     } catch {
       // Keep the default trays when local storage is unavailable or invalid.
     }
@@ -365,6 +434,12 @@ function Index() {
       localStorage.setItem("polyhouse-nursery-history", JSON.stringify(nurseryHistory));
     }
   }, [mounted, nurseryHistory]);
+
+  useEffect(() => {
+    if (mounted) {
+      localStorage.setItem("polyhouse-crop-configs", JSON.stringify(cropConfigs));
+    }
+  }, [mounted, cropConfigs]);
 
   const updateNurseryTray = (id: string, patch: Partial<NurseryTray>) => {
     setNurseryTrays((trays) => trays.map((tray) => {
@@ -424,6 +499,104 @@ function Index() {
       cells: [],
     });
     toast.success("Tray reset for a new planting batch. Enter the crop and plug count.");
+  };
+
+  const handleRenameCrop = async (oldName: string, newName: string) => {
+    try {
+      const cleanOld = oldName.trim();
+      const cleanNew = newName.trim();
+      if (!cleanNew || cleanOld === cleanNew) return;
+
+      toast.loading(`Cascading rename from "${cleanOld}" to "${cleanNew}"...`);
+
+      // 1. Update Nursery Trays
+      const updatedTrays = nurseryTrays.map((tray) => {
+        let trayCrop = tray.crop;
+        if (trayCrop && trayCrop.trim().toLowerCase() === cleanOld.toLowerCase()) {
+          trayCrop = cleanNew;
+        }
+        const updatedCells = (tray.cells || []).map((cell) => {
+          if (cell.crop && cell.crop.trim().toLowerCase() === cleanOld.toLowerCase()) {
+            return { ...cell, crop: cleanNew };
+          }
+          return cell;
+        });
+        return {
+          ...tray,
+          crop: trayCrop,
+          cells: updatedCells
+        };
+      });
+      setNurseryTrays(updatedTrays);
+      localStorage.setItem("polyhouse-nursery-trays", JSON.stringify(updatedTrays));
+
+      // 2. Update Nursery History
+      const updatedNurseryHistory = nurseryHistory.map((item) => {
+        if (item.crop && item.crop.trim().toLowerCase() === cleanOld.toLowerCase()) {
+          return { ...item, crop: cleanNew };
+        }
+        return item;
+      });
+      setNurseryHistory(updatedNurseryHistory);
+      localStorage.setItem("polyhouse-nursery-history", JSON.stringify(updatedNurseryHistory));
+
+      // 3. Update NFT Channels
+      const updatedChannels = nftChannels.map((chan) => {
+        let chanCropName = chan.cropName;
+        if (chanCropName && chanCropName.trim().toLowerCase() === cleanOld.toLowerCase()) {
+          chanCropName = cleanNew;
+        }
+        const updatedCrops = (chan.crops || []).map((c) => {
+          if (c.cropName.trim().toLowerCase() === cleanOld.toLowerCase()) {
+            return { ...c, cropName: cleanNew };
+          }
+          return c;
+        });
+        return {
+          ...chan,
+          cropName: chanCropName,
+          crops: updatedCrops
+        };
+      });
+      await saveNftChannels(updatedChannels);
+      setNftChannels(updatedChannels);
+
+      // 4. Update Harvest History
+      const updatedHarvestHistory = harvestHistory.map((item) => {
+        let itemCropName = item.cropName;
+        if (itemCropName && itemCropName.trim().toLowerCase() === cleanOld.toLowerCase()) {
+          itemCropName = cleanNew;
+        }
+        const updatedCrops = (item.crops || []).map((c) => {
+          if (c.cropName.trim().toLowerCase() === cleanOld.toLowerCase()) {
+            return { ...c, cropName: cleanNew };
+          }
+          return c;
+        });
+        return {
+          ...item,
+          cropName: itemCropName,
+          crops: updatedCrops
+        };
+      });
+      await saveHarvestHistoryRemote(updatedHarvestHistory);
+      setHarvestHistory(updatedHarvestHistory);
+
+      // 5. Update Crop Configs
+      setCropConfigs((prev) => 
+        prev.map((c) => 
+          c.name.toLowerCase() === cleanOld.toLowerCase() 
+            ? { ...c, name: cleanNew } 
+            : c
+        )
+      );
+
+      toast.dismiss();
+      toast.success(`Successfully renamed "${cleanOld}" to "${cleanNew}" everywhere.`);
+    } catch (err: any) {
+      toast.dismiss();
+      toast.error(`Rename failed: ${err.message || err}`);
+    }
   };
 
   const handleGlobalScan = async (value: string) => {
@@ -720,7 +893,6 @@ function Index() {
         { id: "nft", label: "NFT Channels", icon: Grid },
         { id: "grow-bags", label: "Grow Bags", icon: Package },
         { id: "history", label: "Channels History", icon: History },
-        { id: "harvested", label: "Harvested Log", icon: TrendingUp },
       ]
     },
     {
@@ -781,8 +953,8 @@ function Index() {
                 <Sprout className="h-5 w-5 text-emerald-300 animate-pulse" />
               </div>
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-foreground">PolyHouse ERP</h1>
-                <span className="text-[10px] text-muted-foreground block font-semibold">IoT Operations Center</span>
+                <h1 className="text-sm font-bold tracking-tight text-foreground">FarmNexus</h1>
+                <span className="text-[10px] text-muted-foreground block font-semibold">Farm Operations Center</span>
               </div>
             </div>
 
@@ -848,7 +1020,7 @@ function Index() {
           <header className="border-b border-border bg-card md:hidden p-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Sprout className="h-5 w-5 text-primary animate-pulse" />
-              <span className="text-sm font-bold">PolyHouse ERP</span>
+              <span className="text-sm font-bold">FarmNexus</span>
             </div>
             <Select value={activeTab} onValueChange={setActiveTab}>
               <SelectTrigger className="w-44 h-8 text-xs">
@@ -1475,9 +1647,14 @@ function Index() {
                     <h3 className="text-sm font-bold text-foreground">Your trays</h3>
                     <p className="mt-1 text-xs text-muted-foreground">Add a tray, record what was planted, and update germination as seedlings grow.</p>
                   </div>
-                  <Button onClick={addNurseryTray} className="w-full sm:w-auto">
-                    <Plus className="mr-2 h-4 w-4" /> Add tray
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <Button onClick={() => setCropManagerOpen(true)} variant="outline" className="w-full sm:w-auto border-indigo-500/20 text-indigo-600 hover:bg-indigo-50 flex items-center justify-center gap-1.5 font-bold text-xs">
+                      <Palette className="h-4 w-4" /> Manage Crops & Colors
+                    </Button>
+                    <Button onClick={addNurseryTray} className="w-full sm:w-auto">
+                      <Plus className="mr-2 h-4 w-4" /> Add tray
+                    </Button>
+                  </div>
                 </div>
 
                 <CropOperationsDashboard mode="nursery" channels={nftChannels} harvestHistory={harvestHistory} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} />
@@ -1652,7 +1829,7 @@ function Index() {
                                 <div className="flex flex-wrap gap-2 rounded-lg border border-indigo-200/40 bg-background/60 p-2.5 shadow-sm">
                                   <div className="w-full text-[9px] font-extrabold uppercase tracking-wider text-indigo-700/80 mb-1">Tray Contents Summary</div>
                                   {Object.entries(cropSummaryMap).map(([cropName, stats]) => {
-                                    const style = getCropStyle(cropName, true);
+                                    const style = getCropStyle(cropName, true, cropConfigs);
                                     return (
                                       <Badge 
                                         key={cropName} 
@@ -1700,7 +1877,7 @@ function Index() {
                                 >
                                   {cells.map((cell) => {
                                     const isSelected = selectedHoles.includes(cell.holeIndex);
-                                    const style = getCropStyle(cell.crop, cell.germinated);
+                                    const style = getCropStyle(cell.crop, cell.germinated, cropConfigs);
                                     const selectBorder = isSelected 
                                       ? "ring-2 ring-indigo-600 ring-offset-1 scale-105 z-10" 
                                       : "hover:scale-105";
@@ -2038,19 +2215,146 @@ function Index() {
                     </div>
                   );
                 })()}
-              </div>
-            )}
 
-            {activeTab === "harvested" && (
-              <div className="space-y-5">
-                <div>
-                  <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-primary" />
-                    Harvested Crops & Yield
-                  </h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Track harvested status, yield performance, waste, and cultivated crop mix.</p>
-                </div>
-                <CropOperationsDashboard mode="harvested" channels={nftChannels} harvestHistory={harvestHistory} nurseryTrays={nurseryTrays} nurseryHistory={nurseryHistory} />
+                {/* Crop Variety & Badge Color Manager Dialog */}
+                {cropManagerOpen && (
+                  <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <Card className="p-6 max-w-lg w-full border-border/80 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto">
+                      <div className="flex items-center justify-between border-b pb-2">
+                        <div>
+                          <span className="font-bold text-base text-foreground flex items-center gap-2">
+                            <Palette className="h-5 w-5 text-indigo-600 animate-pulse" />
+                            Crop Variety & Color Manager
+                          </span>
+                          <span className="text-xs text-muted-foreground block mt-0.5">
+                            Manage crop varieties, customize badge colors, and rename crop entries (cascades updates).
+                          </span>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => setCropManagerOpen(false)}
+                          className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full"
+                        >
+                          ✕
+                        </Button>
+                      </div>
+
+                      {/* Add New Crop Form */}
+                      <form onSubmit={(e) => {
+                        e.preventDefault();
+                        const form = e.currentTarget;
+                        const input = form.elements.namedItem("newCropName") as HTMLInputElement;
+                        const name = input.value.trim();
+                        if (!name) return;
+                        if (cropConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+                          toast.error("Crop variety already exists.");
+                          return;
+                        }
+                        const newConfig = {
+                          name,
+                          colorKey: "emerald" // default
+                        };
+                        setCropConfigs(prev => [...prev, newConfig]);
+                        input.value = "";
+                        toast.success(`Added ${name} crop variety!`);
+                      }} className="flex gap-2 items-end bg-indigo-50/40 border border-indigo-100/50 p-3.5 rounded-xl">
+                        <div className="flex-1 space-y-1">
+                          <Label htmlFor="new-crop-name" className="text-[10px] font-extrabold text-indigo-700 uppercase tracking-wider">Add New Crop Variety</Label>
+                          <Input id="new-crop-name" name="newCropName" placeholder="e.g. Italian Basil" className="h-8 text-xs bg-background border-indigo-200/40 focus-visible:ring-indigo-500" />
+                        </div>
+                        <Button type="submit" size="sm" className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4">
+                          Add
+                        </Button>
+                      </form>
+
+                      {/* Crop configs list */}
+                      <div className="space-y-2.5 max-h-[35vh] overflow-y-auto pr-1">
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground mb-1">Configured Varieties</div>
+                        {cropConfigs.map((config, index) => {
+                          const keys = ["emerald", "sky", "amber", "purple", "rose", "teal", "orange", "fuchsia"];
+                          const styleMap: { [key: string]: string } = {
+                            emerald: "bg-emerald-500",
+                            sky: "bg-sky-500",
+                            amber: "bg-amber-500",
+                            purple: "bg-purple-500",
+                            rose: "bg-rose-500",
+                            teal: "bg-teal-500",
+                            orange: "bg-orange-500",
+                            fuchsia: "bg-fuchsia-500",
+                          };
+
+                          return (
+                            <div key={config.name} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border bg-muted/20 text-xs hover:border-indigo-200 hover:bg-indigo-50/10 transition-colors">
+                              <div className="flex-1 flex items-center gap-2 min-w-0">
+                                <span className="font-bold text-foreground text-sm truncate">{config.name}</span>
+                                <Button 
+                                  type="button"
+                                  variant="ghost" 
+                                  size="xs" 
+                                  onClick={() => {
+                                    const newName = window.prompt(`Rename "${config.name}" and all history logs/channels to:`, config.name);
+                                    if (newName && newName.trim() && newName.trim() !== config.name) {
+                                      handleRenameCrop(config.name, newName.trim());
+                                    }
+                                  }}
+                                  className="h-5 px-1.5 text-[9px] text-indigo-600 hover:text-indigo-700 hover:bg-indigo-100/50 font-bold border border-indigo-200/30"
+                                >
+                                  Rename
+                                </Button>
+                              </div>
+                              <div className="flex items-center gap-3 self-end sm:self-center">
+                                {/* Color selector */}
+                                <div className="flex gap-1.5 bg-background p-1 rounded-lg border border-border/80">
+                                  {keys.map((k) => (
+                                    <button
+                                      key={k}
+                                      type="button"
+                                      title={`Set ${k} theme`}
+                                      onClick={() => {
+                                        setCropConfigs(prev => prev.map((c, i) => i === index ? { ...c, colorKey: k } : c));
+                                      }}
+                                      className={`h-4.5 w-4.5 rounded-full border border-background/20 flex items-center justify-center transition-all ${styleMap[k]} ${
+                                        config.colorKey === k ? "ring-2 ring-indigo-600 ring-offset-1 scale-110" : "opacity-60 hover:opacity-100 hover:scale-105"
+                                      }`}
+                                    >
+                                      {config.colorKey === k && (
+                                        <span className="h-1.5 w-1.5 rounded-full bg-white shadow-sm" />
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                                {/* Delete button */}
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  onClick={() => {
+                                    if (window.confirm(`Are you sure you want to delete "${config.name}" configuration?`)) {
+                                      setCropConfigs(prev => prev.filter((_, i) => i !== index));
+                                      toast.success(`Removed "${config.name}" config.`);
+                                    }
+                                  }}
+                                  className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                >
+                                  ✕
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex justify-end pt-2 border-t border-border/60">
+                        <Button 
+                          onClick={() => setCropManagerOpen(false)}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 h-9"
+                        >
+                          Close
+                        </Button>
+                      </div>
+                    </Card>
+                  </div>
+                )}
               </div>
             )}
 

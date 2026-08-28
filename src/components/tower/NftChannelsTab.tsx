@@ -59,12 +59,47 @@ function getCropStyle(cropName: string, active: boolean) {
       text: "text-muted-foreground"
     };
   }
-  let hash = 0;
-  for (let i = 0; i < cropName.length; i++) {
-    hash = cropName.charCodeAt(i) + ((hash << 5) - hash);
+
+  const nameKey = cropName.trim();
+  let color = CROP_COLOR_PALETTE[0];
+  let found = false;
+
+  try {
+    const savedConfigs = typeof window !== "undefined" ? localStorage.getItem("polyhouse-crop-configs") : null;
+    if (savedConfigs) {
+      const configs = JSON.parse(savedConfigs) as { name: string; colorKey: string }[];
+      const config = configs.find((c) => c.name.toLowerCase() === nameKey.toLowerCase());
+      if (config) {
+        const keyMap: { [key: string]: number } = {
+          emerald: 0,
+          sky: 1,
+          amber: 2,
+          purple: 3,
+          rose: 4,
+          teal: 5,
+          orange: 6,
+          fuchsia: 7
+        };
+        const idx = keyMap[config.colorKey];
+        if (idx !== undefined) {
+          color = CROP_COLOR_PALETTE[idx];
+          found = true;
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore and fallback
   }
-  const index = Math.abs(hash) % CROP_COLOR_PALETTE.length;
-  const color = CROP_COLOR_PALETTE[index];
+
+  if (!found) {
+    let hash = 0;
+    for (let i = 0; i < nameKey.length; i++) {
+      hash = nameKey.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % CROP_COLOR_PALETTE.length;
+    color = CROP_COLOR_PALETTE[index];
+  }
+
   return {
     bg: color.bg,
     border: `border-2 ${color.border}`,

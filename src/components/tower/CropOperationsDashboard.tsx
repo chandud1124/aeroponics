@@ -7,6 +7,7 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
+  Legend,
   Tooltip,
   XAxis,
   YAxis,
@@ -51,6 +52,7 @@ export function CropOperationsDashboard({
   nurseryHistory,
 }: Props) {
   const [groupFilter, setGroupFilter] = useState("ALL");
+  const [chartGrouping, setChartGrouping] = useState<"crop" | "stand">("crop");
   const [nurseryFilter, setNurseryFilter] = useState("ALL");
 
   const activeChannels = channels.filter((channel) => channel.status === "growing");
@@ -76,22 +78,41 @@ export function CropOperationsDashboard({
             : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`;
           return displayGroup === groupFilter;
         });
-  const crops = useMemo(() => {
-    const totals = new Map<string, number>();
+  const holeStatusData = useMemo(() => {
+    const channelGroups = new Map<string, { empty: number; growing: number }>();
     selectedChannels.forEach((channel) => {
-      const entries = channel.crops?.length
-        ? channel.crops
-        : channel.cropName
-          ? [{ cropName: channel.cropName, count: channel.currentCount || 0 }]
-          : [];
-      entries.forEach((entry) =>
-        totals.set(entry.cropName, (totals.get(entry.cropName) || 0) + entry.count),
-      );
+      const group = chartGrouping === "crop"
+        ? (channel.cropName || channel.crops?.[0]?.cropName || "Unassigned crop")
+        : (channel.polyhouse && channel.block && channel.row
+          ? `${channel.polyhouse}-${channel.block}-${channel.row}`
+          : `${channel.stand || "Unassigned"} / ${channel.level || "Unassigned"}`);
+      const current = channelGroups.get(group) || { empty: 0, growing: 0 };
+      const capacity = channel.capacity || 0;
+      const occupied = Math.min(capacity, channel.currentCount || 0);
+      current.empty += Math.max(0, capacity - occupied);
+      current.growing += occupied;
+      channelGroups.set(group, current);
     });
-    return Array.from(totals, ([name, plants]) => ({ name, plants })).sort(
-      (a, b) => b.plants - a.plants,
-    );
-  }, [selectedChannels]);
+
+    const harvestedByGroup = new Map<string, number>();
+    harvestHistory.forEach((entry) => {
+      const channel = channels.find((item) => item.id === entry.channelId);
+      const group = chartGrouping === "crop"
+        ? (entry.cropName || "Unknown crop").split("(")[0].trim()
+        : channel?.polyhouse && channel.block && channel.row
+          ? `${channel.polyhouse}-${channel.block}-${channel.row}`
+          : `${channel?.stand || "Unassigned"} / ${channel?.level || "Unassigned"}`;
+      harvestedByGroup.set(group, (harvestedByGroup.get(group) || 0) + (entry.yieldQty || 0) + (entry.wasteQty || 0));
+    });
+
+    const groups = new Set([...channelGroups.keys(), ...harvestedByGroup.keys()]);
+    return Array.from(groups, (name) => ({
+      name,
+      empty: channelGroups.get(name)?.empty || 0,
+      growing: channelGroups.get(name)?.growing || 0,
+      harvested: harvestedByGroup.get(name) || 0,
+    })).sort((a, b) => (b.empty + b.growing + b.harvested) - (a.empty + a.growing + a.harvested));
+  }, [chartGrouping, channels, harvestHistory, selectedChannels]);
 
   const nurseryCrops = useMemo(() => {
     const totals = new Map<string, { trays: number; plugs: number; ready: number }>();
@@ -218,7 +239,7 @@ export function CropOperationsDashboard({
         </div>
         <Card className="p-5">
           <Toolbar
-            title="Current production by stand / row"
+            title="Current production by crop and stand"
             value={groupFilter}
             onChange={setGroupFilter}
             options={["ALL", ...groups]}
@@ -256,15 +277,32 @@ export function CropOperationsDashboard({
           </div>
         </Card>
         <Card className="p-5">
-          <h3 className="font-semibold">Crop population in selected group</h3>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-semibold">Hole status and harvest volume</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Compare empty holes, growing plants, and harvested plants.</p>
+            </div>
+            <Select value={chartGrouping} onValueChange={(value) => setChartGrouping(value as "crop" | "stand")}>
+              <SelectTrigger className="w-full sm:w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="crop">Group by crop</SelectItem>
+                <SelectItem value="stand">Group by stand / row</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="mt-4 h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={crops}>
+              <BarChart data={holeStatusData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="plants" fill="#0f766e" radius={[4, 4, 0, 0]} />
+                <Legend />
+                <Bar dataKey="empty" name="Empty holes" stackId="holes" fill="#94a3b8" />
+                <Bar dataKey="growing" name="Growing plants" stackId="holes" fill="#0f766e" />
+                <Bar dataKey="harvested" name="Harvested plants" fill="#f59e0b" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

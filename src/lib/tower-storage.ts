@@ -317,3 +317,11 @@ export async function fetchHarvestHistory(): Promise<HarvestHistoryEntry[]> {
     return [];
   }
 }
+
+export async function saveHarvestHistoryRemote(history: HarvestHistoryEntry[]): Promise<void> {
+  await requestJson("/api/harvest-history", {
+    method: "PUT",
+    body: JSON.stringify(history),
+  });
+}
+

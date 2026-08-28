@@ -29,6 +29,7 @@ import {
   getGpioMappings,
   saveGpioMappings,
   getHarvestHistory,
+  saveHarvestHistory,
   getGeminiApiKey,
   saveGeminiApiKey,
   getCameraSettings,
@@ -948,6 +949,15 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
   if (url.pathname === "/api/harvest-history") {
     if (request.method === "GET") {
       return jsonResponse(getHarvestHistory());
+    }
+    if (request.method === "PUT") {
+      try {
+        const payload = (await request.json()) as any[];
+        saveHarvestHistory(payload);
+        return jsonResponse({ success: true });
+      } catch (err: any) {
+        return jsonResponse({ error: err.message || "Failed to save harvest history" }, 400);
+      }
     }
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
