@@ -656,7 +656,9 @@ int httpRequest(const char* method, const char* path, const String& body = "") {
   http.setTimeout(API_TIMEOUT_MS);
   http.begin(String(API_BASE_URL) + path);
   http.addHeader("Content-Type", "application/json");
-  String finalDeviceID = (deviceMacAddress.length() > 0) ? deviceMacAddress : String(DEVICE_ID);
+  // Authenticate with the device ID registered in Admin > Devices.
+  // The board MAC is only diagnostic unless it is registered as the device MAC.
+  String finalDeviceID = String(DEVICE_ID);
   http.addHeader("X-Device-ID",  finalDeviceID);
   http.addHeader("X-API-Key",    DEVICE_SECRET);
   http.addHeader("Connection",   "close");
@@ -673,7 +675,7 @@ bool fetchHandshakeAndSync() {
   HTTPClient http;
   http.setTimeout(API_TIMEOUT_MS);
   http.begin(String(API_BASE_URL) + "/api/device/handshake");
-  String finalDeviceID = (deviceMacAddress.length() > 0) ? deviceMacAddress : String(DEVICE_ID);
+  String finalDeviceID = String(DEVICE_ID);
   http.addHeader("X-Device-ID", finalDeviceID);
   http.addHeader("X-API-Key",   DEVICE_SECRET);
   http.addHeader("Connection",  "close");

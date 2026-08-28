@@ -603,7 +603,7 @@ export function GrowBagsTab() {
                             >
                               <div className="flex justify-between items-start">
                                 <span className="font-mono text-2xs font-extrabold text-foreground truncate w-full" title={bag.id}>
-                                  Bag {bag.bagIndex}
+                                  {bag.name}
                                 </span>
                                 <Badge className={`h-4.5 text-[9px] uppercase font-bold py-0 ${
                                   isGrowing ? bag.growthStage === "ready-to-harvest" ? "bg-amber-500 hover:bg-amber-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-muted text-muted-foreground"
@@ -612,11 +612,16 @@ export function GrowBagsTab() {
                                 </Badge>
                               </div>
 
-                              <img
-                                src={`https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=${encodeURIComponent(bag.qrCode || bag.id)}`}
-                                alt={`QR code for ${bag.name}`}
-                                className="mx-auto h-16 w-16 rounded border border-border bg-white p-1"
-                              />
+                              <div className="flex flex-col items-center gap-1">
+                                <img
+                                  src={`https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=${encodeURIComponent(bag.qrCode || bag.id)}`}
+                                  alt={`QR code for ${bag.name}`}
+                                  className="h-16 w-16 rounded border border-border bg-white p-1"
+                                />
+                                <span className="w-full break-all text-center text-[9px] font-mono font-semibold leading-tight text-muted-foreground" title={bag.name}>
+                                  {bag.name}
+                                </span>
+                              </div>
 
                               <div className="my-1.5 min-w-0 flex-1 flex flex-col justify-center">
                                 {isGrowing ? (
@@ -700,7 +705,7 @@ export function GrowBagsTab() {
                               <div className="flex justify-between items-center">
                                 <div className="space-y-0.5">
                                   <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">ID: {bag.id}</span>
-                                  <span className="text-sm font-extrabold text-foreground block">Bag ID: {bag.bagIndex}</span>
+                                  <span className="text-sm font-extrabold text-foreground block">{bag.name}</span>
                                 </div>
                                 <Badge className={`text-2xs font-extrabold uppercase ${
                                   isGrowing ? bag.growthStage === "ready-to-harvest" ? "bg-amber-500 hover:bg-amber-600 text-white" : "bg-emerald-500 hover:bg-emerald-600 text-white" : "bg-muted text-muted-foreground"
@@ -710,16 +715,15 @@ export function GrowBagsTab() {
                               </div>
 
                               <div className="space-y-1.5 border-y border-border/50 py-3 text-xs">
-                                <div className="flex items-center gap-3">
+                                <div className="flex flex-col items-center gap-2">
                                   <img
                                     src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(bag.qrCode || bag.id)}`}
                                     alt={`QR code for ${bag.name}`}
                                     className="h-20 w-20 rounded border border-border bg-white p-1"
                                   />
-                                  <div className="text-[10px] text-muted-foreground">
-                                    <div className="font-semibold text-foreground">Scan to identify this bag</div>
-                                    <div className="mt-1 break-all font-mono">{bag.qrCode || bag.id}</div>
-                                  </div>
+                                  <span className="max-w-40 break-all text-center text-[10px] font-mono font-semibold leading-tight text-slate-700" title={bag.name}>
+                                    {bag.name}
+                                  </span>
                                 </div>
                                 <div className="flex justify-between text-muted-foreground font-medium">
                                   <span>Planted Crop:</span>

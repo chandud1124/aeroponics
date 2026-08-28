@@ -572,7 +572,7 @@ function Index() {
     const bag = growBags.find((item) => [item.id, item.qrCode, item.name].some((match) => match.trim().toLowerCase() === scanned));
     if (bag) {
       setScannedChannelId(null);
-      setScannedRecord({ kind: "bag", label: bag.name, detail: `${bag.status} · ${bag.cropName || "No crop planted"} · ${bag.currentCount || 0} plants` });
+      setScannedRecord({ kind: "bag", label: bag.name, detail: `${bag.growthStage === "ready-to-harvest" ? "Ready to harvest" : bag.growthStage === "fruiting" ? "Fruiting" : bag.status === "growing" ? "Growing" : "Empty"} · ${bag.cropName || "No crop planted"} · ${Math.min(1, bag.currentCount || 0)} plant${bag.currentCount === 1 ? "" : "s"}` });
       setActiveTab("grow-bags");
       setShowGlobalScanner(false);
       return;

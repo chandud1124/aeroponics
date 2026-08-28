@@ -16,6 +16,9 @@ dist-ssr
 .nitro
 *.local
 
+# ESP32 device credentials
+esp32-code/**/secrets.h
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
