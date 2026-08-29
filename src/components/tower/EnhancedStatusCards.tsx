@@ -59,8 +59,8 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
       <FaultAlert fault={status.fault} />
 
       {/* Main Status Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-        {/* Pump Status */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-8">
+        {/* Pump 1 Status */}
         <Card className="p-4 sm:p-5 flex flex-col justify-between border-border/85 bg-card/65 shadow-sm hover:border-primary/40 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold tracking-wider uppercase text-muted-foreground">Irrigation Pump</span>
@@ -73,6 +73,24 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
             <div className="mt-1">
               <Badge variant={status.pumpOn ? "default" : "secondary"}>
                 {status.flowing ? "Water Flow OK" : "No Flow"}
+              </Badge>
+            </div>
+          </div>
+        </Card>
+
+        {/* Pump 2 Status */}
+        <Card className="p-4 sm:p-5 flex flex-col justify-between border-border/85 bg-card/65 shadow-sm hover:border-primary/40 transition-colors">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold tracking-wider uppercase text-muted-foreground">Irrigation Pump 2</span>
+            <Activity className={`h-5 w-5 ${status.pumpOn_2 ? "text-emerald-500 animate-spin" : "text-muted-foreground"}`} style={{ animationDuration: "3s" }} />
+          </div>
+          <div className="mt-4">
+            <div className="text-2xl font-bold tracking-tight">
+              {status.pumpOn_2 ? "RUNNING" : "STANDBY"}
+            </div>
+            <div className="mt-1">
+              <Badge variant={status.pumpOn_2 ? "default" : "secondary"}>
+                {status.flowing_2 ? "Water Flow OK" : "No Flow"}
               </Badge>
             </div>
           </div>

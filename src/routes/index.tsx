@@ -74,6 +74,24 @@ import {
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+
+type ScanDetail = {
+  label: string;
+  value: string;
+};
+
+type ScannedRecord = {
+  kind: "channel" | "tray" | "bag" | "not-found";
+  label: string;
+  details: ScanDetail[];
+};
+
+function formatScanDate(value?: string | null) {
+  if (!value) return "Not set";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Not set" : date.toLocaleString();
+}
+
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -279,11 +297,14 @@ function Index() {
   const [globalScanInput, setGlobalScanInput] = useState("");
   const [showGlobalScanner, setShowGlobalScanner] = useState(false);
   const [scannedChannelId, setScannedChannelId] = useState<string | null>(null);
-  const [scannedRecord, setScannedRecord] = useState<{ kind: "channel" | "tray" | "bag" | "not-found"; label: string; detail: string } | null>(null);
+  const [scannedRecord, setScannedRecord] = useState<ScannedRecord | null>(null);
 
   // Nursery Visual Grid and Detailed Hole Planner State
   const [gridModeTrayId, setGridModeTrayId] = useState<string | null>(null);
   const [selectedHoles, setSelectedHoles] = useState<number[]>([]);
+  const [holeRangeInput, setHoleRangeInput] = useState("");
+  const [isSelectingHoles, setIsSelectingHoles] = useState(false);
+  const [selectionDragMode, setSelectionDragMode] = useState<"add" | "remove">("add");
   const [cellCrop, setCellCrop] = useState("");
   const [cellPlantedOn, setCellPlantedOn] = useState(new Date().toISOString().split("T")[0]);
   const [cellStatus, setCellStatus] = useState<"germinated" | "planted" | "empty">("planted");
@@ -348,6 +369,30 @@ function Index() {
         status: trayStatus,
       };
     }));
+  };
+
+  const applyHoleRange = (tray: NurseryTray) => {
+    const selected = new Set<number>();
+    holeRangeInput.split(",").forEach((part) => {
+      const [startText, endText] = part.trim().split("-");
+      const start = Number(startText);
+      const end = endText === undefined ? start : Number(endText);
+      if (!Number.isInteger(start) || !Number.isInteger(end)) return;
+      const first = Math.max(1, Math.min(start, end));
+      const last = Math.min(tray.plugs, Math.max(start, end));
+      for (let hole = first; hole <= last; hole++) selected.add(hole - 1);
+    });
+    if (selected.size === 0) {
+      toast.error(`Enter holes such as 1-8 or 12,15 (1-${tray.plugs})`);
+      return;
+    }
+    setSelectedHoles(Array.from(selected).sort((a, b) => a - b));
+    const firstCell = ensureTrayCells(tray).find((cell) => selected.has(cell.holeIndex));
+    if (firstCell) {
+      setCellCrop(firstCell.crop || "");
+      setCellPlantedOn(firstCell.plantedOn || new Date().toISOString().split("T")[0]);
+      setCellStatus(firstCell.crop ? (firstCell.germinated ? "germinated" : "planted") : "planted");
+    }
   };
 
   useEffect(() => {
@@ -556,7 +601,25 @@ function Index() {
     const channel = channels.find((item) => [item.id, item.qrCode, item.name, `${item.stand || ""}-${item.level || ""}-ch ${item.channelIndex || ""}`].some((match) => match.trim().toLowerCase() === scanned));
     if (channel) {
       setScannedChannelId(channel.id);
-      setScannedRecord({ kind: "channel", label: channel.name, detail: `${channel.status} · ${channel.cropName || "No crop planted"} · ${channel.currentCount || 0} plants` });
+      const crops = channel.crops?.length
+        ? channel.crops.map((crop) => `${crop.cropName}: ${crop.count}`).join(", ")
+        : channel.cropName ? `${channel.cropName}: ${channel.currentCount ?? 0}` : "No crops planted";
+      const location = [channel.polyhouse, channel.block, channel.row, channel.level, channel.stand]
+        .filter(Boolean)
+        .join(" / ") || "Not assigned";
+      setScannedRecord({
+        kind: "channel",
+        label: channel.name,
+        details: [
+          { label: "Status", value: channel.status },
+          { label: "Cultivating", value: crops },
+          { label: "Planted", value: formatScanDate(channel.plantedAt) },
+          { label: "Expected harvest", value: formatScanDate(channel.expectedHarvestISO) },
+          { label: "Location", value: location },
+          { label: "Holes", value: `${channel.currentCount ?? 0} occupied / ${channel.capacity ?? 0} total` },
+          { label: "Available", value: `${Math.max(0, (channel.capacity ?? 0) - (channel.currentCount ?? 0))} holes` },
+        ],
+      });
       setActiveTab("nft");
       setShowGlobalScanner(false);
       return;
@@ -564,7 +627,21 @@ function Index() {
     const tray = nurseryTrays.find((item) => [item.id, item.name].some((match) => match.trim().toLowerCase() === scanned));
     if (tray) {
       setScannedChannelId(null);
-      setScannedRecord({ kind: "tray", label: tray.name, detail: `${tray.status} · ${tray.crop || "No crop assigned"} · ${tray.germinated}/${tray.plugs} plugs` });
+      const trayCrops = Array.from(new Set((tray.cells ?? []).map((cell) => cell.crop).filter(Boolean)));
+      const cropText = trayCrops.length ? trayCrops.join(", ") : tray.crop || "No crop assigned";
+      const plantedDates = (tray.cells ?? []).map((cell) => cell.plantedOn).filter(Boolean).sort();
+      setScannedRecord({
+        kind: "tray",
+        label: tray.name,
+        details: [
+          { label: "Status", value: tray.status },
+          { label: "Cultivating", value: cropText },
+          { label: "Planted", value: formatScanDate(plantedDates[0] || tray.plantedOn) },
+          { label: "Expected harvest", value: "Not set" },
+          { label: "Plugs", value: `${tray.germinated} germinated / ${tray.plugs} total` },
+          { label: "Available", value: `${Math.max(0, tray.plugs - (tray.cells?.filter((cell) => cell.crop).length ?? 0))} holes` },
+        ],
+      });
       setActiveTab("nursery");
       setShowGlobalScanner(false);
       return;
@@ -572,13 +649,27 @@ function Index() {
     const bag = growBags.find((item) => [item.id, item.qrCode, item.name].some((match) => match.trim().toLowerCase() === scanned));
     if (bag) {
       setScannedChannelId(null);
-      setScannedRecord({ kind: "bag", label: bag.name, detail: `${bag.growthStage === "ready-to-harvest" ? "Ready to harvest" : bag.growthStage === "fruiting" ? "Fruiting" : bag.status === "growing" ? "Growing" : "Empty"} · ${bag.cropName || "No crop planted"} · ${Math.min(1, bag.currentCount || 0)} plant${bag.currentCount === 1 ? "" : "s"}` });
+      const bagCrops = bag.crops?.length
+        ? bag.crops.map((crop) => `${crop.cropName}: ${crop.count}`).join(", ")
+        : bag.cropName ? `${bag.cropName}: ${Math.min(1, bag.currentCount ?? 0)}` : "No crop planted";
+      setScannedRecord({
+        kind: "bag",
+        label: bag.name,
+        details: [
+          { label: "Status", value: bag.growthStage === "ready-to-harvest" ? "Ready to harvest" : bag.growthStage === "fruiting" ? "Fruiting" : bag.status === "growing" ? "Growing" : "Empty" },
+          { label: "Cultivating", value: bagCrops },
+          { label: "Planted", value: formatScanDate(bag.plantedAt) },
+          { label: "Expected harvest", value: formatScanDate(bag.expectedHarvestISO) },
+          { label: "Location", value: [bag.polyhouse, bag.block, bag.bagIndex].filter(Boolean).join(" / ") || "Not assigned" },
+          { label: "Plants", value: `${bag.currentCount ?? 0} occupied / ${bag.capacity ?? 1} total` },
+        ],
+      });
       setActiveTab("grow-bags");
       setShowGlobalScanner(false);
       return;
     }
     setScannedChannelId(null);
-    setScannedRecord({ kind: "not-found", label: "No matching record", detail: `No NFT channel or nursery tray matches "${value.trim()}".` });
+    setScannedRecord({ kind: "not-found", label: "No matching record", details: [{ label: "Search", value: `No NFT channel, nursery tray, or grow bag matches "${value.trim()}".` }] });
     toast.warning(`No nursery tray or NFT channel matches "${value}".`);
   };
 
@@ -1145,9 +1236,21 @@ function Index() {
                 </div>
               )}
               {scannedRecord && (
-                <div className={`mt-3 flex flex-col gap-2 rounded-lg border p-3 text-xs sm:flex-row sm:items-center sm:justify-between ${scannedRecord.kind === "not-found" ? "border-red-500/30 bg-red-500/5" : "border-primary/20 bg-background"}`}>
-                  <span><Badge variant="outline" className="mr-2">{scannedRecord.kind === "channel" ? "NFT channel" : scannedRecord.kind === "tray" ? "Nursery tray" : scannedRecord.kind === "bag" ? "Grow bag" : "Not found"}</Badge><strong>{scannedRecord.label}</strong></span>
-                  <span className="text-muted-foreground">{scannedRecord.detail}</span>
+                <div className={`mt-3 rounded-lg border p-3 text-xs ${scannedRecord.kind === "not-found" ? "border-red-500/30 bg-red-500/5" : "border-primary/20 bg-background"}`}>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <span><Badge variant="outline" className="mr-2">{scannedRecord.kind === "channel" ? "NFT channel" : scannedRecord.kind === "tray" ? "Nursery tray" : scannedRecord.kind === "bag" ? "Grow bag" : "Not found"}</Badge><strong>{scannedRecord.label}</strong></span>
+                    {scannedRecord.kind === "not-found" && <span className="text-muted-foreground">{scannedRecord.details[0]?.value}</span>}
+                  </div>
+                  {scannedRecord.kind !== "not-found" && (
+                    <div className="mt-3 grid gap-x-5 gap-y-2 border-t border-border/60 pt-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {scannedRecord.details.map((detail) => (
+                        <div key={detail.label}>
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{detail.label}</span>
+                          <span className="mt-0.5 block font-semibold text-foreground">{detail.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {scannedRecord.kind !== "not-found" && (
                     <Button type="button" variant="outline" className="h-7 shrink-0 text-[11px]" onClick={() => setActiveTab(scannedRecord.kind === "channel" ? "history" : scannedRecord.kind === "bag" ? "grow-bags" : "nursery")}>
                       {scannedRecord.kind === "channel" ? "View history" : scannedRecord.kind === "bag" ? "View grow bag" : "View tray"}
@@ -1900,6 +2003,24 @@ function Index() {
                                   </div>
                                 </div>
 
+                                <div className="flex flex-col gap-2 rounded-lg border border-indigo-200/50 bg-background/70 p-2.5 sm:flex-row sm:items-end">
+                                  <div className="flex-1 space-y-1">
+                                    <Label className="text-[10px] font-semibold">Select hole numbers or ranges</Label>
+                                    <Input
+                                      value={holeRangeInput}
+                                      onChange={(event) => setHoleRangeInput(event.target.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") applyHoleRange(tray);
+                                      }}
+                                      placeholder={`Example: 1-12, 18 (1-${tray.plugs})`}
+                                      className="h-8 text-xs"
+                                    />
+                                  </div>
+                                  <Button type="button" size="sm" onClick={() => applyHoleRange(tray)} className="h-8 text-xs">
+                                    Select holes
+                                  </Button>
+                                </div>
+
                                 {/* Crops Summary list */}
                                 <div className="flex flex-wrap gap-2 rounded-lg border border-indigo-200/40 bg-background/60 p-2.5 shadow-sm">
                                   <div className="w-full text-[9px] font-extrabold uppercase tracking-wider text-indigo-700/80 mb-1">Tray Contents Summary</div>
@@ -1949,6 +2070,8 @@ function Index() {
                                 <div 
                                   className="grid gap-2 border border-indigo-200/50 rounded-lg p-2.5 bg-background shadow-inner max-h-55 overflow-y-auto"
                                   style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+                                  onPointerUp={() => setIsSelectingHoles(false)}
+                                  onPointerLeave={() => setIsSelectingHoles(false)}
                                 >
                                   {cells.map((cell) => {
                                     const isSelected = selectedHoles.includes(cell.holeIndex);
@@ -1962,19 +2085,25 @@ function Index() {
                                         key={cell.holeIndex}
                                         type="button"
                                         title={`${cell.crop ? `${cell.crop} (Planted: ${cell.plantedOn || "N/A"})` : "Hole Empty"} (${cell.germinated ? "Germinated" : "Planted"})`}
-                                        onClick={() => {
-                                          if (isSelected) {
-                                            setSelectedHoles(prev => prev.filter(idx => idx !== cell.holeIndex));
-                                          } else {
-                                            setSelectedHoles(prev => [...prev, cell.holeIndex]);
-                                            if (selectedHoles.length === 0) {
-                                              setCellCrop(cell.crop || "");
-                                              setCellPlantedOn(cell.plantedOn || new Date().toISOString().split("T")[0]);
-                                              setCellStatus(cell.crop ? (cell.germinated ? "germinated" : "planted") : "planted");
-                                            }
-                                          }
+                                        onPointerDown={(event) => {
+                                          event.currentTarget.setPointerCapture(event.pointerId);
+                                          const mode = isSelected ? "remove" : "add";
+                                          setSelectionDragMode(mode);
+                                          setIsSelectingHoles(true);
+                                          setSelectedHoles((prev) => mode === "add"
+                                            ? Array.from(new Set([...prev, cell.holeIndex]))
+                                            : prev.filter((idx) => idx !== cell.holeIndex));
+                                          setCellCrop(cell.crop || "");
+                                          setCellPlantedOn(cell.plantedOn || new Date().toISOString().split("T")[0]);
+                                          setCellStatus(cell.crop ? (cell.germinated ? "germinated" : "planted") : "planted");
                                         }}
-                                        className={`relative aspect-square flex items-center justify-center rounded-full text-[9px] font-bold font-mono cursor-pointer transition-all duration-150 ${style.bg} ${style.border} ${style.text} ${selectBorder}`}
+                                        onPointerEnter={() => {
+                                          if (!isSelectingHoles) return;
+                                          setSelectedHoles((prev) => selectionDragMode === "add"
+                                            ? Array.from(new Set([...prev, cell.holeIndex]))
+                                            : prev.filter((idx) => idx !== cell.holeIndex));
+                                        }}
+                                        className={`relative aspect-square flex items-center justify-center rounded-full text-[9px] font-bold font-mono cursor-pointer select-none touch-none transition-all duration-150 ${style.bg} ${style.border} ${style.text} ${selectBorder}`}
                                       >
                                         {cell.holeIndex + 1}
                                         {cell.crop && (

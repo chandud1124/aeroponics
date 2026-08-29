@@ -870,6 +870,10 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
     return true;
   });
 
+  const totalNftHoles = channels.reduce((sum, channel) => sum + (channel.capacity ?? 0), 0);
+  const totalNftPlants = channels.reduce((sum, channel) => sum + (channel.currentCount ?? 0), 0);
+  const emptyNftHoles = Math.max(0, totalNftHoles - totalNftPlants);
+
   const groupedLayout: {
     [standName: string]: {
       [levelName: string]: NftChannel[]
@@ -925,6 +929,25 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
             <Plus className="h-4 w-4" />
             Add Channel Batch
           </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-xl border border-border bg-card p-3">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total channels</span>
+          <div className="mt-1 text-2xl font-black text-foreground">{channels.length}</div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total holes</span>
+          <div className="mt-1 text-2xl font-black text-foreground">{totalNftHoles}</div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Plants growing</span>
+          <div className="mt-1 text-2xl font-black text-emerald-600">{totalNftPlants}</div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-3">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Available holes</span>
+          <div className="mt-1 text-2xl font-black text-amber-600">{emptyNftHoles}</div>
         </div>
       </div>
 

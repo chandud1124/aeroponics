@@ -116,8 +116,8 @@ export function NextCyclePanel({
   online?: boolean;
 }) {
   const isDayMode = (status.cycleMode ?? "DAY") === "DAY";
-  const expectedDuration = status.cycleOnDurationSeconds ?? (isDayMode ? schedule.dayDurationSeconds ?? schedule.durationSeconds : schedule.nightDurationSeconds ?? 30);
-  const expectedOff = status.cycleOffIntervalMinutes ?? (isDayMode ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes : schedule.nightIntervalMinutes ?? 15);
+  const expectedDuration = isDayMode ? schedule.dayDurationSeconds ?? schedule.durationSeconds : schedule.nightDurationSeconds ?? schedule.durationSeconds;
+  const expectedOff = isDayMode ? schedule.dayIntervalMinutes ?? schedule.intervalMinutes : schedule.nightIntervalMinutes ?? schedule.intervalMinutes;
 
   const expectedDuration_2 = isDayMode 
     ? (schedule.dayDurationSeconds_2 ?? schedule.durationSeconds_2 ?? schedule.durationSeconds)
@@ -238,7 +238,7 @@ export function NextCyclePanel({
                 {status.pumpOn ? `${pump1State.mistingRemainingSec}s` : pump1State.idleCountdown}
               </span>
               <span className="text-[9px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded block w-fit mx-auto mt-1">
-                Interval: {formatInterval(expectedOff)} | Duration: {formatDuration(expectedDuration)}
+                OFF interval: {formatInterval(expectedOff)} | ON duration: {formatDuration(expectedDuration)}
               </span>
             </div>
           </div>
@@ -253,7 +253,7 @@ export function NextCyclePanel({
                 {status.pumpOn_2 ? `${pump2State.mistingRemainingSec}s` : pump2State.idleCountdown}
               </span>
               <span className="text-[9px] bg-primary/10 text-primary font-bold px-2 py-0.5 rounded block w-fit mx-auto mt-1">
-                Interval: {formatInterval(expectedOff_2)} | Duration: {formatDuration(expectedDuration_2)}
+                OFF interval: {formatInterval(expectedOff_2)} | ON duration: {formatDuration(expectedDuration_2)}
               </span>
             </div>
           </div>

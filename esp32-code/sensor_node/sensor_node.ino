@@ -12,8 +12,11 @@
 // ─────────────────────────────────────────────────────────────────────
 //  PIN ASSIGNMENTS (BOOT DEFAULTS AND DYNAMIC OVERRIDES)
 // ─────────────────────────────────────────────────────────────────────
-#define PH_PIN         2
-#define TDS_PIN        4
+#define PH_PIN         34  // ADC1 pin; ADC2 pins are unavailable while Wi-Fi is active
+#define PH_RAW_MIN_VALID 100
+#define PH_RAW_MAX_VALID 4050  // 4095 means the ADC input is saturated
+#define TDS_PIN        35  // ADC1 pin; GPIO 4 is ADC2 and fails while Wi-Fi is active
+#define TDS_CALIBRATION_FACTOR 0.875f  // Calibrated to approximately 687 ppm at the current reference reading
 #define TEMP_PIN       15   // DHT22 Air Temperature / Humidity sensor
 #define TEMP1_PIN      16   // Waterproof DS18B20 Water Temperature (Tank)
 #define TEMP2_PIN      17   // Waterproof DS18B20 Water Temperature (NFT Channel)
@@ -118,6 +121,7 @@ void setup() {
   Serial.begin(115200);
   unsigned long t0 = millis();
   while (millis() - t0 < 300) yield();
+  analogReadResolution(12);
 
   Serial.println(F("\n╔══════════════════════════════════════╗"));
   Serial.println(F("║     TOWER GARDEN — SENSOR NODE       ║"));
@@ -141,7 +145,8 @@ void setup() {
   // WiFi setup
   WiFi.mode(WIFI_STA);
   WiFi.persistent(false);
-  WiFi.setSleep(false);
+  // Keep Wi-Fi power bursts from pulling down the analog sensor supply.
+  WiFi.setSleep(true);
   WiFi.setAutoReconnect(false);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   tsLastWifiAttempt = millis();
@@ -227,8 +232,14 @@ void loop() {
 //  SENSOR READINGS
 // ─────────────────────────────────────────────────────────────────────
 void setupPinModes() {
-  if (PIN_PH_SENSOR > 0) pinMode(PIN_PH_SENSOR, INPUT);
-  if (PIN_EC_SENSOR > 0) pinMode(PIN_EC_SENSOR, INPUT);
+  if (PIN_PH_SENSOR > 0) {
+    pinMode(PIN_PH_SENSOR, INPUT);
+    analogSetPinAttenuation(PIN_PH_SENSOR, ADC_11db);
+  }
+  if (PIN_EC_SENSOR > 0) {
+    pinMode(PIN_EC_SENSOR, INPUT);
+    analogSetPinAttenuation(PIN_EC_SENSOR, ADC_11db);
+  }
   if (PIN_LEVEL_SENSOR_TX > 0) {
     pinMode(PIN_LEVEL_SENSOR_TX, OUTPUT);
     digitalWrite(PIN_LEVEL_SENSOR_TX, LOW);
@@ -238,6 +249,18 @@ void setupPinModes() {
   if (PIN_WATER_TEMP_SENSOR > 0) pinMode(PIN_WATER_TEMP_SENSOR, INPUT_PULLUP);
   if (PIN_NFT_TEMP_SENSOR > 0) pinMode(PIN_NFT_TEMP_SENSOR, INPUT_PULLUP);
 }
+
+bool isSafePhAdcPin(int pin) {
+  // GPIO 32-39 are ADC1 inputs on the classic ESP32 and remain usable with Wi-Fi.
+  return pin >= 32 && pin <= 39;
+}
+
+bool isSafeEcAdcPin(int pin) {
+  // GPIO 32-39 are ADC1 inputs on the classic ESP32 and remain usable with Wi-Fi.
+  return pin >= 32 && pin <= 39;
+}
+
+const bool PH_SENSOR_CALIBRATED = false;
 
 void readSensors() {
   // DHT22 (Air Temp & Air Humidity)
@@ -298,30 +321,43 @@ void readSensors() {
   // pH (analog)
   if (PIN_PH_SENSOR <= 0) {
     sensors.phValid = false;
-    Serial.println("[pH Sensor] Disabled");
+    Serial.printf("[pH Sensor] Disabled (configured GPIO: %d)\n", PIN_PH_SENSOR);
   } else {
+    const int directPhRaw = analogRead(PIN_PH_SENSOR);
     int phRaw = readAnalogFiltered(PIN_PH_SENSOR);
-    if (phRaw < 100) {
+    const float phVoltage = phRaw * 3.3f / 4095.0f;
+    if (phRaw < PH_RAW_MIN_VALID || phRaw > PH_RAW_MAX_VALID) {
       sensors.phValid = false;
-      Serial.printf("[pH Sensor] Sensor not connected (Raw ADC: %d)\n", phRaw);
+      Serial.printf("[pH Sensor] Invalid/saturated input (GPIO: %d, Direct ADC: %d, Filtered ADC: %d, Voltage: %.3fV)\n",
+                    PIN_PH_SENSOR, directPhRaw, phRaw, phVoltage);
+    } else if (!PH_SENSOR_CALIBRATED) {
+      sensors.phValid = false;
+      Serial.printf("[pH Sensor] Raw ADC: %d | Voltage: %.3fV | Calibration required; pH not reported\n",
+                    phRaw, phVoltage);
     } else {
       float phUncompensated = 7.0f + ((float)(phRaw - 2048) * 3.3f / 4095.0f * 3.5f);
       float tempCompFactor = 298.15f / (273.15f + (sensors.humidityValid ? sensors.waterTempC : 25.0f));
-      sensors.phValue = 7.0f + (phUncompensated - 7.0f) * tempCompFactor;
-      sensors.phValid = true;
-      Serial.printf("[pH Sensor] Raw ADC: %d -> %.2f pH\n", phRaw, sensors.phValue);
+      const float calibratedPh = 7.0f + (phUncompensated - 7.0f) * tempCompFactor;
+      if (calibratedPh < 0.0f || calibratedPh > 14.0f) {
+        sensors.phValid = false;
+        Serial.printf("[pH Sensor] Calibration produced invalid pH %.2f (Raw ADC: %d)\n", calibratedPh, phRaw);
+      } else {
+        sensors.phValue = calibratedPh;
+        sensors.phValid = true;
+        Serial.printf("[pH Sensor] GPIO: %d | Raw ADC: %d -> %.2f pH\n", PIN_PH_SENSOR, phRaw, sensors.phValue);
+      }
     }
   }
 
   // EC/TDS (analog TDS Sensor converted to EC)
   if (PIN_EC_SENSOR <= 0) {
     sensors.ecValid = false;
-    Serial.println("[TDS/EC Sensor] Disabled");
+    Serial.printf("[TDS/EC Sensor] Disabled (configured GPIO: %d)\n", PIN_EC_SENSOR);
   } else {
     int tdsRaw = readAnalogFiltered(PIN_EC_SENSOR);
     if (tdsRaw < 100) {
       sensors.ecValid = false;
-      Serial.printf("[TDS/EC Sensor] Sensor not connected (Raw ADC: %d)\n", tdsRaw);
+      Serial.printf("[TDS/EC Sensor] Sensor not connected (GPIO: %d, Raw ADC: %d)\n", PIN_EC_SENSOR, tdsRaw);
     } else {
       float voltage = (float)tdsRaw * 3.3f / 4095.0f;
       float temperature = sensors.humidityValid ? sensors.waterTempC : 25.0f;
@@ -333,12 +369,13 @@ void readSensors() {
       float tdsValue = (133.33f * compensationVoltage * compensationVoltage * compensationVoltage 
                         - 255.86f * compensationVoltage * compensationVoltage 
                         + 857.39f * compensationVoltage) * 0.5f;
+      tdsValue *= TDS_CALIBRATION_FACTOR;
       
       // Convert TDS (ppm) to EC (mS/cm) using standard 0.5 conversion factor (TDS = EC * 500, so EC = TDS / 500)
       sensors.ecValue = tdsValue / 500.0f;
       sensors.ecValid = true;
-      Serial.printf("[TDS/EC Sensor] Raw ADC: %d -> Voltage: %.2fV -> TDS: %.0f ppm -> EC: %.2f mS/cm\n", 
-                    tdsRaw, voltage, tdsValue, sensors.ecValue);
+      Serial.printf("[TDS/EC Sensor] GPIO: %d | Raw ADC: %d -> Voltage: %.2fV -> TDS: %.0f ppm -> EC: %.2f mS/cm\n",
+            PIN_EC_SENSOR, tdsRaw, voltage, tdsValue, sensors.ecValue);
     }
   }
 
@@ -460,6 +497,10 @@ bool fetchHandshakeAndSync() {
   int p_level_rx = extractJsonInt(resp, "pin_level_sensor_rx");
   int p_level_tx = extractJsonInt(resp, "pin_level_sensor_tx");
   bool serverTriggerEcho = extractJsonBool(resp, "ultrasonicTriggerEcho", true);
+  if (p_phS > 0 && !isSafePhAdcPin(p_phS)) {
+    Serial.printf("[pH Sensor] Ignoring backend GPIO %d: ADC2 cannot be read while Wi-Fi is active\n", p_phS);
+  }
+  Serial.printf("[pH Sensor] Backend GPIO: %d | Using GPIO: %d\n", p_phS, isSafePhAdcPin(p_phS) ? p_phS : PIN_PH_SENSOR);
 
   float serverEmptyDistance = extractJsonNumber(resp, "emptyDistanceCm").toFloat();
   float serverFullDistance = extractJsonNumber(resp, "fullDistanceCm").toFloat();
@@ -469,8 +510,11 @@ bool fetchHandshakeAndSync() {
   float serverTankCapacity = extractJsonNumber(resp, "tankCapacityLiters").toFloat();
 
   bool pinChanged = false;
-  if (p_phS >= -1 && p_phS != PIN_PH_SENSOR) { PIN_PH_SENSOR = p_phS; pinChanged = true; }
-  if (p_ecS >= -1 && p_ecS != PIN_EC_SENSOR) { PIN_EC_SENSOR = p_ecS; pinChanged = true; }
+  if (isSafePhAdcPin(p_phS) && p_phS != PIN_PH_SENSOR) { PIN_PH_SENSOR = p_phS; pinChanged = true; }
+  if (p_ecS > 0 && !isSafeEcAdcPin(p_ecS)) {
+    Serial.printf("[TDS/EC Sensor] Ignoring backend GPIO %d: ADC2 cannot be read while Wi-Fi is active\n", p_ecS);
+  }
+  if (isSafeEcAdcPin(p_ecS) && p_ecS != PIN_EC_SENSOR) { PIN_EC_SENSOR = p_ecS; pinChanged = true; }
   if (p_dht >= -1 && p_dht != PIN_TEMP_SENSOR) { 
     PIN_TEMP_SENSOR = p_dht; 
     if (PIN_TEMP_SENSOR > 0) {
