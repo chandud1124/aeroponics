@@ -34,15 +34,19 @@ type OperationLogEntry = {
   notes?: string;
   sourceLocation?: string;
   targetLocation?: string;
+  harvestEntry?: HarvestHistoryEntry;
+  lifecycleEvent?: CropLifecycleEvent;
 };
 
 interface OperationsLogProps {
   lifecycleEvents: CropLifecycleEvent[];
   harvestHistory: HarvestHistoryEntry[];
   nftChannels?: Array<{ id: string; name: string; stand?: string; level?: string; channelIndex?: number }>;
+  onUndoHarvest?: (entry: HarvestHistoryEntry) => void;
+  onUndoPlanting?: (event: CropLifecycleEvent) => void;
 }
 
-export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [] }: OperationsLogProps) {
+export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [], onUndoHarvest, onUndoPlanting }: OperationsLogProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [filterCrop, setFilterCrop] = useState("all");
@@ -56,6 +60,14 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
 
   const allOperations = useMemo(() => {
     const operations: OperationLogEntry[] = [];
+    const seen = new Set<string>();
+
+    const pushUnique = (entry: OperationLogEntry) => {
+      const key = `${entry.id}|${entry.type}|${entry.timestamp}|${entry.cropName}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      operations.push(entry);
+    };
 
     // Add lifecycle events
     lifecycleEvents.forEach((event) => {
@@ -74,7 +86,7 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
         eventType = "removed";
       }
 
-      operations.push({
+      pushUnique({
         id: event.id,
         timestamp: new Date(event.timestamp).getTime(),
         type: eventType,
@@ -84,6 +96,7 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
         notes: event.notes,
         sourceLocation: event.sourceName,
         targetLocation: event.targetName,
+        lifecycleEvent: event,
       });
     });
 
@@ -91,7 +104,7 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
     harvestHistory.forEach((entry) => {
       if (!lifecycleEvents.some((e) => e.id === `legacy-harvested-${entry.id}`)) {
         if ((entry.yieldQty || 0) > 0) {
-          operations.push({
+          pushUnique({
             id: `legacy-harvested-${entry.id}`,
             timestamp: new Date(entry.harvestedAt).getTime(),
             type: "harvested",
@@ -99,10 +112,11 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
             quantity: entry.yieldQty,
             location: entry.channelName,
             notes: `Yield: ${entry.yieldQty}pc, Waste: ${entry.wasteQty}pc`,
+            harvestEntry: entry,
           });
         }
         if ((entry.wasteQty || 0) > 0) {
-          operations.push({
+          pushUnique({
             id: `legacy-removed-${entry.id}`,
             timestamp: new Date(entry.harvestedAt).getTime(),
             type: "removed",
@@ -145,6 +159,12 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
     () => Array.from(new Set(allOperations.map((op) => op.cropName))).sort(),
     [allOperations]
   );
+
+  const isUndoAvailable = (entry?: HarvestHistoryEntry) => {
+    if (!entry) return false;
+    if (!entry.undoableUntil) return true;
+    return Date.now() < entry.undoableUntil;
+  };
 
   const operationStats = useMemo(() => {
     const stats = {
@@ -214,6 +234,13 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
       default:
         return "bg-muted/10 text-muted-foreground border-muted/50";
     }
+  };
+
+  const getUndoButtonText = (op: OperationLogEntry) => {
+    if (op.type === "harvested") return "Undo Harvest";
+    if (op.type === "planted" && op.lifecycleEvent?.sourceNurseryTrayId) return "Undo Tray Plant";
+    if (op.type === "transferred" && op.lifecycleEvent?.sourceNurseryTrayId) return "Undo Nursery Transfer";
+    return "Undo";
   };
 
   return (
@@ -400,13 +427,41 @@ export function OperationsLog({ lifecycleEvents, harvestHistory, nftChannels = [
                       </div>
                     </div>
                   </div>
-                  <button className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 mt-0.5">
-                    {expandedId === op.id ? (
-                      <ChevronUp className="h-4 w-4" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4" />
-                    )}
-                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0 mt-0.5">
+                    {(op.type === "harvested" && op.harvestEntry && onUndoHarvest && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-[9px] text-amber-600 hover:text-amber-700 hover:bg-amber-500/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUndoHarvest(op.harvestEntry!);
+                        }}
+                        disabled={!isUndoAvailable(op.harvestEntry)}
+                      >
+                        {isUndoAvailable(op.harvestEntry) ? getUndoButtonText(op) : "Expired"}
+                      </Button>
+                    )) || (op.type === "planted" && op.lifecycleEvent?.sourceNurseryTrayId && onUndoPlanting && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-[9px] text-amber-600 hover:text-amber-700 hover:bg-amber-500/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUndoPlanting(op.lifecycleEvent!);
+                        }}
+                      >
+                        {getUndoButtonText(op)}
+                      </Button>
+                    ))}
+                    <button className="text-muted-foreground hover:text-foreground transition-colors">
+                      {expandedId === op.id ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 {expandedId === op.id && (

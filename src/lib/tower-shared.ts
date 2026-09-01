@@ -254,6 +254,16 @@ export type NftIncidentLog = {
   cultivar?: string;
 };
 
+export type HolePlantRecord = {
+  holeId: number;
+  cropName: string;
+  variety?: string;
+  plantedAt: string;
+  expectedHarvestAt?: string | null;
+  count?: number;
+  sourceNurseryTrayId?: string | null;
+};
+
 export type NftChannel = {
   id: string;
   name: string;
@@ -275,6 +285,7 @@ export type NftChannel = {
   row?: string;
   holeConfig?: string;
   incidents?: NftIncidentLog[];
+  holes?: HolePlantRecord[];
 };
 
 export type GpioMapping = {
@@ -337,6 +348,9 @@ export type HarvestHistoryEntry = {
   avgWeightGrams?: number;
   yieldKg?: number;
   incidents?: NftIncidentLog[];
+  undoableUntil?: number;
+  sourceNurseryTrayId?: string | null;
+  holes?: HolePlantRecord[]; // For tracking individual hole harvests for undo
 };
 
 export type CropLifecycleEventType = "planted" | "harvested" | "removed" | "transferred";
@@ -359,8 +373,10 @@ export type CropLifecycleEvent = {
   quantity: number;
   sourceId?: string;
   sourceName?: string;
+  sourceNurseryTrayId?: string | null;
   destinationId?: string;
   destinationName?: string;
+  destinationNurseryTrayId?: string | null;
   location?: CropLocationSnapshot;
   notes?: string;
 };

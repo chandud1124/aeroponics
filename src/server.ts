@@ -1032,7 +1032,7 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     if (request.method === "POST") {
       const parts = url.pathname.split("/");
       const id = parts[3];
-      const payload = (await request.json()) as { notes: string; yieldQty?: number; wasteQty?: number; avgWeightGrams?: number; harvestCultivar?: string };
+      const payload = (await request.json()) as { notes: string; yieldQty?: number; wasteQty?: number; avgWeightGrams?: number; harvestCultivar?: string; sourceNurseryTrayId?: string | null };
       const measurements = [payload.yieldQty ?? 0, payload.wasteQty ?? 0, payload.avgWeightGrams ?? 0];
       if (measurements.some((value) => !Number.isFinite(value) || value < 0)) {
         return jsonResponse({ error: "Harvest yield, waste, and average weight must be non-negative numbers" }, 400);
@@ -1044,7 +1044,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
           payload.wasteQty ?? 0,
           payload.avgWeightGrams ?? 0,
           payload.notes || "",
-          payload.harvestCultivar
+          payload.harvestCultivar,
+          payload.sourceNurseryTrayId
         );
         if (!updated) {
           return jsonResponse({ error: "Channel not found" }, 404);

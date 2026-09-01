@@ -14,12 +14,15 @@ import {
   plantCropRemote,
   harvestCropRemote,
   fetchHarvestHistory,
+  saveHarvestHistoryRemote,
   appendCropLifecycleEvent,
   fetchCropLifecycleEvents,
+  fetchNurseryStore,
+  saveNurseryStore,
   type NftChannel,
   type NftCropEntry,
 } from "@/lib/tower-storage";
-import type { CropConfig } from "@/lib/tower-shared";
+import type { CropConfig, HolePlantRecord } from "@/lib/tower-shared";
 import type { CropLifecycleEvent } from "@/lib/tower-shared";
 
 const SUGGESTED_CROPS_LIST = [
@@ -134,7 +137,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
 
   // Forms states
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
-  const [actionType, setActionType] = useState<"plant" | "harvest" | "add-channel" | "edit-channel" | "incident" | "logs" | "transfer" | "edit-planted-crops" | null>(null);
+  const [actionType, setActionType] = useState<"plant" | "harvest" | "add-channel" | "edit-channel" | "incident" | "logs" | "transfer" | "edit-planted-crops" | "re-shift" | null>(null);
   
   const [channelName, setChannelName] = useState("");
   const [cropName, setCropName] = useState("");
@@ -143,6 +146,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
   const [plantedAt, setPlantedAt] = useState("");
   const [expectedHarvestISO, setExpectedHarvestISO] = useState("");
   const [notes, setNotes] = useState("");
+  const [selectedNurseryTrayId, setSelectedNurseryTrayId] = useState<string | null>(null);
   
   // Coordinate locations
   const [stand, setStand] = useState("");
@@ -188,14 +192,38 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
   const [transferScanQr, setTransferScanQr] = useState("");
   const [showCameraScanner, setShowCameraScanner] = useState(false);
 
+  // Hole-range planting state
+  const [usesHoleRanges, setUsesHoleRanges] = useState(false);
+  const [holeRanges, setHoleRanges] = useState<Array<{
+    startHole: number;
+    endHole: number;
+    cropName: string;
+    plantDate: string;
+    expectedHarvestDate: string;
+    sourceNurseryTrayId?: string | null;
+  }>>([]);
+  const [originalHoles, setOriginalHoles] = useState<Array<{ holeId: number; cropName: string; plantedAt: string; expectedHarvestAt: string | null; count: number; sourceNurseryTrayId: string | null }> | null>(null);
+  const [nurseryTrays, setNurseryTrays] = useState<any[]>([]);
+
+  // Hole-range harvest state
+  const [selectedHolesToHarvest, setSelectedHolesToHarvest] = useState<Set<number>>(new Set());
+
+  // Re-shift state (for multi-hole management)
+  const [reshiftSourceHoles, setReshiftSourceHoles] = useState({ start: 1, end: 5 });
+  const [reshiftDestHoles, setReshiftDestHoles] = useState({ start: 6, end: 10 });
+  const [reshiftNewCrop, setReshiftNewCrop] = useState("");
+  const [reshiftNewDate, setReshiftNewDate] = useState("");
+  const [reshiftSourceTray, setReshiftSourceTray] = useState("");
+
   const loadData = () => {
     setLoading(true);
     Promise.all([
       fetchNftChannels(),
       fetchCropLifecycleEvents(),
-      fetchHarvestHistory()
+      fetchHarvestHistory(),
+      fetchNurseryStore()
     ])
-      .then(([data, events, harvests]) => {
+      .then(([data, events, harvests, nurseryStore]) => {
         // Sort channels by polyhouse, block, row, level, then channelIndex
         const sorted = [...data].sort((a, b) => {
           const phA = a.polyhouse || "";
@@ -218,6 +246,9 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
         });
         setChannels(sorted);
 
+        // Load nursery trays
+        setNurseryTrays(nurseryStore?.trays || []);
+
         // Filter for recent transfers (last 20)
         const transfers = events
           .filter((e) => e.type === "transferred")
@@ -225,8 +256,14 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
           .slice(0, 20);
         setRecentTransfers(transfers);
 
-        // Sort harvests by date descending and keep last 20
-        const sortedHarvests = [...harvests]
+        // Sort harvests by date descending and keep last 20, excluding undo/reversal rows
+        const sortedHarvests = Array.from(
+          new Map(
+            [...harvests]
+              .filter((harvest) => !isUndoHarvestRecord(harvest))
+              .map((harvest) => [getHarvestFingerprint(harvest), harvest])
+          ).values()
+        )
           .sort((a, b) => new Date(b.harvestedAt).getTime() - new Date(a.harvestedAt).getTime())
           .slice(0, 20);
         setRecentHarvests(sortedHarvests);
@@ -266,30 +303,440 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
     );
   };
 
+  const validateHoleRanges = (): boolean => {
+    if (holeRanges.length === 0) {
+      toast.error("At least one hole range must be defined");
+      return false;
+    }
+
+    for (const range of holeRanges) {
+      if (!range.cropName.trim()) {
+        toast.error("All hole ranges must have a crop name");
+        return false;
+      }
+      if (range.startHole < 1 || range.endHole < 1 || range.startHole > range.endHole) {
+        toast.error("Hole ranges must have valid start and end holes (start ≤ end)");
+        return false;
+      }
+    }
+
+    // Check for overlaps
+    for (let i = 0; i < holeRanges.length; i++) {
+      for (let j = i + 1; j < holeRanges.length; j++) {
+        const r1 = holeRanges[i];
+        const r2 = holeRanges[j];
+        // Check overlap: NOT (r1.end < r2.start OR r2.end < r1.start)
+        if (!(r1.endHole < r2.startHole || r2.endHole < r1.startHole)) {
+          toast.error(`Hole ranges overlap: ${r1.startHole}-${r1.endHole} and ${r2.startHole}-${r2.endHole}`);
+          return false;
+        }
+      }
+    }
+
+    return true;
+  };
+
+  const handleAddHoleRange = () => {
+    setHoleRanges([...holeRanges, {
+      startHole: 1,
+      endHole: 5,
+      cropName: "",
+      plantDate: plantedAt,
+      expectedHarvestDate: expectedHarvestISO || "",
+    }]);
+  };
+
+  const handleRemoveHoleRange = (index: number) => {
+    setHoleRanges(holeRanges.filter((_, idx) => idx !== index));
+  };
+
+  const handleHoleRangeChange = (
+    index: number,
+    field: "startHole" | "endHole" | "cropName" | "plantDate" | "expectedHarvestDate" | "sourceNurseryTrayId",
+    value: any
+  ) => {
+    setHoleRanges(
+      holeRanges.map((r, idx) => {
+        if (idx === index) {
+          return {
+            ...r,
+            [field]: field.includes("Hole") ? Number(value) : value,
+          };
+        }
+        return r;
+      })
+    );
+  };
+
+  const isUndoHarvestRecord = (harvestEntry: any): boolean => {
+    const note = String(harvestEntry?.notes || "").toLowerCase();
+    return note.includes("undo harvest") || note.includes("restored ") || note.includes("restored to") || note.includes("reversed harvest");
+  };
+
+  const getHarvestFingerprint = (harvestEntry: any): string => {
+    const harvestedAt = String(harvestEntry?.harvestedAt || "");
+    const cropName = String(harvestEntry?.cropName || "").trim();
+    const yieldQty = Number(harvestEntry?.yieldQty ?? harvestEntry?.currentCount ?? 0);
+    const wasteQty = Number(harvestEntry?.wasteQty ?? 0);
+    return `${harvestedAt}|${cropName}|${yieldQty}|${wasteQty}`;
+  };
+
+  const isUndoAvailable = (harvestEntry: any): boolean => {
+    if (!harvestEntry) return false;
+    if (isUndoHarvestRecord(harvestEntry)) return false;
+    if (!harvestEntry.undoableUntil) return true; // Legacy entries without timestamp can still be undone
+    return Date.now() < harvestEntry.undoableUntil;
+  };
+
+  // Calculate days since planting for a hole range
+  const getDaysSincePlanting = (plantedAtISO: string | null): number => {
+    if (!plantedAtISO) return 0;
+    const diff = Date.now() - new Date(plantedAtISO).getTime();
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
+  };
+
+  // Calculate days remaining until harvest for a hole range
+  const getDaysUntilHarvest = (expectedHarvestISO: string | null): number | null => {
+    if (!expectedHarvestISO) return null;
+    const diff = new Date(expectedHarvestISO).getTime() - Date.now();
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+    return days > 0 ? days : 0; // 0 means ready now
+  };
+
+  // Get status of a hole range (ready, growing, etc)
+  const getHoleRangeStatus = (hole: HolePlantRecord): { status: "ready" | "growing"; daysRemaining: number | null } => {
+    const daysRemaining = getDaysUntilHarvest(hole.expectedHarvestAt);
+    if (daysRemaining === null) {
+      // If no expected harvest, check if 30+ days have passed (default maturity)
+      const daysPassed = getDaysSincePlanting(hole.plantedAt);
+      return { status: daysPassed >= 30 ? "ready" : "growing", daysRemaining: null };
+    }
+    return {
+      status: daysRemaining === 0 ? "ready" : "growing",
+      daysRemaining
+    };
+  };
+
+  // Convert Multi-Crop data to Hole-Range format (preserves tray info if available)
+  const convertMultiCropToHoleRanges = (): Array<{
+    startHole: number;
+    endHole: number;
+    cropName: string;
+    plantDate: string;
+    expectedHarvestDate: string;
+    sourceNurseryTrayId: string | null;
+  }> => {
+    // If original holes exist, convert them back to ranges (preserves sourceNurseryTrayId)
+    if (originalHoles && originalHoles.length > 0) {
+      const ranges: Array<{
+        startHole: number;
+        endHole: number;
+        cropName: string;
+        plantDate: string;
+        expectedHarvestDate: string;
+        sourceNurseryTrayId: string | null;
+      }> = [];
+      let i = 0;
+      while (i < originalHoles.length) {
+        const startHole = originalHoles[i].holeId;
+        const cropName = originalHoles[i].cropName;
+        const plantDate = originalHoles[i].plantedAt.split("T")[0];
+        const expectedHarvestDate = originalHoles[i].expectedHarvestAt?.split("T")[0] || "";
+        const sourceNurseryTrayId = originalHoles[i].sourceNurseryTrayId;
+        
+        let endHole = startHole;
+        let j = i + 1;
+        // Group consecutive holes with same crop and date
+        while (j < originalHoles.length && 
+               originalHoles[j].cropName === cropName &&
+               originalHoles[j].plantedAt === originalHoles[i].plantedAt &&
+               originalHoles[j].holeId === endHole + 1) {
+          endHole = originalHoles[j].holeId;
+          j++;
+        }
+        
+        ranges.push({ startHole, endHole, cropName, plantDate, expectedHarvestDate, sourceNurseryTrayId });
+        i = j;
+      }
+      return ranges;
+    }
+    
+    // Otherwise, convert from multi-crop crops list (no tray info available)
+    const ranges: Array<{
+      startHole: number;
+      endHole: number;
+      cropName: string;
+      plantDate: string;
+      expectedHarvestDate: string;
+      sourceNurseryTrayId: string | null;
+    }> = [];
+    let currentHole = 1;
+
+    for (const crop of cropsList) {
+      const count = Number(crop.count || 0);
+      if (count > 0) {
+        ranges.push({
+          startHole: currentHole,
+          endHole: currentHole + count - 1,
+          cropName: crop.cropName,
+          plantDate: plantedAt,
+          expectedHarvestDate: expectedHarvestISO || "",
+          sourceNurseryTrayId: selectedNurseryTrayId || null,
+        });
+        currentHole += count;
+      }
+    }
+    return ranges;
+  };
+
+  // Convert Hole-Range data to Multi-Crop format
+  const convertHoleRangesToMultiCrop = (): Array<{ cropName: string; count: string }> => {
+    const cropMap = new Map<string, number>();
+    
+    for (const range of holeRanges) {
+      const count = range.endHole - range.startHole + 1;
+      const current = cropMap.get(range.cropName) || 0;
+      cropMap.set(range.cropName, current + count);
+    }
+    
+    return Array.from(cropMap.entries()).map(([cropName, count]) => ({
+      cropName,
+      count: String(count)
+    }));
+  };
+
+  // Handle harvest of specific hole ranges
+  const handleHarvestHoleRanges = async () => {
+    if (!activeChannelId) return;
+    try {
+      const activeChan = channels.find(c => c.id === activeChannelId);
+      if (!activeChan || !activeChan.holes || activeChan.holes.length === 0) {
+        toast.error("No hole-range planting data found for this channel.");
+        return;
+      }
+
+      if (selectedHolesToHarvest.size === 0) {
+        toast.error("Please select at least one hole range to harvest.");
+        return;
+      }
+
+      // Get holes to harvest
+      const holesToHarvest = activeChan.holes.filter(h => selectedHolesToHarvest.has(h.holeId));
+      if (holesToHarvest.length === 0) {
+        toast.error("No holes selected for harvest.");
+        return;
+      }
+
+      const harvestCount = holesToHarvest.length;
+      const totalHarvested = yieldQty + wasteQty;
+
+      if (totalHarvested !== harvestCount) {
+        toast.warning(`Selected ${harvestCount} holes, but harvest quantity is ${totalHarvested}. Adjusting to ${harvestCount}.`);
+      }
+
+      // Update channel - remove harvested holes, keep others
+      const remainingHoles = activeChan.holes.filter(h => !selectedHolesToHarvest.has(h.holeId));
+      const harvestedCrops = holesToHarvest.map(h => h.cropName).filter((c, i, arr) => arr.indexOf(c) === i);
+      
+      const updatedChan: NftChannel = {
+        ...activeChan,
+        holes: remainingHoles.length > 0 ? remainingHoles : undefined,
+        currentCount: remainingHoles.length,
+        status: remainingHoles.length > 0 ? "growing" : "empty",
+        harvestedAt: remainingHoles.length === 0 ? new Date().toISOString() : null,
+        crops: remainingHoles.length > 0 
+          ? remainingHoles.map(h => ({ cropName: h.cropName, count: 1 }))
+            .reduce((acc: any[], cur) => {
+              const existing = acc.find(c => c.cropName === cur.cropName);
+              if (existing) existing.count++;
+              else acc.push(cur);
+              return acc;
+            }, [])
+          : []
+      };
+
+      const updatedList = channels.map((c) => c.id === activeChannelId ? updatedChan : c);
+      await saveNftChannels(updatedList);
+
+      // Save harvest history for undo capability (with nursery tray sync)
+      try {
+        const harvestHistory = await fetchHarvestHistory();
+        const now = Date.now();
+        
+        // Create one harvest entry per hole for detailed undo tracking
+        for (const hole of holesToHarvest) {
+          const newEntry: HarvestHistoryEntry = {
+            id: `harv-hole-${now}-${hole.holeId}`,
+            channelId: activeChannelId,
+            channelName: activeChan.name,
+            cropName: hole.cropName,
+            crops: [{ cropName: hole.cropName, count: 1 }],
+            plantedAt: hole.plantedAt || null,
+            harvestedAt: new Date().toISOString(),
+            notes: notes || `Harvested hole ${hole.holeId}`,
+            capacity: 1,
+            currentCount: 1,
+            yieldQty: 1,
+            wasteQty: 0,
+            avgWeightGrams: 0,
+            undoableUntil: now + (24 * 60 * 60 * 1000),
+            sourceNurseryTrayId: hole.sourceNurseryTrayId || null, // ← KEY: Store which nursery tray this came from
+            holes: [hole], // Store full hole data for undo
+          };
+          harvestHistory.push(newEntry);
+        }
+        
+        await saveHarvestHistoryRemote(harvestHistory);
+      } catch (err: any) {
+        console.warn("Failed to save harvest history for holes:", err);
+        // Don't fail the harvest if history save fails
+      }
+
+      // Create lifecycle events
+      for (const crop of harvestedCrops) {
+        const cropHoleCount = holesToHarvest.filter(h => h.cropName === crop).length;
+        await appendCropLifecycleEvent({
+          id: `lifecycle-harvested-holes-${Date.now()}-${crop}`,
+          type: "harvested",
+          timestamp: new Date().toISOString(),
+          cropName: crop,
+          quantity: cropHoleCount,
+          sourceId: activeChannelId,
+          sourceName: activeChan.name,
+          location: channelLocation(activeChan),
+          notes: `Harvested ${cropHoleCount} holes (${holesToHarvest.map(h => h.holeId).join(",")}) of ${crop}`,
+        });
+      }
+
+      toast.success(`Successfully harvested ${harvestCount} holes!`);
+      setSelectedHolesToHarvest(new Set());
+      loadData();
+      closeForm();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to harvest holes");
+    }
+  };
+
+  // Handle re-shifting plants between hole ranges
+  const handleReshiftPlants = async () => {
+    if (!activeChannelId) return;
+    try {
+      const activeChan = channels.find(c => c.id === activeChannelId);
+      if (!activeChan || !activeChan.holes) {
+        toast.error("No hole-range data found for this channel.");
+        return;
+      }
+
+      // Validate inputs
+      if (reshiftSourceHoles.start < 1 || reshiftSourceHoles.end < reshiftSourceHoles.start ||
+          reshiftDestHoles.start < 1 || reshiftDestHoles.end < reshiftDestHoles.start) {
+        toast.error("Invalid hole ranges for re-shift.");
+        return;
+      }
+
+      if (!reshiftNewCrop.trim()) {
+        toast.error("Please enter a crop name for the re-shifted holes.");
+        return;
+      }
+
+      // Check for overlap
+      if (!(reshiftSourceHoles.end < reshiftDestHoles.start || reshiftDestHoles.end < reshiftSourceHoles.start)) {
+        toast.error("Source and destination hole ranges cannot overlap.");
+        return;
+      }
+
+      // Get source and destination hole counts
+      const sourceCount = reshiftSourceHoles.end - reshiftSourceHoles.start + 1;
+      const destCount = reshiftDestHoles.end - reshiftDestHoles.start + 1;
+
+      if (sourceCount !== destCount) {
+        toast.error(`Source holes (${sourceCount}) and destination holes (${destCount}) must be the same count.`);
+        return;
+      }
+
+      // Create new holes for destination range
+      const newHoles: HolePlantRecord[] = [];
+      for (let i = 0; i < sourceCount; i++) {
+        newHoles.push({
+          holeId: reshiftDestHoles.start + i,
+          cropName: reshiftNewCrop.trim(),
+          plantedAt: reshiftNewDate ? new Date(reshiftNewDate).toISOString() : new Date().toISOString(),
+          expectedHarvestAt: null,
+          count: 1,
+          sourceNurseryTrayId: reshiftSourceTray || null,
+        });
+      }
+
+      // Remove source holes, add destination holes
+      const updatedHoles = activeChan.holes
+        .filter(h => h.holeId < reshiftSourceHoles.start || h.holeId > reshiftSourceHoles.end)
+        .concat(newHoles)
+        .sort((a, b) => a.holeId - b.holeId);
+
+      // Update crops list
+      const newCropCount = newHoles.length;
+      const allCrops = updatedHoles.map(h => h.cropName);
+      const uniqueCrops = [...new Set(allCrops)];
+      const cropEntries = uniqueCrops.map(crop => ({
+        cropName: crop,
+        count: allCrops.filter(c => c === crop).length
+      }));
+
+      const updatedChan: NftChannel = {
+        ...activeChan,
+        holes: updatedHoles,
+        currentCount: updatedHoles.length,
+        status: "growing",
+        crops: cropEntries,
+        cropName: cropEntries.map(c => `${c.cropName} (${c.count})`).join(", ")
+      };
+
+      const updatedList = channels.map((c) => c.id === activeChannelId ? updatedChan : c);
+      await saveNftChannels(updatedList);
+
+      // Update nursery tray if sourced from nursery
+      if (reshiftSourceTray) {
+        try {
+          const nurseryStore = await fetchNurseryStore();
+          const trayIndex = nurseryStore.trays.findIndex(t => t.id === reshiftSourceTray);
+          if (trayIndex >= 0) {
+            nurseryStore.trays[trayIndex].germinated = Math.max(
+              0,
+              (nurseryStore.trays[trayIndex].germinated || 0) - newCropCount
+            );
+            await saveNurseryStore(nurseryStore);
+            toast.success(`${newCropCount} plants moved from Nursery Tray`);
+          }
+        } catch (err: any) {
+          console.warn("Failed to update nursery tray:", err);
+        }
+      }
+
+      // Create lifecycle event
+      await appendCropLifecycleEvent({
+        id: `lifecycle-reshifted-${Date.now()}`,
+        type: "transferred",
+        timestamp: new Date().toISOString(),
+        cropName: reshiftNewCrop.trim(),
+        quantity: sourceCount,
+        destinationId: activeChannelId,
+        destinationName: activeChan.name,
+        sourceNurseryTrayId: reshiftSourceTray || null,
+        location: channelLocation(activeChan),
+        notes: `Re-shifted: Holes ${reshiftSourceHoles.start}-${reshiftSourceHoles.end} → ${reshiftDestHoles.start}-${reshiftDestHoles.end}`,
+      });
+
+      toast.success(`Successfully re-shifted ${sourceCount} holes!`);
+      setShowReshiftForm(false);
+      setSelectedHolesToHarvest(new Set());
+      loadData();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to re-shift plants");
+    }
+  };
+
   const handlePlant = async () => {
     if (!activeChannelId) return;
-
-    // Filter valid crop varieties input
-    const validCrops = cropsList.filter((c) => c.cropName.trim() !== "");
-    if (validCrops.length === 0) {
-      toast.error("At least one plant variety name is required");
-      return;
-    }
-
-    if (validCrops.some((crop) => !Number.isFinite(crop.count) || crop.count <= 0)) {
-      toast.error("Every crop variety must have a quantity greater than zero");
-      return;
-    }
-    const cropNames = validCrops.map((crop) => crop.cropName.trim().toLowerCase());
-    if (new Set(cropNames).size !== cropNames.length) {
-      toast.error("Each crop variety can only be entered once");
-      return;
-    }
-    const totalCount = validCrops.reduce((sum, c) => sum + c.count, 0);
-    if (totalCount > capacity) {
-      toast.error(`Total plants count (${totalCount}) exceeds channel capacity (${capacity})`);
-      return;
-    }
 
     try {
       const activeChan = channels.find((c) => c.id === activeChannelId);
@@ -297,6 +744,132 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
 
       if (activeChan.status === "growing" && actionType === "plant") {
         await harvestCropRemote(activeChan.id, activeChan.currentCount ?? 0, 0, 0, "Auto-logged on replant.");
+      }
+
+      // Handle hole-range planting
+      if (usesHoleRanges) {
+        if (!validateHoleRanges()) return;
+
+        // Create HolePlantRecord array from hole ranges
+        const holes: HolePlantRecord[] = [];
+        let totalPlants = 0;
+
+        for (const range of holeRanges) {
+          const holeCount = range.endHole - range.startHole + 1;
+          totalPlants += holeCount;
+
+          for (let holeId = range.startHole; holeId <= range.endHole; holeId++) {
+            holes.push({
+              holeId,
+              cropName: range.cropName.trim(),
+              plantedAt: range.plantDate ? new Date(range.plantDate).toISOString() : new Date().toISOString(),
+              expectedHarvestAt: range.expectedHarvestDate ? new Date(range.expectedHarvestDate).toISOString() : null,
+              count: 1,
+              sourceNurseryTrayId: range.sourceNurseryTrayId || null,
+            });
+          }
+        }
+
+        // Update nursery tray capacity if sourced from nursery
+        for (const range of holeRanges) {
+          if (range.sourceNurseryTrayId) {
+            const trayIndex = nurseryTrays.findIndex((t) => t.id === range.sourceNurseryTrayId);
+            if (trayIndex >= 0) {
+              const holeCountForTray = holeRanges
+                .filter((r) => r.sourceNurseryTrayId === range.sourceNurseryTrayId)
+                .reduce((sum, r) => sum + (r.endHole - r.startHole + 1), 0);
+
+              nurseryTrays[trayIndex].germinated = Math.max(
+                0,
+                (nurseryTrays[trayIndex].germinated || 0) - holeCountForTray
+              );
+            }
+          }
+        }
+
+        // Update nursery store
+        if (nurseryTrays.some((t) => holeRanges.some((r) => r.sourceNurseryTrayId === t.id))) {
+          await saveNurseryStore({ trays: nurseryTrays, history: [], configs: [] });
+        }
+
+        // Create crop entries for compatibility
+        const cropEntries: NftCropEntry[] = [];
+        for (const range of holeRanges) {
+          const existing = cropEntries.find((c) => c.cropName === range.cropName.trim());
+          if (existing) {
+            existing.count += (range.endHole - range.startHole + 1);
+          } else {
+            cropEntries.push({
+              cropName: range.cropName.trim(),
+              count: range.endHole - range.startHole + 1,
+            });
+          }
+        }
+
+        const combinedCropName = cropEntries
+          .map((c) => `${c.cropName} (${c.count})`)
+          .join(", ");
+
+        const updatedChan: NftChannel = {
+          ...activeChan,
+          cropName: combinedCropName,
+          crops: cropEntries,
+          holes,
+          status: "growing",
+          plantedAt: holeRanges[0]?.plantDate ? new Date(holeRanges[0].plantDate).toISOString() : new Date().toISOString(),
+          expectedHarvestISO: holeRanges[0]?.expectedHarvestDate ? new Date(holeRanges[0].expectedHarvestDate).toISOString() : null,
+          capacity: capacity || 50,
+          currentCount: totalPlants,
+          notes,
+        };
+
+        const updatedList = channels.map((c) => c.id === activeChannelId ? updatedChan : c);
+        await saveNftChannels(updatedList);
+
+        // Create lifecycle events for each crop type
+        for (const [index, crop] of cropEntries.entries()) {
+          const sourceNurseryTrayId = holeRanges.find((r) => r.cropName === crop.cropName)?.sourceNurseryTrayId;
+          await appendCropLifecycleEvent({
+            id: `lifecycle-planted-${Date.now()}-${index}`,
+            type: "planted",
+            timestamp: new Date().toISOString(),
+            cropName: crop.cropName,
+            quantity: crop.count,
+            destinationId: updatedChan.id,
+            destinationName: updatedChan.name,
+            sourceNurseryTrayId: sourceNurseryTrayId || null,
+            location: channelLocation(updatedChan),
+            notes: notes || "NFT channel planted from nursery",
+          });
+        }
+
+        toast.success(`Planted ${totalPlants} plants across ${holeRanges.length} hole range(s)!`);
+        loadData();
+        onDataChanged?.();
+        closeForm();
+        return;
+      }
+
+      // Traditional multi-crop planting (existing logic)
+      const validCrops = cropsList.filter((c) => c.cropName.trim() !== "");
+      if (validCrops.length === 0) {
+        toast.error("At least one plant variety name is required");
+        return;
+      }
+
+      if (validCrops.some((crop) => !Number.isFinite(crop.count) || crop.count <= 0)) {
+        toast.error("Every crop variety must have a quantity greater than zero");
+        return;
+      }
+      const cropNames = validCrops.map((crop) => crop.cropName.trim().toLowerCase());
+      if (new Set(cropNames).size !== cropNames.length) {
+        toast.error("Each crop variety can only be entered once");
+        return;
+      }
+      const totalCount = validCrops.reduce((sum, c) => sum + c.count, 0);
+      if (totalCount > capacity) {
+        toast.error(`Total plants count (${totalCount}) exceeds channel capacity (${capacity})`);
+        return;
       }
 
       const firstCropName = validCrops[0].cropName;
@@ -316,6 +889,18 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
         notes,
       };
 
+      // Update nursery tray capacity if sourced from nursery
+      if (selectedNurseryTrayId) {
+        const trayIndex = nurseryTrays.findIndex((t) => t.id === selectedNurseryTrayId);
+        if (trayIndex >= 0) {
+          nurseryTrays[trayIndex].germinated = Math.max(
+            0,
+            (nurseryTrays[trayIndex].germinated || 0) - totalCount
+          );
+          await saveNurseryStore({ trays: nurseryTrays, history: [], configs: [] });
+        }
+      }
+
       const updatedList = channels.map((c) => c.id === activeChannelId ? updatedChan : c);
       await saveNftChannels(updatedList);
       for (const [index, crop] of validCrops.entries()) {
@@ -327,12 +912,14 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
           quantity: crop.count,
           destinationId: updatedChan.id,
           destinationName: updatedChan.name,
+          sourceNurseryTrayId: selectedNurseryTrayId || null,
           location: channelLocation(updatedChan),
           notes: notes || "NFT channel planted",
         });
       }
       toast.success("Crop batch planted successfully!");
       loadData();
+      onDataChanged?.();
       closeForm();
     } catch (e: any) {
       toast.error(e.message || "Failed to plant crop");
@@ -382,6 +969,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
       }
       toast.success("Crop batch harvested successfully!");
       loadData();
+      onDataChanged?.();
       closeForm();
     } catch (e: any) {
       toast.error(e.message || "Failed to harvest crop");
@@ -590,6 +1178,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
       }
       toast.success(incidentType === "removal" ? "Plants removed & logged!" : "Incident logged successfully!");
       loadData();
+      onDataChanged?.();
       closeForm();
     } catch (e: any) {
       toast.error("Failed to log incident");
@@ -597,11 +1186,21 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
   };
 
   const handleOpenLogs = async (chan: NftChannel) => {
-    setSelectedChannelLogs(chan);
+    const filteredIncidents = (chan.incidents || []).filter(
+      (incident) => !String(incident.description).includes("[UNDO HARVEST]")
+    );
+    setSelectedChannelLogs({ ...chan, incidents: filteredIncidents });
     try {
       const hist = await fetchHarvestHistory();
-      const filtered = hist.filter((h) => h.channelId === chan.id);
-      setChannelHarvestHistory(filtered);
+      const deduped = Array.from(
+        new Map(
+          hist
+            .filter((h) => h.channelId === chan.id)
+            .filter((h) => !isUndoHarvestRecord(h))
+            .map((h) => [getHarvestFingerprint(h), h])
+        ).values()
+      );
+      setChannelHarvestHistory(deduped);
       setActionType("logs");
     } catch {
       toast.error("Failed to load logs");
@@ -752,6 +1351,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
       toast.success(`Successfully shipped ${transferCount}x ${transferCultivar}!`);
       setTransferNotes("");
       loadData();
+      onDataChanged?.();
       closeForm();
     } catch (e: any) {
       toast.error("Failed to transfer plants.");
@@ -870,6 +1470,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
 
       toast.success(`Successfully undone transfer of ${moveQty}x ${transferEvent.cropName}!`);
       loadData();
+      onDataChanged?.();
     } catch (e: any) {
       toast.error("Failed to undo transfer.");
       console.error(e);
@@ -877,8 +1478,27 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
   };
 
   const handleUndoHarvest = async (harvestEntry: any) => {
+    if (!isUndoAvailable(harvestEntry)) {
+      toast.error("Undo window has expired (24 hours). This harvest cannot be undone.");
+      return;
+    }
+
     if (!harvestEntry.channelId) {
       toast.error("Cannot undo this harvest: missing channel data.");
+      return;
+    }
+
+    const channel = channels.find((c) => c.id === harvestEntry.channelId);
+    if (!channel) {
+      toast.error("Channel not found.");
+      return;
+    }
+
+    const duplicateUndoDescription = `[UNDO HARVEST] Restored ${harvestEntry.currentCount}x ${harvestEntry.cropName} (yield: ${harvestEntry.yieldQty}, waste: ${harvestEntry.wasteQty})`;
+    const alreadyUndone = (channel.incidents || []).some((incident) => incident.description === duplicateUndoDescription);
+    if (alreadyUndone) {
+      setRecentHarvests((prev) => prev.filter((item) => item.id !== harvestEntry.id));
+      toast.info("This harvest has already been undone.");
       return;
     }
 
@@ -887,12 +1507,6 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
     }
 
     try {
-      const channel = channels.find((c) => c.id === harvestEntry.channelId);
-      if (!channel) {
-        toast.error("Channel not found.");
-        return;
-      }
-
       // Restore channel to growing status with previous harvest count
       const restoredChannel: NftChannel = {
         ...channel,
@@ -913,6 +1527,37 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
 
       const updatedList = channels.map((c) => (c.id === channel.id ? restoredChannel : c));
       await saveNftChannels(updatedList);
+      setSelectedChannelLogs(restoredChannel);
+      setRecentHarvests((prev) => prev.filter((item) => item.id !== harvestEntry.id));
+
+      // Remove the harvested record so it no longer appears in recent harvest history and operations log
+      const prevHarvestHistory = await fetchHarvestHistory();
+      const nextHarvestHistory = prevHarvestHistory.filter((item) => item.id !== harvestEntry.id);
+      await saveHarvestHistoryRemote(nextHarvestHistory);
+
+      // Restore plants to source nursery tray if available
+      if (harvestEntry.sourceNurseryTrayId) {
+        try {
+          const nurseryStore = await fetchNurseryStore();
+          const sourceTray = nurseryStore.trays.find(t => t.id === harvestEntry.sourceNurseryTrayId);
+          if (sourceTray) {
+            // Restore capacity - increase germinated count or plugs available
+            const restorePlants = harvestEntry.currentCount;
+            const updatedTray = {
+              ...sourceTray,
+              germinated: Math.min(sourceTray.plugs, (sourceTray.germinated || 0) + restorePlants)
+            };
+            const updatedTrays = nurseryStore.trays.map(t => 
+              t.id === harvestEntry.sourceNurseryTrayId ? updatedTray : t
+            );
+            await saveNurseryStore({ ...nurseryStore, trays: updatedTrays });
+            toast.success(`${restorePlants}x plants restored to Nursery Tray "${sourceTray.name}"`);
+          }
+        } catch (err: any) {
+          console.warn("Failed to update nursery tray on undo:", err);
+          // Don't fail the undo if nursery sync fails
+        }
+      }
 
       await appendCropLifecycleEvent({
         id: `lifecycle-undo-harvest-${Date.now()}`,
@@ -922,12 +1567,14 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
         quantity: harvestEntry.currentCount,
         destinationId: channel.id,
         destinationName: channel.name,
+        sourceNurseryTrayId: harvestEntry.sourceNurseryTrayId || null,
         location: channelLocation(restoredChannel),
-        notes: `Undo harvest: restored ${harvestEntry.currentCount}x ${harvestEntry.cropName}`,
+        notes: `Undo harvest: ${harvestEntry.currentCount} plants restored to ${channel.name}`,
       });
 
       toast.success(`Successfully undone harvest! ${harvestEntry.currentCount}x ${harvestEntry.cropName} restored to ${channel.name}.`);
       loadData();
+      onDataChanged?.();
     } catch (e: any) {
       toast.error("Failed to undo harvest.");
       console.error(e);
@@ -1084,6 +1731,12 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
 
   const handleOpenPlant = (chan: NftChannel) => {
     setActiveChannelId(chan.id);
+    // Store original holes if they exist (for hole-range mode)
+    if (chan.holes && chan.holes.length > 0) {
+      setOriginalHoles(chan.holes);
+    } else {
+      setOriginalHoles(null);
+    }
     if (chan.crops && chan.crops.length > 0) {
       setCropsList(chan.crops);
     } else {
@@ -1108,6 +1761,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
     setPlantedAt("");
     setExpectedHarvestISO("");
     setNotes("");
+    setSelectedNurseryTrayId(null);
     setCropsList([{ cropName: "", count: 50 }]);
     setStand("");
     setLevel("");
@@ -1124,6 +1778,9 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
     setIncidentDesc("");
     setIncidentQty(1);
     setIncidentCultivar("");
+    setUsesHoleRanges(false);
+    setHoleRanges([]);
+    setOriginalHoles(null);
   };
 
   const calculateDays = (plantedAtISO: string | null) => {
@@ -1602,16 +2259,29 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
 
                                     <div className="flex gap-2">
                                       {chan.status === "growing" ? (
-                                        <Button
-                                          onClick={() => {
-                                            setActiveChannelId(chan.id);
-                                            setNotes(chan.notes || "");
-                                            setActionType("harvest");
-                                          }}
-                                          className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs px-4 py-1.5 h-8 shadow-sm"
-                                        >
-                                          Complete Harvest
-                                        </Button>
+                                        <>
+                                          <Button
+                                            onClick={() => {
+                                              setActiveChannelId(chan.id);
+                                              setNotes(chan.notes || "");
+                                              setActionType("harvest");
+                                            }}
+                                            className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs px-4 py-1.5 h-8 shadow-sm"
+                                          >
+                                            Complete Harvest
+                                          </Button>
+                                          {chan.holes && chan.holes.length > 0 && (
+                                            <Button
+                                              onClick={() => {
+                                                setActiveChannelId(chan.id);
+                                                setActionType("re-shift");
+                                              }}
+                                              className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-1.5 h-8 shadow-sm"
+                                            >
+                                              Re-shift Holes
+                                            </Button>
+                                          )}
+                                        </>
                                       ) : (
                                         <Button
                                           onClick={() => handleOpenPlant(chan)}
@@ -1650,6 +2320,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                 {actionType === "incident" && "Log Incident / Thin Plants"}
                 {actionType === "logs" && "Gully Seeding & Logs Timeline"}
                 {actionType === "transfer" && "Ship / Transfer Plants"}
+                {actionType === "re-shift" && "Re-shift Plants Between Holes"}
               </span>
               <span className="text-xs text-muted-foreground block mt-0.5">
                 {actionType === "plant" && "Configure cultivars and counts for this multi-crop batch."}
@@ -1659,6 +2330,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                 {actionType === "incident" && "Record pest/disease problems or log plant removals."}
                 {actionType === "logs" && "Historical batch records and event tracking log for this channel location."}
                 {actionType === "transfer" && "Deduct crop quantities from this gully and shift them directly to a target gully."}
+                {actionType === "re-shift" && "Move empty harvested holes and replant with a new crop and date."}
               </span>
             </div>
 
@@ -1759,71 +2431,283 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
 
               {(actionType === "plant" || actionType === "edit-planted-crops") && (
                 <>
-                  {/* Multi-crop rows */}
-                  <div className="space-y-2 border border-border p-2.5 rounded-lg bg-muted/15">
-                    <div className="flex justify-between items-center pb-1.5 border-b">
-                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Cultivars Planted</span>
-                      <Button onClick={handleAddCropRow} variant="outline" size="sm" className="h-6 text-[10px] font-bold px-2 py-0">
-                        + Add Row
-                      </Button>
-                    </div>
-                    <div className="space-y-2 max-h-36 overflow-y-auto pt-1">
-                      {cropsList.map((crop, idx) => (
-                        <div key={idx} className="flex gap-2 items-center">
-                          <Input
-                            list="nft-crop-suggestions"
-                            placeholder="e.g. Romaine"
-                            value={crop.cropName}
-                            onChange={(e) => handleCropRowChange(idx, "cropName", e.target.value)}
-                            className="h-8 text-xs flex-1"
-                          />
-                          <datalist id="nft-crop-suggestions">
-                            {SUGGESTED_CROPS_LIST.map((c) => (
-                              <option key={c} value={c} />
-                            ))}
-                          </datalist>
-                          <Input
-                            type="number"
-                            placeholder="Qty"
-                            value={crop.count}
-                            onChange={(e) => handleCropRowChange(idx, "count", e.target.value)}
-                            className="h-8 text-xs w-16"
-                          />
-                          <Button
-                            onClick={() => handleRemoveCropRow(idx)}
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-500/10 shrink-0"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
+                  {/* Show hole-range mode toggle in both Plant and Edit Crops */}
+                  <div className="flex gap-2 mb-3">
+                    <Button
+                      onClick={() => {
+                        // When switching TO Multi-Crop: convert hole ranges to crops
+                        if (usesHoleRanges && holeRanges.length > 0) {
+                          setCropsList(convertHoleRangesToMultiCrop());
+                        }
+                        setUsesHoleRanges(false);
+                      }}
+                      variant={usesHoleRanges ? "outline" : "default"}
+                      size="sm"
+                      className="text-[10px] font-bold px-3 h-8 flex-1"
+                    >
+                      Multi-Crop
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        // When switching TO Hole-Range: convert crops to hole ranges (preserves tray info if available)
+                        if (!usesHoleRanges && cropsList.length > 0) {
+                          setHoleRanges(convertMultiCropToHoleRanges());
+                          if (!originalHoles) {
+                            console.info("Tray source information not available from multi-crop data");
+                          }
+                        }
+                        setUsesHoleRanges(true);
+                      }}
+                      variant={usesHoleRanges ? "default" : "outline"}
+                      size="sm"
+                      className="text-[10px] font-bold px-3 h-8 flex-1"
+                    >
+                      Hole-Range {originalHoles && originalHoles.length > 0 ? "✓" : ""}
+                    </Button>
+                  </div>
+
+                  {/* Traditional Multi-Crop Form */}
+                  {!usesHoleRanges && (
+                    <>
+                      <div className="space-y-2 border border-border p-2.5 rounded-lg bg-muted/15">
+                        <div className="flex justify-between items-center pb-1.5 border-b">
+                          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Cultivars Planted</span>
+                          <Button onClick={handleAddCropRow} variant="outline" size="sm" className="h-6 text-[10px] font-bold px-2 py-0">
+                            + Add Row
                           </Button>
                         </div>
-                      ))}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground text-right font-bold pt-1.5 border-t">
-                      Total: {cropsList.reduce((sum, c) => sum + Number(c.count || 0), 0)} / {capacity} Plants
-                    </div>
-                  </div>
+                        <div className="space-y-2 max-h-36 overflow-y-auto pt-1">
+                          {cropsList.map((crop, idx) => (
+                            <div key={idx} className="flex gap-2 items-center">
+                              <Input
+                                list="nft-crop-suggestions"
+                                placeholder="e.g. Romaine"
+                                value={crop.cropName}
+                                onChange={(e) => handleCropRowChange(idx, "cropName", e.target.value)}
+                                className="h-8 text-xs flex-1"
+                              />
+                              <datalist id="nft-crop-suggestions">
+                                {SUGGESTED_CROPS_LIST.map((c) => (
+                                  <option key={c} value={c} />
+                                ))}
+                              </datalist>
+                              <Input
+                                type="number"
+                                placeholder="Qty"
+                                value={crop.count}
+                                onChange={(e) => handleCropRowChange(idx, "count", e.target.value)}
+                                className="h-8 text-xs w-16"
+                              />
+                              <Button
+                                onClick={() => handleRemoveCropRow(idx)}
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-500/10 shrink-0"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground text-right font-bold pt-1.5 border-t">
+                          Total: {cropsList.reduce((sum, c) => sum + Number(c.count || 0), 0)} / {capacity} Plants
+                        </div>
+                      </div>
 
-                  <div className="space-y-1">
-                    <Label htmlFor="plant-date" className="text-xs font-semibold">Planted Date</Label>
-                    <Input
-                      id="plant-date"
-                      type="date"
-                      value={plantedAt}
-                      onChange={(e) => setPlantedAt(e.target.value)}
-                    />
-                  </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="plant-date" className="text-xs font-semibold">Planted Date</Label>
+                        <Input
+                          id="plant-date"
+                          type="date"
+                          value={plantedAt}
+                          onChange={(e) => setPlantedAt(e.target.value)}
+                        />
+                      </div>
 
-                  <div className="space-y-1">
-                    <Label htmlFor="harvest-date" className="text-xs font-semibold">Expected Harvest Date</Label>
-                    <Input
-                      id="harvest-date"
-                      type="date"
-                      value={expectedHarvestISO}
-                      onChange={(e) => setExpectedHarvestISO(e.target.value)}
-                    />
-                  </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="harvest-date" className="text-xs font-semibold">Expected Harvest Date</Label>
+                        <Input
+                          id="harvest-date"
+                          type="date"
+                          value={expectedHarvestISO}
+                          onChange={(e) => setExpectedHarvestISO(e.target.value)}
+                        />
+                      </div>
+
+                      {nurseryTrays.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Label className="text-xs font-semibold">Source Nursery Tray (Optional)</Label>
+                            <span className="text-[8px] bg-blue-500/20 text-blue-700 px-1.5 py-0.5 rounded">💡 Undo Available</span>
+                          </div>
+                          <Select 
+                            value={selectedNurseryTrayId || "none"} 
+                            onValueChange={(val) => setSelectedNurseryTrayId(val === "none" ? null : val)}
+                          >
+                            <SelectTrigger className="h-9 text-sm">
+                              <SelectValue placeholder="No tray" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No tray (Direct seeding - no undo)</SelectItem>
+                              {nurseryTrays.map((tray) => (
+                                <SelectItem key={tray.id} value={tray.id}>
+                                  {tray.name} ({tray.germinated}/{tray.plugs}) ✓ Undo Available
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {selectedNurseryTrayId && (
+                            <div className="text-xs text-emerald-700 bg-emerald-500/10 p-2 rounded border border-emerald-500/30">
+                              ✓ If planted by mistake, you can <strong>UNDO within 24 hours</strong> and plants return to this tray automatically
+                            </div>
+                          )}
+                          {!selectedNurseryTrayId && (
+                            <div className="text-xs text-amber-700 bg-amber-500/10 p-2 rounded border border-amber-500/30">
+                              ⚠️ Direct seeding (no nursery tray) - undo will NOT restore plants to tray
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Hole-Range Planting Form */}
+                  {usesHoleRanges && (
+                    <>
+                      <div className="space-y-2 border border-border p-2.5 rounded-lg bg-muted/15">
+                        <div className="flex justify-between items-center pb-1.5 border-b">
+                          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Hole Ranges</span>
+                          <Button onClick={handleAddHoleRange} variant="outline" size="sm" className="h-6 text-[10px] font-bold px-2 py-0">
+                            + Add Range
+                          </Button>
+                        </div>
+
+                        <div className="space-y-2.5 max-h-80 overflow-y-auto pt-1">
+                          {holeRanges.map((range, idx) => (
+                            <div key={idx} className="space-y-1.5 p-2 bg-background rounded border border-border/50">
+                              <div className="flex gap-2 items-end">
+                                <div className="flex-1">
+                                  <Label className="text-[9px] font-bold text-muted-foreground">Holes</Label>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      max={99}
+                                      placeholder="Start"
+                                      value={range.startHole}
+                                      onChange={(e) => handleHoleRangeChange(idx, "startHole", e.target.value)}
+                                      className="h-7 text-[10px] text-center"
+                                    />
+                                    <span className="text-[10px] font-bold self-center">→</span>
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      max={99}
+                                      placeholder="End"
+                                      value={range.endHole}
+                                      onChange={(e) => handleHoleRangeChange(idx, "endHole", e.target.value)}
+                                      className="h-7 text-[10px] text-center"
+                                    />
+                                    <Button
+                                      onClick={() => handleRemoveHoleRange(idx)}
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-500/10 shrink-0"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <Label className="text-[9px] font-bold text-muted-foreground">Crop Name</Label>
+                                <Select
+                                  value={range.cropName}
+                                  onValueChange={(val) => handleHoleRangeChange(idx, "cropName", val)}
+                                >
+                                  <SelectTrigger className="h-7 text-[10px]">
+                                    <SelectValue placeholder="Select crop..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {SUGGESTED_CROPS_LIST.map((crop) => (
+                                      <SelectItem key={crop} value={crop}>
+                                        {crop}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <Label className="text-[9px] font-bold text-muted-foreground">Plant Date</Label>
+                                  <Input
+                                    type="date"
+                                    value={range.plantDate}
+                                    onChange={(e) => handleHoleRangeChange(idx, "plantDate", e.target.value)}
+                                    className="h-7 text-[10px]"
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-[9px] font-bold text-muted-foreground">Expected Harvest</Label>
+                                  <Input
+                                    type="date"
+                                    value={range.expectedHarvestDate}
+                                    onChange={(e) => handleHoleRangeChange(idx, "expectedHarvestDate", e.target.value)}
+                                    className="h-7 text-[10px]"
+                                  />
+                                </div>
+                              </div>
+
+                              {nurseryTrays.length > 0 && (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <Label className="text-[9px] font-bold text-muted-foreground">Source Nursery Tray (Optional)</Label>
+                                    <span className="text-[8px] bg-blue-500/20 text-blue-700 px-1.5 py-0.5 rounded">💡 Undo Available</span>
+                                  </div>
+                                  <Select 
+                                    value={range.sourceNurseryTrayId || "none"} 
+                                    onValueChange={(val) => handleHoleRangeChange(idx, "sourceNurseryTrayId", val === "none" ? null : val)}
+                                  >
+                                    <SelectTrigger className="h-7 text-[10px]">
+                                      <SelectValue placeholder="No tray" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="none">No tray (Direct seeding - no undo)</SelectItem>
+                                      {nurseryTrays.map((tray) => (
+                                        <SelectItem key={tray.id} value={tray.id}>
+                                          {tray.name} ({tray.germinated}/{tray.plugs}) ✓ Undo
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  {range.sourceNurseryTrayId && (
+                                    <div className="text-[8px] text-emerald-700 bg-emerald-500/10 p-1.5 rounded border border-emerald-500/30">
+                                      ✓ If planted by mistake, you can <strong>UNDO within 24 hours</strong> and plants return to this tray automatically
+                                    </div>
+                                  )}
+                                  {!range.sourceNurseryTrayId && (
+                                    <div className="text-[8px] text-amber-700 bg-amber-500/10 p-1.5 rounded border border-amber-500/30">
+                                      ⚠️ Direct seeding (no nursery tray) - undo will NOT restore plants to tray
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="text-[9px] text-muted-foreground font-bold">
+                                {range.endHole - range.startHole + 1} holes ({range.cropName || "??"})
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="text-[10px] text-muted-foreground text-right font-bold pt-1.5 border-t">
+                          Total: {holeRanges.reduce((sum, r) => sum + (r.endHole - r.startHole + 1), 0)} / {capacity} Plants
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
 
@@ -1831,64 +2715,157 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                 <>
                   {(() => {
                     const activeChan = channels.find((c) => c.id === activeChannelId);
+                    
+                    // Show hole-range harvest UI if channel has holes
+                    if (activeChan?.holes && activeChan.holes.length > 0) {
+                      return (
+                        <div className="space-y-3">
+                          <div className="border border-border p-2.5 rounded-lg bg-muted/15">
+                            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider pb-2 border-b">
+                              Hole Ranges Ready to Harvest
+                            </div>
+                            <div className="space-y-2 mt-2 max-h-48 overflow-y-auto">
+                              {activeChan.holes.map((hole) => {
+                                const status = getHoleRangeStatus(hole);
+                                const isSelected = selectedHolesToHarvest.has(hole.holeId);
+                                const daysSince = getDaysSincePlanting(hole.plantedAt);
+                                
+                                return (
+                                  <div
+                                    key={hole.holeId}
+                                    onClick={() => {
+                                      const newSet = new Set(selectedHolesToHarvest);
+                                      if (newSet.has(hole.holeId)) {
+                                        newSet.delete(hole.holeId);
+                                      } else {
+                                        newSet.add(hole.holeId);
+                                      }
+                                      setSelectedHolesToHarvest(newSet);
+                                    }}
+                                    className={`p-2 rounded border cursor-pointer text-[10px] transition-all ${
+                                      isSelected
+                                        ? "border-primary bg-primary/10"
+                                        : status.status === "ready"
+                                          ? "border-green-500/50 bg-green-500/5 hover:bg-green-500/10"
+                                          : "border-amber-500/50 bg-amber-500/5 hover:bg-amber-500/10"
+                                    }`}
+                                  >
+                                    <div className="flex justify-between items-center">
+                                      <div className="flex-1">
+                                        <div className="font-bold">Hole {hole.holeId} - {hole.cropName}</div>
+                                        <div className="text-muted-foreground">
+                                          Planted {daysSince}d ago
+                                          {status.status === "ready" && <span className="text-green-600 ml-2">✓ Ready</span>}
+                                          {status.daysRemaining !== null && status.daysRemaining > 0 && (
+                                            <span className="text-amber-600 ml-2">{status.daysRemaining} days left</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => {}}
+                                        className="w-4 h-4 cursor-pointer"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="text-[9px] text-muted-foreground mt-2 pt-2 border-t">
+                              {selectedHolesToHarvest.size} of {activeChan.holes.length} holes selected
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label htmlFor="yield-qty" className="text-xs font-semibold">Usable Yield (Plants)</Label>
+                              <Input
+                                id="yield-qty"
+                                type="number"
+                                min={0}
+                                value={yieldQty}
+                                onChange={(e) => { const v = e.target.value; setYieldQty(v === "" ? "" as any : Number(v)); }}
+                                className="text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="waste-qty" className="text-xs font-semibold">Waste / Defective (Plants)</Label>
+                              <Input
+                                id="waste-qty"
+                                type="number"
+                                min={0}
+                                value={wasteQty}
+                                onChange={(e) => { const v = e.target.value; setWasteQty(v === "" ? "" as any : Number(v)); }}
+                                className="text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Fallback to traditional harvest UI
                     const crops = activeChan?.crops || [];
                     if (crops.length > 0) {
                       return (
-                        <div className="space-y-1">
-                          <Label htmlFor="harvest-cultivar" className="text-xs font-semibold">Select Variety to Harvest</Label>
-                          <Select value={harvestCultivar} onValueChange={(val) => setHarvestCultivar(val)}>
-                            <SelectTrigger id="harvest-cultivar" className="h-9 text-xs bg-background">
-                              <SelectValue placeholder="Select variety" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {crops.map((c, i) => (
-                                <SelectItem key={i} value={c.cropName}>
-                                  {c.cropName} ({c.count} available)
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <div className="space-y-3">
+                          <div className="space-y-1">
+                            <Label htmlFor="harvest-cultivar" className="text-xs font-semibold">Select Variety to Harvest</Label>
+                            <Select value={harvestCultivar} onValueChange={(val) => setHarvestCultivar(val)}>
+                              <SelectTrigger id="harvest-cultivar" className="h-9 text-xs bg-background">
+                                <SelectValue placeholder="Select variety" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {crops.map((c, i) => (
+                                  <SelectItem key={i} value={c.cropName}>
+                                    {c.cropName} ({c.count} available)
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label htmlFor="yield-qty" className="text-xs font-semibold">Usable Yield (Plants)</Label>
+                              <Input
+                                id="yield-qty"
+                                type="number"
+                                min={0}
+                                value={yieldQty}
+                                onChange={(e) => { const v = e.target.value; setYieldQty(v === "" ? "" as any : Number(v)); }}
+                                className="text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="waste-qty" className="text-xs font-semibold">Waste / Defective (Plants)</Label>
+                              <Input
+                                id="waste-qty"
+                                type="number"
+                                min={0}
+                                value={wasteQty}
+                                onChange={(e) => { const v = e.target.value; setWasteQty(v === "" ? "" as any : Number(v)); }}
+                                className="text-xs"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="weight-g" className="text-xs font-semibold">Avg Weight per Plant (Grams)</Label>
+                            <Input
+                              id="weight-g"
+                              type="number"
+                              min={0}
+                              value={avgWeightGrams}
+                              onChange={(e) => { const v = e.target.value; setAvgWeightGrams(v === "" ? "" as any : Number(v)); }}
+                              placeholder="e.g. 180"
+                              className="text-xs"
+                            />
+                          </div>
                         </div>
                       );
                     }
                     return null;
                   })()}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="yield-qty" className="text-xs font-semibold">Usable Yield (Plants)</Label>
-                      <Input
-                        id="yield-qty"
-                        type="number"
-                        min={0}
-                        value={yieldQty}
-                        onChange={(e) => { const v = e.target.value; setYieldQty(v === "" ? "" as any : Number(v)); }}
-                        className="text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="waste-qty" className="text-xs font-semibold">Waste / Defective (Plants)</Label>
-                      <Input
-                        id="waste-qty"
-                        type="number"
-                        min={0}
-                        value={wasteQty}
-                        onChange={(e) => { const v = e.target.value; setWasteQty(v === "" ? "" as any : Number(v)); }}
-                        className="text-xs"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="weight-g" className="text-xs font-semibold">Avg Weight per Plant (Grams)</Label>
-                    <Input
-                      id="weight-g"
-                      type="number"
-                      min={0}
-                      value={avgWeightGrams}
-                      onChange={(e) => { const v = e.target.value; setAvgWeightGrams(v === "" ? "" as any : Number(v)); }}
-                      placeholder="e.g. 180"
-                      className="text-xs"
-                    />
-                  </div>
                 </>
               )}
 
@@ -2076,6 +3053,118 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                 </>
               )}
 
+              {actionType === "re-shift" && (
+                <>
+                  <div className="text-[11px] text-muted-foreground font-semibold mb-2 p-2 bg-amber-500/10 rounded border border-amber-500/30">
+                    💡 Re-shift empty harvested holes and replant with new crop/date
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Source Holes (to empty)</Label>
+                    <div className="flex gap-2 items-end">
+                      <div>
+                        <Label className="text-[9px] text-muted-foreground">Start</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={reshiftSourceHoles.start}
+                          onChange={(e) => setReshiftSourceHoles({ ...reshiftSourceHoles, start: Number(e.target.value) })}
+                          className="h-8 text-xs text-center w-16"
+                          placeholder="1"
+                        />
+                      </div>
+                      <span className="text-xs font-bold">→</span>
+                      <div>
+                        <Label className="text-[9px] text-muted-foreground">End</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={reshiftSourceHoles.end}
+                          onChange={(e) => setReshiftSourceHoles({ ...reshiftSourceHoles, end: Number(e.target.value) })}
+                          className="h-8 text-xs text-center w-16"
+                          placeholder="5"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold">Destination Holes (to fill)</Label>
+                    <div className="flex gap-2 items-end">
+                      <div>
+                        <Label className="text-[9px] text-muted-foreground">Start</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={reshiftDestHoles.start}
+                          onChange={(e) => setReshiftDestHoles({ ...reshiftDestHoles, start: Number(e.target.value) })}
+                          className="h-8 text-xs text-center w-16"
+                          placeholder="6"
+                        />
+                      </div>
+                      <span className="text-xs font-bold">→</span>
+                      <div>
+                        <Label className="text-[9px] text-muted-foreground">End</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={reshiftDestHoles.end}
+                          onChange={(e) => setReshiftDestHoles({ ...reshiftDestHoles, end: Number(e.target.value) })}
+                          className="h-8 text-xs text-center w-16"
+                          placeholder="10"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="reshift-crop" className="text-xs font-semibold">New Crop Name</Label>
+                    <Input
+                      id="reshift-crop"
+                      list="nft-crop-suggestions"
+                      placeholder="e.g. Lettuce"
+                      value={reshiftNewCrop}
+                      onChange={(e) => setReshiftNewCrop(e.target.value)}
+                      className="text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="reshift-date" className="text-xs font-semibold">Plant Date for New Crop</Label>
+                    <Input
+                      id="reshift-date"
+                      type="date"
+                      value={reshiftNewDate}
+                      onChange={(e) => setReshiftNewDate(e.target.value)}
+                      className="text-xs"
+                    />
+                  </div>
+
+                  {nurseryTrays.length > 0 && (
+                    <div className="space-y-1">
+                      <Label htmlFor="reshift-tray" className="text-xs font-semibold">Source Nursery Tray (Optional)</Label>
+                      <Select value={reshiftSourceTray || "none"} onValueChange={(val) => setReshiftSourceTray(val === "none" ? "" : val)}>
+                        <SelectTrigger id="reshift-tray" className="h-9 text-xs">
+                          <SelectValue placeholder="No tray (direct seeding)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No tray (direct seeding)</SelectItem>
+                          {nurseryTrays.map((tray) => (
+                            <SelectItem key={tray.id} value={tray.id}>
+                              {tray.name} ({tray.germinated}/{tray.plugs})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div className="text-[9px] text-muted-foreground bg-blue-500/10 p-2 rounded">
+                    Moving {reshiftDestHoles.end - reshiftDestHoles.start + 1} holes of {reshiftNewCrop || "??"} to this channel
+                  </div>
+                </>
+              )}
+
               {actionType === "logs" && selectedChannelLogs && (
                 <div className="space-y-4 font-sans text-xs">
                   {/* Quick Operations Console */}
@@ -2198,16 +3287,18 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                   {/* Incident Logs Timeline */}
                   <div className="space-y-2">
                     <span className="font-bold text-foreground block border-b pb-1">Event Logs & Incident Timeline</span>
-                    {selectedChannelLogs.incidents && selectedChannelLogs.incidents.length > 0 ? (
+                    {selectedChannelLogs.incidents && selectedChannelLogs.incidents.filter((inc) => !String(inc.description).includes("[UNDO HARVEST]")).length > 0 ? (
                       <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                        {selectedChannelLogs.incidents.map((inc, i) => (
-                          <div key={i} className="pl-3 border-l-2 border-amber-500 py-0.5 space-y-0.5">
-                            <span className="text-[9px] text-muted-foreground block font-mono">
-                              {new Date(inc.timestamp).toLocaleString()}
-                            </span>
-                            <p className="text-[11px] leading-tight text-foreground">{inc.description}</p>
-                          </div>
-                        ))}
+                        {selectedChannelLogs.incidents
+                          .filter((inc) => !String(inc.description).includes("[UNDO HARVEST]"))
+                          .map((inc, i) => (
+                            <div key={i} className="pl-3 border-l-2 border-amber-500 py-0.5 space-y-0.5">
+                              <span className="text-[9px] text-muted-foreground block font-mono">
+                                {new Date(inc.timestamp).toLocaleString()}
+                              </span>
+                              <p className="text-[11px] leading-tight text-foreground">{inc.description}</p>
+                            </div>
+                          ))}
                       </div>
                     ) : (
                       <span className="text-muted-foreground italic text-[11px] block">No incident events logged in this cycle.</span>
@@ -2273,9 +3364,15 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                     <span className="font-bold text-foreground block border-b pb-1">Recent Harvests & Recovery</span>
                     {recentHarvests && recentHarvests.length > 0 ? (
                       <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                        {recentHarvests.map((harvest) => {
+                        {recentHarvests
+                          .filter((harvest) => {
+                            const isCurrentChannel = harvest.channelId === selectedChannelLogs?.id || !selectedChannelLogs;
+                            return isCurrentChannel && !isUndoHarvestRecord(harvest);
+                          })
+                          .map((harvest) => {
                           const isRelevant = harvest.channelId === selectedChannelLogs?.id;
                           const showReshiftUI = selectedHarvestToReshifted?.id === harvest.id && showReshiftForm;
+                          const canUndoThisHarvest = isUndoAvailable(harvest);
                           return (
                             <div
                               key={harvest.id}
@@ -2300,29 +3397,34 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                                   )}
                                 </div>
                                 <div className="flex gap-1 shrink-0">
-                                  <Button
-                                    onClick={() => handleUndoHarvest(harvest)}
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 px-2 text-[9px] text-blue-600 hover:text-blue-700 hover:bg-blue-500/10 flex items-center gap-1"
-                                  >
-                                    <RotateCcw className="h-3 w-3" />
-                                    Undo
-                                  </Button>
-                                  <Button
-                                    onClick={() => {
-                                      setSelectedHarvestToReshifted(harvest);
-                                      setShowReshiftForm(!showReshiftForm);
-                                      setReshiftTargetId("");
-                                      setReshiftNotes("");
-                                    }}
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 px-2 text-[9px] text-purple-600 hover:text-purple-700 hover:bg-purple-500/10 flex items-center gap-1"
-                                  >
-                                    <Sprout className="h-3 w-3" />
-                                    Re-shift
-                                  </Button>
+                                  {!isUndoHarvestRecord(harvest) && (
+                                    <Button
+                                      onClick={() => handleUndoHarvest(harvest)}
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={!canUndoThisHarvest}
+                                      className="h-6 px-2 text-[9px] text-blue-600 hover:text-blue-700 hover:bg-blue-500/10 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                      {canUndoThisHarvest ? "Undo" : "Expired"}
+                                    </Button>
+                                  )}
+                                  {!isUndoHarvestRecord(harvest) && (
+                                    <Button
+                                      onClick={() => {
+                                        setSelectedHarvestToReshifted(harvest);
+                                        setShowReshiftForm(!showReshiftForm);
+                                        setReshiftTargetId("");
+                                        setReshiftNotes("");
+                                      }}
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-[9px] text-purple-600 hover:text-purple-700 hover:bg-purple-500/10 flex items-center gap-1"
+                                    >
+                                      <Sprout className="h-3 w-3" />
+                                      Re-shift
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                               <span className="text-[8px] text-muted-foreground block font-mono">
@@ -2384,18 +3486,21 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                     <span className="font-bold text-foreground block border-b pb-1">Completed Yield Harvest Audits</span>
                     {channelHarvestHistory.length > 0 ? (
                       <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                        {channelHarvestHistory.map((item) => (
-                          <div key={item.id} className="pl-3 border-l-2 border-green-500 py-0.5 space-y-1">
-                            <div className="flex justify-between items-center text-[10px] font-bold text-foreground">
-                              <span>{item.cropName}</span>
-                              <span className="text-green-600">Yield: {item.yieldQty ?? item.currentCount}</span>
+                        {channelHarvestHistory
+                          .filter((item) => !isUndoHarvestRecord(item))
+                          .filter((item, index, arr) => arr.findIndex((entry) => getHarvestFingerprint(entry) === getHarvestFingerprint(item)) === index)
+                          .map((item) => (
+                            <div key={getHarvestFingerprint(item)} className="pl-3 border-l-2 border-green-500 py-0.5 space-y-1">
+                              <div className="flex justify-between items-center text-[10px] font-bold text-foreground">
+                                <span>{item.cropName}</span>
+                                <span className="text-green-600">Yield: {item.yieldQty ?? item.currentCount}</span>
+                              </div>
+                              <div className="text-[9px] text-muted-foreground flex justify-between">
+                                <span>Harvested: {new Date(item.harvestedAt).toLocaleDateString()}</span>
+                                {item.wasteQty !== undefined && item.wasteQty > 0 && <span>Waste: {item.wasteQty}</span>}
+                              </div>
                             </div>
-                            <div className="text-[9px] text-muted-foreground flex justify-between">
-                              <span>Harvested: {new Date(item.harvestedAt).toLocaleDateString()}</span>
-                              {item.wasteQty !== undefined && item.wasteQty > 0 && <span>Waste: {item.wasteQty}</span>}
-                            </div>
-                          </div>
-                        ))}
+                          ))}
                       </div>
                     ) : (
                       <span className="text-muted-foreground italic text-[11px] block">No completed harvests recorded for this channel location.</span>
@@ -2404,7 +3509,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                 </div>
               )}
 
-              {actionType !== "add-channel" && actionType !== "incident" && actionType !== "logs" && actionType !== "transfer" && (
+              {actionType !== "add-channel" && actionType !== "incident" && actionType !== "logs" && actionType !== "transfer" && actionType !== "re-shift" && (
                 <div className="space-y-1">
                   <Label htmlFor="notes" className="text-xs font-semibold">Notes / History logs</Label>
                   <Input
@@ -2428,8 +3533,24 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                 </Button>
               )}
               {actionType === "harvest" && (
-                <Button onClick={handleHarvest} className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs px-4 h-9">
-                  Log Yield & Harvest
+                <Button 
+                  onClick={() => {
+                    const activeChan = channels.find(c => c.id === activeChannelId);
+                    if (activeChan?.holes && activeChan.holes.length > 0 && selectedHolesToHarvest.size > 0) {
+                      handleHarvestHoleRanges();
+                    } else {
+                      handleHarvest();
+                    }
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs px-4 h-9"
+                >
+                  {(() => {
+                    const activeChan = channels.find(c => c.id === activeChannelId);
+                    if (activeChan?.holes && activeChan.holes.length > 0) {
+                      return `Harvest ${selectedHolesToHarvest.size} Holes`;
+                    }
+                    return "Log Yield & Harvest";
+                  })()}
                 </Button>
               )}
               {actionType === "add-channel" && (
@@ -2450,6 +3571,11 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
               {actionType === "transfer" && (
                 <Button onClick={handleTransferSubmit} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 h-9">
                   Confirm Shipment
+                </Button>
+              )}
+              {actionType === "re-shift" && (
+                <Button onClick={handleReshiftPlants} className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 h-9">
+                  Re-shift Plants
                 </Button>
               )}
             </div>

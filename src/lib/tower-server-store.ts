@@ -1594,7 +1594,8 @@ export function harvestCrop(
   wasteQty: number,
   avgWeightGrams: number,
   notes: string,
-  harvestCultivar?: string
+  harvestCultivar?: string,
+  sourceNurseryTrayId?: string | null
 ): NftChannel | null {
   const channel = nftChannels.find((c) => c.id === channelId);
   if (!channel) return null;
@@ -1609,8 +1610,9 @@ export function harvestCrop(
   // Save crop details into historical log before resetting
   if (channel.cropName || (channel.crops && channel.crops.length > 0)) {
     const history = getHarvestHistory();
+    const now = Date.now();
     const newEntry: HarvestHistoryEntry = {
-      id: `harv-${Date.now()}`,
+      id: `harv-${now}`,
       channelId: channel.id,
       channelName: channel.name,
       cropName: harvestCultivar || channel.cropName || (channel.crops ? channel.crops.map((c) => `${c.cropName} (${c.count})`).join(", ") : ""),
@@ -1624,6 +1626,8 @@ export function harvestCrop(
       wasteQty,
       avgWeightGrams,
       incidents: channel.incidents,
+      undoableUntil: now + (24 * 60 * 60 * 1000),
+      sourceNurseryTrayId: sourceNurseryTrayId || null,
     };
     history.push(newEntry);
     saveHarvestHistory(history);

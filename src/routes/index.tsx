@@ -594,6 +594,147 @@ function Index() {
     }
   };
 
+  const handleUndoPlantingFromTray = async (event: CropLifecycleEvent) => {
+    if (!event.destinationId || !event.sourceNurseryTrayId) {
+      toast.error("This planting record cannot be undone because it is not tied to a nursery tray.");
+      return;
+    }
+
+    if (!window.confirm(`Undo planting of ${event.quantity}x ${event.cropName} from tray back to the nursery?`)) {
+      return;
+    }
+
+    try {
+      const channel = nftChannels.find((item) => item.id === event.destinationId);
+      if (!channel) {
+        toast.error("NFT channel not found for this planting record.");
+        return;
+      }
+
+      const nextChannels = nftChannels.map((item) => {
+        if (item.id !== channel.id) return item;
+        return {
+          ...item,
+          status: "empty",
+          cropName: "",
+          crops: [],
+          currentCount: 0,
+          plantedAt: null,
+          expectedHarvestISO: null,
+          harvestedAt: null,
+          holes: undefined,
+          notes: item.notes,
+        };
+      });
+      await saveNftChannels(nextChannels);
+      setNftChannels(nextChannels);
+
+      const nurseryStore = await fetchNurseryStore();
+      const tray = nurseryStore.trays.find((item) => item.id === event.sourceNurseryTrayId);
+      if (tray) {
+        const updatedTrays = nurseryStore.trays.map((item) =>
+          item.id === event.sourceNurseryTrayId
+            ? { ...item, germinated: Math.min(item.plugs, (item.germinated || 0) + event.quantity) }
+            : item
+        );
+        await saveNurseryStore({ ...nurseryStore, trays: updatedTrays });
+      }
+
+      await appendCropLifecycleEvent({
+        id: `lifecycle-undo-plant-${Date.now()}`,
+        type: "transferred",
+        timestamp: new Date().toISOString(),
+        cropName: event.cropName,
+        quantity: event.quantity,
+        sourceId: event.destinationId,
+        sourceName: channel.name,
+        destinationId: event.sourceNurseryTrayId,
+        destinationName: tray?.name || "Nursery Tray",
+        sourceNurseryTrayId: event.sourceNurseryTrayId,
+        destinationNurseryTrayId: event.sourceNurseryTrayId,
+        location: { polyhouse: channel.polyhouse, block: channel.block, row: channel.row, stand: channel.stand, level: channel.level, channelIndex: channel.channelIndex, holeConfig: channel.holeConfig },
+        notes: `Undo nursery transplant: ${event.quantity}x ${event.cropName} returned to tray ${tray?.name || "unknown"}`,
+      });
+
+      toast.success(`Planting undone for ${event.quantity}x ${event.cropName}.`);
+      await loadCropsData();
+    } catch (error: any) {
+      toast.error("Failed to undo planting from logs.");
+      console.error(error);
+    }
+  };
+
+  const handleUndoHarvestFromLog = async (harvestEntry: HarvestHistoryEntry) => {
+    if (!harvestEntry.channelId) {
+      toast.error("Cannot undo this harvest: missing channel data.");
+      return;
+    }
+
+    if (!window.confirm(`Undo harvest of ${harvestEntry.currentCount ?? 0}x ${harvestEntry.cropName} from ${harvestEntry.channelName}?`)) {
+      return;
+    }
+
+    const channel = nftChannels.find((item) => item.id === harvestEntry.channelId);
+    if (!channel) {
+      toast.error("Channel not found for this harvest record.");
+      return;
+    }
+
+    try {
+      const updatedChannel: NftChannel = {
+        ...channel,
+        status: "growing",
+        currentCount: harvestEntry.currentCount ?? channel.currentCount ?? 0,
+        cropName: harvestEntry.cropName,
+        crops: harvestEntry.crops && harvestEntry.crops.length > 0 ? harvestEntry.crops : [{ cropName: harvestEntry.cropName, count: harvestEntry.currentCount ?? channel.currentCount ?? 0 }],
+        plantedAt: harvestEntry.plantedAt || channel.plantedAt,
+        expectedHarvestISO: channel.expectedHarvestISO,
+        harvestedAt: null,
+      };
+
+      const nextChannels = nftChannels.map((item) => (item.id === channel.id ? updatedChannel : item));
+      await saveNftChannels(nextChannels);
+      setNftChannels(nextChannels);
+
+      if (harvestEntry.sourceNurseryTrayId) {
+        const nurseryStore = await fetchNurseryStore();
+        const tray = nurseryStore.trays.find((item) => item.id === harvestEntry.sourceNurseryTrayId);
+        if (tray) {
+          const restoreQty = harvestEntry.currentCount ?? 0;
+          const updatedTrays = nurseryStore.trays.map((item) =>
+            item.id === harvestEntry.sourceNurseryTrayId
+              ? { ...item, germinated: Math.min(item.plugs, (item.germinated || 0) + restoreQty) }
+              : item
+          );
+          await saveNurseryStore({ ...nurseryStore, trays: updatedTrays });
+        }
+      }
+
+      const nextHarvestHistory = harvestHistory.filter((item) => item.id !== harvestEntry.id);
+      await saveHarvestHistoryRemote(nextHarvestHistory);
+      setHarvestHistory(nextHarvestHistory);
+
+      await appendCropLifecycleEvent({
+        id: `lifecycle-undo-harvest-${Date.now()}`,
+        type: "planted",
+        timestamp: new Date().toISOString(),
+        cropName: harvestEntry.cropName,
+        quantity: harvestEntry.currentCount ?? 0,
+        destinationId: channel.id,
+        destinationName: channel.name,
+        sourceNurseryTrayId: harvestEntry.sourceNurseryTrayId || null,
+        location: { polyhouse: channel.polyhouse, block: channel.block, row: channel.row, stand: channel.stand, level: channel.level, channelIndex: channel.channelIndex, holeConfig: channel.holeConfig },
+        notes: `Undo harvest: ${harvestEntry.currentCount ?? 0} plants restored to ${channel.name}`,
+      });
+
+      toast.success(`Harvest undone for ${harvestEntry.cropName}.`);
+      await loadCropsData();
+    } catch (error: any) {
+      toast.error("Failed to undo harvest from logs.");
+      console.error(error);
+    }
+  };
+
   const handleGlobalScan = async (value: string) => {
     const scanned = value.trim().toLowerCase();
     if (!scanned) return;
@@ -885,6 +1026,21 @@ function Index() {
       const allUpdatedChans = nftChannels.map((c) => c.id === targetNftId ? updatedChan : c);
       await saveNftChannels(allUpdatedChans);
 
+      await appendCropLifecycleEvent({
+        id: `lifecycle-transplant-${Date.now()}`,
+        type: "transferred",
+        timestamp: new Date().toISOString(),
+        cropName: tray.crop || "Unknown crop",
+        quantity: transplantCount,
+        sourceId: tray.id,
+        sourceName: tray.name,
+        sourceNurseryTrayId: tray.id,
+        destinationId: targetChan.id,
+        destinationName: targetChan.name,
+        location: { polyhouse: targetChan.polyhouse, block: targetChan.block, row: targetChan.row, stand: targetChan.stand, level: targetChan.level, channelIndex: targetChan.channelIndex, holeConfig: targetChan.holeConfig },
+        notes: transplantNotes || `Transplanted ${transplantCount}x ${tray.crop || "plants"} from Tray ${tray.name} to ${targetChan.name}`,
+      });
+
       // 2. Log in Nursery history
       const newEntry: NurseryHistoryEntry = {
         id: `nurs-harv-${Date.now()}`,
@@ -934,14 +1090,15 @@ function Index() {
     }
   };
 
-  const loadCropsData = () => {
+  const loadCropsData = async () => {
     setLoadingCrops(true);
-    Promise.all([
-      fetchNftChannels(),
-      fetchHarvestHistory(),
-      fetchGrowBags(),
-      fetchCropLifecycleEvents(),
-    ]).then(([chans, hist, bags, events]) => {
+    try {
+      const [chans, hist, bags, events] = await Promise.all([
+        fetchNftChannels(),
+        fetchHarvestHistory(),
+        fetchGrowBags(),
+        fetchCropLifecycleEvents(),
+      ]);
       setNftChannels(chans || []);
       setHarvestHistory(hist || []);
       const normalizedBags = (bags || []).map(normalizeGrowBag);
@@ -950,9 +1107,11 @@ function Index() {
       }
       setGrowBags(normalizedBags);
       setCropLifecycleEvents(events || []);
-    }).catch(() => {
-      // ignore
-    }).finally(() => setLoadingCrops(false));
+    } catch (error) {
+      console.error("Failed to load crops data:", error);
+    } finally {
+      setLoadingCrops(false);
+    }
   };
 
   useEffect(() => {
@@ -1806,7 +1965,7 @@ function Index() {
               </div>
             )}
 
-            {activeTab === "nft" && <NftChannelsTab initialChannelId={scannedChannelId} cropConfigs={cropConfigs} />}
+            {activeTab === "nft" && <NftChannelsTab initialChannelId={scannedChannelId} cropConfigs={cropConfigs} onDataChanged={loadCropsData} />}
             {activeTab === "grow-bags" && <GrowBagsTab />}
             
             {/* Operations Log */}
@@ -1815,6 +1974,8 @@ function Index() {
                 lifecycleEvents={cropLifecycleEvents}
                 harvestHistory={harvestHistory}
                 nftChannels={nftChannels}
+                onUndoHarvest={handleUndoHarvestFromLog}
+                onUndoPlanting={handleUndoPlantingFromTray}
               />
             )}
 
