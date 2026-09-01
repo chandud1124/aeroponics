@@ -143,6 +143,10 @@ const char* NVS_TANK_L     = "tankLength";
 const char* NVS_TANK_H     = "tankHeight";
 const char* NVS_TANK_CAP   = "tankCapacity";
 const char* NVS_PLAN_NAME  = "planName";
+const char* NVS_PLAN_HISTORY_COUNT = "planHistoryCount";
+const char* NVS_PLAN_HISTORY_0 = "planHist0";
+const char* NVS_PLAN_HISTORY_1 = "planHist1";
+const char* NVS_PLAN_HISTORY_2 = "planHist2";
 const char* NVS_SCHED_APPLIED = "schedApplied";
 
 const int OFFLINE_LOG_MAX  = 20;
@@ -690,11 +694,63 @@ void saveLastFaultToNVS(const char* code) {
   prefs.end();
 }
 
-void savePlanNameToNVS(const String& name) {
+bool planHistoryContains(const String* history, int count, const String& value) {
+  for (int i = 0; i < count; i++) {
+    if (history[i].length() > 0 && history[i] == value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void syncRecentPlanHistory(const String& activeName) {
   prefs.begin(NVS_NS, false);
-  prefs.putString(NVS_PLAN_NAME, name);
+
+  String history[3] = {"", "", ""};
+  history[0] = prefs.getString(NVS_PLAN_HISTORY_0, "");
+  history[1] = prefs.getString(NVS_PLAN_HISTORY_1, "");
+  history[2] = prefs.getString(NVS_PLAN_HISTORY_2, "");
+
+  String merged[3];
+  int mergedCount = 0;
+
+  if (activeName.length() > 0) {
+    merged[mergedCount++] = activeName;
+  }
+
+  for (int i = 0; i < 3; i++) {
+    if (history[i].length() == 0 || history[i] == activeName) {
+      continue;
+    }
+    if (!planHistoryContains(merged, mergedCount, history[i]) && mergedCount < 3) {
+      merged[mergedCount++] = history[i];
+    }
+  }
+
+  if (activeName.length() == 0) {
+    for (int i = 0; i < 3; i++) {
+      if (history[i].length() > 0 && !planHistoryContains(merged, mergedCount, history[i]) && mergedCount < 3) {
+        merged[mergedCount++] = history[i];
+      }
+    }
+  }
+
+  for (int i = 0; i < 3; i++) {
+    if (i < mergedCount) {
+      prefs.putString(i == 0 ? NVS_PLAN_HISTORY_0 : i == 1 ? NVS_PLAN_HISTORY_1 : NVS_PLAN_HISTORY_2, merged[i]);
+    } else {
+      prefs.remove(i == 0 ? NVS_PLAN_HISTORY_0 : i == 1 ? NVS_PLAN_HISTORY_1 : NVS_PLAN_HISTORY_2);
+    }
+  }
+
+  prefs.putInt(NVS_PLAN_HISTORY_COUNT, mergedCount);
+  prefs.putString(NVS_PLAN_NAME, activeName);
   prefs.putUInt(NVS_SCHED_APPLIED, (uint32_t)scheduleAppliedAt);
   prefs.end();
+}
+
+void savePlanNameToNVS(const String& name) {
+  syncRecentPlanHistory(name);
 }
 
 void loadPlanNameFromNVS() {
@@ -702,6 +758,8 @@ void loadPlanNameFromNVS() {
   appliedPlanName = prefs.getString(NVS_PLAN_NAME, "");
   scheduleAppliedAt = (time_t)prefs.getUInt(NVS_SCHED_APPLIED, 0);
   prefs.end();
+
+  syncRecentPlanHistory(appliedPlanName);
 }
 
 void loadLastFaultFromNVS() {

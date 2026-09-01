@@ -26,6 +26,7 @@ import {
   type GrowBag,
   type NurseryStore,
   type CropLifecycleEvent,
+  type RecentPlanEntry,
 } from "./tower-shared";
 import { supabaseAdmin } from "../integrations/supabase/client.server";
 
@@ -244,6 +245,7 @@ type PersistedTowerState = {
   cameraSettings?: CameraSettings;
   cameraSnapshots?: CameraSnapshot[];
   users?: UserEntry[];
+  recentPlansByDevice?: Record<string, RecentPlanEntry[]>;
 };
 
 type TowerEventType =
@@ -304,12 +306,19 @@ function loadStateFromDisk() {
     if (Array.isArray(parsed.users)) {
       users = parsed.users;
     }
+
+    if (parsed.recentPlansByDevice && typeof parsed.recentPlansByDevice === "object") {
+      recentPlansByDevice = Object.fromEntries(
+        Object.entries(parsed.recentPlansByDevice).map(([deviceId, plans]) => [deviceId, Array.isArray(plans) ? plans : []]),
+      );
+    }
   } catch (error) {
     console.error("Failed to load tower state from disk:", error);
   }
 }
 
 let users: UserEntry[] = [];
+let recentPlansByDevice: Record<string, RecentPlanEntry[]> = {};
 
 export function getUsers(): UserEntry[] {
   return users;
@@ -346,6 +355,7 @@ function saveStateToDisk() {
       cameraSettings,
       cameraSnapshots,
       users,
+      recentPlansByDevice,
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(nextState, null, 2), "utf8");
   } catch (error) {
@@ -658,11 +668,20 @@ export function getCycleProfile(now = new Date(), deviceId?: string | null) {
 function pushSensorSnapshot(nextStatus: LiveStatus) {
   const compEc = compensateEc(nextStatus.ec, nextStatus.reservoirTempC);
   const calcVpd = calculateVpd(nextStatus.towerTempC, nextStatus.humidityPct);
+  const deviceId = nextStatus.deviceId ?? DEFAULT_DEVICE_ID;
+  const now = Date.now();
+
+  const latestForDevice = sensorHistory.find((snapshot) => snapshot.deviceId === deviceId);
+  const shouldThrottle = latestForDevice && now - latestForDevice.timestamp < 10_000 && !nextStatus.fault && nextStatus.waterLevel == null;
+
+  if (shouldThrottle) {
+    return;
+  }
 
   const nextSnapshot = {
     id: makeId(),
-    deviceId: nextStatus.deviceId ?? DEFAULT_DEVICE_ID,
-    timestamp: Date.now(),
+    deviceId,
+    timestamp: now,
     reservoirTempC: nextStatus.reservoirTempC,
     nftTempC: nextStatus.nftTempC ?? null,
     ph: nextStatus.ph ?? null,
@@ -982,6 +1001,60 @@ function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function serializePlanSignature(schedule: Schedule) {
+  return JSON.stringify({
+    planName: schedule.planName ?? "",
+    intervalMinutes: schedule.intervalMinutes,
+    durationSeconds: schedule.durationSeconds,
+    startHour: schedule.startHour,
+    endHour: schedule.endHour,
+    enabled: schedule.enabled,
+    dayIntervalMinutes: schedule.dayIntervalMinutes ?? schedule.intervalMinutes,
+    dayDurationSeconds: schedule.dayDurationSeconds ?? schedule.durationSeconds,
+    nightIntervalMinutes: schedule.nightIntervalMinutes ?? Math.max(schedule.intervalMinutes, 15),
+    nightDurationSeconds: schedule.nightDurationSeconds ?? Math.max(15, Math.round(schedule.durationSeconds * 0.75)),
+    intervalMinutes_2: schedule.intervalMinutes_2 ?? 10,
+    durationSeconds_2: schedule.durationSeconds_2 ?? 180,
+    enabled_2: schedule.enabled_2 ?? false,
+  });
+}
+
+export function getRecentPlanHistory(deviceId?: string | null): RecentPlanEntry[] {
+  const normalized = normalizeDeviceId(deviceId ?? null);
+  return recentPlansByDevice[normalized] ?? [];
+}
+
+function setRecentPlanHistory(deviceId: string | null | undefined, plans: RecentPlanEntry[]) {
+  const normalized = normalizeDeviceId(deviceId ?? null);
+  recentPlansByDevice[normalized] = plans.slice(0, 3);
+}
+
+function recordSchedulePlan(deviceId: string | null | undefined, next: Schedule) {
+  const normalized = normalizeDeviceId(deviceId ?? null);
+  const entry: RecentPlanEntry = {
+    id: `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    planName: next.planName?.trim() || `Plan ${new Date().toISOString()}`,
+    savedAt: Date.now(),
+    signature: serializePlanSignature(next),
+    deviceId: normalized,
+  };
+
+  const history = [entry, ...getRecentPlanHistory(normalized)].filter((plan, index, array) => {
+    const duplicateIndex = array.findIndex((candidate) => candidate.signature === plan.signature);
+    return duplicateIndex === index;
+  });
+
+  setRecentPlanHistory(normalized, history);
+
+  const status = statuses[normalized];
+  if (status) {
+    status.activePlanName = entry.planName;
+    status.activePlanSignature = entry.signature;
+    status.activePlanSavedAt = entry.savedAt;
+    status.recentPlanHistory = history;
+  }
+}
+
 export function getSchedule(deviceId?: string | null) {
   const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
   if (resolvedDeviceId && deviceSchedules[resolvedDeviceId]) {
@@ -992,14 +1065,18 @@ export function getSchedule(deviceId?: string | null) {
 
 export function updateSchedule(next: Schedule, deviceId?: string | null) {
   const resolvedDeviceId = deviceId ? normalizeDeviceId(deviceId) : null;
+  const trimmedSchedule = { ...next, planName: next.planName?.trim() || `Plan ${new Date().toISOString()}` };
+
   if (resolvedDeviceId) {
-    deviceSchedules[resolvedDeviceId] = { ...next };
+    deviceSchedules[resolvedDeviceId] = { ...trimmedSchedule };
     saveDeviceSchedulesToDisk(deviceSchedules);
-    void appendEvent("schedule_updated", { deviceId: resolvedDeviceId, schedule: next });
+    recordSchedulePlan(resolvedDeviceId, trimmedSchedule);
+    void appendEvent("schedule_updated", { deviceId: resolvedDeviceId, schedule: trimmedSchedule });
     return getSchedule(resolvedDeviceId);
   } else {
-    schedule = { ...next };
+    schedule = { ...trimmedSchedule };
     saveScheduleToDisk(schedule);
+    recordSchedulePlan(null, trimmedSchedule);
     void appendEvent("schedule_updated", schedule);
     return getSchedule();
   }

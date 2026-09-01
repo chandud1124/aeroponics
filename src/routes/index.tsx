@@ -61,6 +61,7 @@ import {
 } from "@/components/tower/PumpOperational";
 import { HistoryAnalyticsTab } from "@/components/tower/HistoryAnalytics";
 import { CropOperationsDashboard } from "@/components/tower/CropOperationsDashboard";
+import { OperationsLog } from "@/components/tower/OperationsLog";
 import {
   BarChart,
   Bar,
@@ -131,6 +132,7 @@ import {
   EyeOff,
   Search,
   Palette,
+  Notebook,
 } from "lucide-react";
 
 const DEFAULT_NURSERY_TRAYS: NurseryTray[] = [
@@ -955,7 +957,7 @@ function Index() {
 
   useEffect(() => {
     if (!user) return;
-    if (activeTab === "crops" || activeTab === "history" || activeTab === "nursery" || activeTab === "nft" || activeTab === "grow-bags") {
+    if (activeTab === "crops" || activeTab === "history" || activeTab === "nursery" || activeTab === "nft" || activeTab === "grow-bags" || activeTab === "operations-log") {
       loadCropsData();
     }
   }, [activeTab, user]);
@@ -1051,6 +1053,7 @@ function Index() {
         { id: "nft", label: "NFT Channels", icon: Grid },
         { id: "grow-bags", label: "Grow Bags", icon: Package },
         { id: "history", label: "Channels History", icon: History },
+        { id: "operations-log", label: "Operations Log", icon: Notebook },
       ]
     },
     {
@@ -1805,6 +1808,15 @@ function Index() {
 
             {activeTab === "nft" && <NftChannelsTab initialChannelId={scannedChannelId} cropConfigs={cropConfigs} />}
             {activeTab === "grow-bags" && <GrowBagsTab />}
+            
+            {/* Operations Log */}
+            {activeTab === "operations-log" && (
+              <OperationsLog 
+                lifecycleEvents={cropLifecycleEvents}
+                harvestHistory={harvestHistory}
+                nftChannels={nftChannels}
+              />
+            )}
 
             {/* High-Fidelity Nursery Trays */}
             {activeTab === "nursery" && (

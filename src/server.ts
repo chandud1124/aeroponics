@@ -48,6 +48,7 @@ import {
   deleteUser,
   hashUserPassword,
   verifyUserPassword,
+  getRecentPlanHistory,
 } from "./lib/tower-server-store";
 
 import { sendPtzCommand } from "./lib/onvif-ptz";
@@ -846,6 +847,8 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     touchStatus({ source: "esp32", deviceId: resolvedDeviceId });
     const status = getStatus(resolvedDeviceId);
     const deviceSchedule = getSchedule(resolvedDeviceId);
+    const recentPlans = getRecentPlanHistory(resolvedDeviceId);
+    const activePlan = recentPlans[0] ?? null;
     const cycleProfile = getCycleProfile(undefined, resolvedDeviceId);
     const devicePins = getDevicePins(resolvedDeviceId);
     const mappings = (devicePins && devicePins.length > 0) ? devicePins : getGpioMappings();
@@ -897,6 +900,10 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
         serverTime: Date.now(),
         hasRegisteredDevice: true,
         ...deviceSchedule,
+        recentPlanHistory: recentPlans,
+        activePlanName: activePlan?.planName ?? deviceSchedule.planName ?? status?.activePlanName ?? null,
+        activePlanSignature: activePlan?.signature ?? status?.activePlanSignature ?? null,
+        activePlanSavedAt: activePlan?.savedAt ?? status?.activePlanSavedAt ?? null,
         intervalMinutes: cycleProfile.offIntervalMinutes + Math.round(cycleProfile.onDurationSeconds / 60),
         durationSeconds: cycleProfile.onDurationSeconds,
         intervalMinutes_2: cycleProfile2.offIntervalMinutes + Math.round(cycleProfile2.onDurationSeconds / 60),
@@ -1131,6 +1138,49 @@ async function handleLocalApi(request: Request): Promise<Response | null> {
     }
 
     return jsonResponse({ error: "Method not allowed" }, 405);
+  }
+
+  if (url.pathname === "/api/force-sync-plan") {
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    // Require user authentication from web UI
+    const targetDeviceGate = requireRegisteredTargetDevice(request);
+    if (targetDeviceGate) return targetDeviceGate;
+
+    const targetDevice = getTargetDeviceId(request);
+    const recentPlans = getRecentPlanHistory(targetDevice);
+    const activePlan = recentPlans[0];
+
+    if (!activePlan) {
+      return jsonResponse(
+        {
+          error: "No active plan",
+          message: "Cannot force sync: no active plan found for this device.",
+        },
+        404,
+      );
+    }
+
+    // Mark the plan as needing immediate sync by recording the current time
+    // On next handshake, device will receive this plan in recentPlanHistory
+    // and update its local storage since the signature is known
+    const syncMarked = {
+      ...activePlan,
+      syncRequestedAt: Date.now(),
+    };
+
+    return jsonResponse(
+      {
+        success: true,
+        planName: activePlan.planName,
+        signature: activePlan.signature,
+        message: "Plan sync queued. ESP32 will apply changes on next check-in (usually within 30 seconds).",
+        syncRequestedAt: syncMarked.syncRequestedAt,
+      },
+      200,
+    );
   }
 
   if (url.pathname === "/api/pump-log") {

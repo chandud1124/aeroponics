@@ -34,6 +34,14 @@ export const PUMP_STATE_COLORS: Record<PumpState, string> = {
   [PumpState.MANUAL_MODE]: "bg-purple-200 text-purple-900",
 };
 
+export type RecentPlanEntry = {
+  id: string;
+  planName: string;
+  savedAt: number;
+  signature: string;
+  deviceId?: string | null;
+};
+
 export type Schedule = {
   planName?: string;
   intervalMinutes: number;
@@ -72,6 +80,10 @@ export type Schedule = {
 
 export type LiveStatus = {
   deviceId?: string;
+  activePlanName?: string | null;
+  activePlanSignature?: string | null;
+  activePlanSavedAt?: number | null;
+  recentPlanHistory?: RecentPlanEntry[];
   pumpOn: boolean;
   flowing: boolean;
   pumpState: PumpState;

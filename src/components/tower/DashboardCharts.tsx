@@ -67,47 +67,47 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
   return (
     <div className="space-y-4">
 
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-        <div>
-          <h3 className="text-sm font-bold text-foreground">Sensor pulse</h3>
-          <p className="text-[11px] text-muted-foreground">Last 24 hours · {hasHistory ? "live telemetry" : "waiting for history"}</p>
+      <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-xs sm:text-sm font-bold text-foreground truncate">Sensor pulse</h3>
+          <p className="text-[10px] sm:text-[11px] text-muted-foreground line-clamp-1">Last 24h · {hasHistory ? "live" : "loading"}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           {onViewHistory && (
             <button
               onClick={onViewHistory}
-              className="text-[10px] font-bold uppercase tracking-wider text-primary hover:underline"
+              className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-primary hover:underline whitespace-nowrap"
             >
-              View Full History →
+              Details →
             </button>
           )}
-          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            <span className={`h-2 w-2 rounded-full ${loading ? "animate-pulse bg-amber-500" : "bg-emerald-500"}`} />
-            {loading ? "Syncing" : hasHistory ? "Live" : "Snapshot"}
+          <span className="inline-flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            <span className={`h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full ${loading ? "animate-pulse bg-amber-500" : "bg-emerald-500"}`} />
+            <span className="hidden xs:inline">{loading ? "Syncing" : hasHistory ? "Live" : "Snap"}</span>
           </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2">
       {/* pH and EC Trend Area Chart */}
       <Card
         onClick={onViewHistory}
-        className={`flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-4 shadow-sm transition-colors sm:p-5 ${
+        className={`flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-3 sm:p-4 shadow-sm transition-colors ${
           onViewHistory ? "cursor-pointer hover:border-primary/50 hover:bg-card/90" : "hover:border-primary/30"
         }`}
       >
-        <div className="space-y-1 mb-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-              <Gauge className="h-4 w-4 text-indigo-500" />
-              pH & EC Solution Balance (24h)
+        <div className="space-y-1 mb-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+              <Gauge className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-500 flex-shrink-0" />
+              <span className="line-clamp-1">pH & EC Balance</span>
             </span>
-            <span className="text-[9px] font-bold text-muted-foreground">Target pH 5.5–6.5</span>
+            <span className="text-[8px] sm:text-[9px] font-bold text-muted-foreground whitespace-nowrap">pH 5.5–6.5</span>
           </div>
-          <span className="text-[10px] text-muted-foreground block">Real-time overlay of acid level and electrical conductivity index.</span>
+          <span className="text-[9px] sm:text-[10px] text-muted-foreground block line-clamp-2">Acid level and EC index.</span>
         </div>
 
-        <div className="h-52 w-full sm:h-64">
+        <div className="h-40 w-full xs:h-48 sm:h-56">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 5, left: -20, bottom: 0 }}>
               <defs>
@@ -121,16 +121,16 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
-              <XAxis dataKey="timeLabel" className="text-[10px] font-semibold fill-muted-foreground" tickLine={false} minTickGap={28} />
-              <YAxis yAxisId="left" domain={[5.0, 7.0]} className="text-[10px] font-mono fill-muted-foreground" tickLine={false} />
-              <YAxis yAxisId="right" orientation="right" domain={[0.6, 1.8]} className="text-[10px] font-mono fill-muted-foreground" tickLine={false} />
+              <XAxis dataKey="timeLabel" className="text-[8px] xs:text-[9px] sm:text-[10px] font-semibold fill-muted-foreground" tickLine={false} minTickGap={20} />
+              <YAxis yAxisId="left" domain={[5.0, 7.0]} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" tickLine={false} width={30} />
+              <YAxis yAxisId="right" orientation="right" domain={[0.6, 1.8]} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" tickLine={false} width={30} />
               <Tooltip
-                contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: "8px", fontSize: "11px" }}
+                contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: "6px", fontSize: "10px" }}
                 labelStyle={{ fontWeight: "bold" }}
               />
-              <Legend wrapperStyle={{ fontSize: "10px", fontWeight: "bold", paddingTop: "10px" }} />
-              <Area yAxisId="left" type="monotone" dataKey="ph" name="pH Value" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorPh)" />
-              <Area yAxisId="right" type="monotone" dataKey="ec" name="EC Index" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorEc)" />
+              <Legend wrapperStyle={{ fontSize: "9px", fontWeight: "bold", paddingTop: "8px" }} />
+              <Area yAxisId="left" type="monotone" dataKey="ph" name="pH" stroke="#6366f1" strokeWidth={1.5} fillOpacity={1} fill="url(#colorPh)" />
+              <Area yAxisId="right" type="monotone" dataKey="ec" name="EC" stroke="#f59e0b" strokeWidth={1.5} fillOpacity={1} fill="url(#colorEc)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -139,22 +139,22 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
       {/* Temperature and Humidity Trend Chart */}
       <Card
         onClick={onViewHistory}
-        className={`flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-4 shadow-sm transition-colors sm:p-5 ${
+        className={`flex min-w-0 flex-col justify-between border-border/80 bg-card/80 p-3 sm:p-4 shadow-sm transition-colors ${
           onViewHistory ? "cursor-pointer hover:border-primary/50 hover:bg-card/90" : "hover:border-primary/30"
         }`}
       >
-        <div className="space-y-1 mb-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-              <Thermometer className="h-4 w-4 text-sky-500" />
-              Reservoir Temp & Humidity (24h)
+        <div className="space-y-1 mb-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+              <Thermometer className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-sky-500 flex-shrink-0" />
+              <span className="line-clamp-1">Temp & Humidity</span>
             </span>
-            <span className="text-[9px] font-bold text-muted-foreground">Comfort band 40–90%</span>
+            <span className="text-[8px] sm:text-[9px] font-bold text-muted-foreground whitespace-nowrap">40–90%</span>
           </div>
-          <span className="text-[10px] text-muted-foreground block">Track environmental fluctuations impacting root health.</span>
+          <span className="text-[9px] sm:text-[10px] text-muted-foreground block line-clamp-2">Environmental conditions.</span>
         </div>
 
-        <div className="h-52 w-full sm:h-64">
+        <div className="h-40 w-full xs:h-48 sm:h-56">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 5, left: -20, bottom: 0 }}>
               <defs>
@@ -172,17 +172,17 @@ export function DashboardCharts({ deviceId, status, onViewHistory }: DashboardCh
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
-              <XAxis dataKey="timeLabel" className="text-[10px] font-semibold fill-muted-foreground" tickLine={false} minTickGap={28} />
-              <YAxis yAxisId="left" domain={[15, 30]} className="text-[10px] font-mono fill-muted-foreground" tickLine={false} />
-              <YAxis yAxisId="right" orientation="right" domain={[40, 90]} className="text-[10px] font-mono fill-muted-foreground" tickLine={false} />
+              <XAxis dataKey="timeLabel" className="text-[8px] xs:text-[9px] sm:text-[10px] font-semibold fill-muted-foreground" tickLine={false} minTickGap={20} />
+              <YAxis yAxisId="left" domain={[15, 30]} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" tickLine={false} width={30} />
+              <YAxis yAxisId="right" orientation="right" domain={[40, 90]} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" tickLine={false} width={30} />
               <Tooltip
-                contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: "8px", fontSize: "11px" }}
+                contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: "6px", fontSize: "10px" }}
                 labelStyle={{ fontWeight: "bold" }}
               />
-              <Legend wrapperStyle={{ fontSize: "10px", fontWeight: "bold", paddingTop: "10px" }} />
-              <Area yAxisId="left" type="monotone" dataKey="reservoirTempC" name="Tank Temp (°C)" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#colorTemp)" />
-              <Area yAxisId="left" type="monotone" dataKey="nftTempC" name="NFT Temp (°C)" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorNftTemp)" />
-              <Area yAxisId="right" type="monotone" dataKey="humidityPct" name="Air Humidity (%)" stroke="#22c55e" strokeWidth={2} fillOpacity={1} fill="url(#colorHum)" />
+              <Legend wrapperStyle={{ fontSize: "9px", fontWeight: "bold", paddingTop: "8px" }} />
+              <Area yAxisId="left" type="monotone" dataKey="reservoirTempC" name="Tank T°" stroke="#0ea5e9" strokeWidth={1.5} fillOpacity={1} fill="url(#colorTemp)" />
+              <Area yAxisId="left" type="monotone" dataKey="nftTempC" name="NFT T°" stroke="#f59e0b" strokeWidth={1.5} fillOpacity={1} fill="url(#colorNftTemp)" />
+              <Area yAxisId="right" type="monotone" dataKey="humidityPct" name="Humidity %" stroke="#22c55e" strokeWidth={1.5} fillOpacity={1} fill="url(#colorHum)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>

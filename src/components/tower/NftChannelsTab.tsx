@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { QrCode, Sprout, ShoppingBag, Plus, Sparkles, Clipboard, Trash2, Edit3, Calendar, FileText, BarChart3, AlertTriangle, AlertCircle, History, Search } from "lucide-react";
+import { QrCode, Sprout, ShoppingBag, Plus, Sparkles, Clipboard, Trash2, Edit3, Calendar, FileText, BarChart3, AlertTriangle, AlertCircle, History, Search, RotateCcw } from "lucide-react";
 import { CameraQrScanner } from "@/components/tower/CameraQrScanner";
 import {
   fetchNftChannels,
@@ -15,6 +15,7 @@ import {
   harvestCropRemote,
   fetchHarvestHistory,
   appendCropLifecycleEvent,
+  fetchCropLifecycleEvents,
   type NftChannel,
   type NftCropEntry,
 } from "@/lib/tower-storage";
@@ -167,6 +168,14 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
   // Logs states
   const [selectedChannelLogs, setSelectedChannelLogs] = useState<NftChannel | null>(null);
   const [channelHarvestHistory, setChannelHarvestHistory] = useState<any[]>([]);
+  const [recentTransfers, setRecentTransfers] = useState<CropLifecycleEvent[]>([]);
+  const [recentHarvests, setRecentHarvests] = useState<any[]>([]);
+
+  // Harvest undo/re-shift states
+  const [reshiftTargetId, setReshiftTargetId] = useState("");
+  const [reshiftNotes, setReshiftNotes] = useState("");
+  const [showReshiftForm, setShowReshiftForm] = useState(false);
+  const [selectedHarvestToReshifted, setSelectedHarvestToReshifted] = useState<any>(null);
 
   // Multi-crop list editing
   const [cropsList, setCropsList] = useState<NftCropEntry[]>([{ cropName: "", count: 20 }]);
@@ -175,13 +184,18 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
   const [transferTargetId, setTransferTargetId] = useState("");
   const [transferCount, setTransferCount] = useState<number>(5);
   const [transferCultivar, setTransferCultivar] = useState("");
+  const [transferNotes, setTransferNotes] = useState("");
   const [transferScanQr, setTransferScanQr] = useState("");
   const [showCameraScanner, setShowCameraScanner] = useState(false);
 
   const loadData = () => {
     setLoading(true);
-    fetchNftChannels()
-      .then((data) => {
+    Promise.all([
+      fetchNftChannels(),
+      fetchCropLifecycleEvents(),
+      fetchHarvestHistory()
+    ])
+      .then(([data, events, harvests]) => {
         // Sort channels by polyhouse, block, row, level, then channelIndex
         const sorted = [...data].sort((a, b) => {
           const phA = a.polyhouse || "";
@@ -203,6 +217,19 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
           return (a.channelIndex ?? 0) - (b.channelIndex ?? 0);
         });
         setChannels(sorted);
+
+        // Filter for recent transfers (last 20)
+        const transfers = events
+          .filter((e) => e.type === "transferred")
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 20);
+        setRecentTransfers(transfers);
+
+        // Sort harvests by date descending and keep last 20
+        const sortedHarvests = [...harvests]
+          .sort((a, b) => new Date(b.harvestedAt).getTime() - new Date(a.harvestedAt).getTime())
+          .slice(0, 20);
+        setRecentHarvests(sortedHarvests);
       })
       .finally(() => setLoading(false));
   };
@@ -720,13 +747,302 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
         destinationId: targetChan.id,
         destinationName: targetChan.name,
         location: channelLocation(updatedTarget),
-        notes: "Transferred between NFT channels",
+        notes: transferNotes.trim() || "Transferred between NFT channels",
       });
       toast.success(`Successfully shipped ${transferCount}x ${transferCultivar}!`);
+      setTransferNotes("");
       loadData();
       closeForm();
     } catch (e: any) {
       toast.error("Failed to transfer plants.");
+    }
+  };
+
+  const handleUndoTransfer = async (transferEvent: CropLifecycleEvent) => {
+    if (!transferEvent.sourceId || !transferEvent.destinationId) {
+      toast.error("Cannot undo this transfer: missing source or destination data.");
+      return;
+    }
+
+    if (!confirm(`Undo transfer of ${transferEvent.quantity}x ${transferEvent.cropName} from ${transferEvent.sourceName} to ${transferEvent.destinationName}?`)) {
+      return;
+    }
+
+    try {
+      const sourceChan = channels.find((c) => c.id === transferEvent.destinationId);
+      const targetChan = channels.find((c) => c.id === transferEvent.sourceId);
+
+      if (!sourceChan || !targetChan) {
+        toast.error("Source or destination channel not found.");
+        return;
+      }
+
+      const moveQty = transferEvent.quantity;
+
+      // Move back from destination to source
+      const nextSourceCrops = sourceChan.crops && sourceChan.crops.length > 0
+        ? sourceChan.crops.map((cr) => {
+            if (cr.cropName.toLowerCase() === transferEvent.cropName.toLowerCase()) {
+              return { ...cr, count: Math.max(0, cr.count - moveQty) };
+            }
+            return cr;
+          }).filter((cr) => cr.count > 0)
+        : [];
+      
+      const nextSourceCount = Math.max(0, (sourceChan.currentCount ?? 0) - moveQty);
+      const isSourceEmpty = nextSourceCount === 0;
+
+      const updatedSource: NftChannel = {
+        ...sourceChan,
+        status: isSourceEmpty ? "empty" : "growing",
+        currentCount: nextSourceCount,
+        crops: isSourceEmpty ? [] : nextSourceCrops,
+        cropName: isSourceEmpty ? "" : (nextSourceCrops.length > 0 ? nextSourceCrops.map((c) => c.cropName).join(", ") : ""),
+        plantedAt: isSourceEmpty ? null : sourceChan.plantedAt,
+        expectedHarvestISO: isSourceEmpty ? null : sourceChan.expectedHarvestISO,
+        incidents: [
+          ...(sourceChan.incidents || []),
+          {
+            timestamp: new Date().toISOString(),
+            type: "incident",
+            description: `[UNDO] Reverted ${moveQty}x ${transferEvent.cropName} from ${targetChan.name}`,
+          },
+        ],
+      };
+
+      let nextTargetCrops: NftCropEntry[] = [];
+      if (targetChan.status === "growing") {
+        const baseCrops = targetChan.crops && targetChan.crops.length > 0
+          ? targetChan.crops
+          : [{ cropName: targetChan.cropName || "Unknown", count: targetChan.currentCount ?? 0 }];
+        
+        const existingIdx = baseCrops.findIndex((cr) => cr.cropName.toLowerCase() === transferEvent.cropName.toLowerCase());
+        if (existingIdx > -1) {
+          nextTargetCrops = baseCrops.map((cr, idx) => 
+            idx === existingIdx ? { ...cr, count: cr.count + moveQty } : cr
+          );
+        } else {
+          nextTargetCrops = [...baseCrops, { cropName: transferEvent.cropName, count: moveQty }];
+        }
+      } else {
+        nextTargetCrops = [{ cropName: transferEvent.cropName, count: moveQty }];
+      }
+
+      const nextTargetCount = (targetChan.currentCount ?? 0) + moveQty;
+
+      const updatedTarget: NftChannel = {
+        ...targetChan,
+        status: "growing",
+        currentCount: nextTargetCount,
+        crops: nextTargetCrops,
+        cropName: nextTargetCrops.map((c) => c.cropName).join(", "),
+        plantedAt: targetChan.plantedAt || new Date().toISOString(),
+        incidents: [
+          ...(targetChan.incidents || []),
+          {
+            timestamp: new Date().toISOString(),
+            type: "incident",
+            description: `[UNDO] Received back ${moveQty}x ${transferEvent.cropName} from ${sourceChan.name}`,
+          },
+        ],
+      };
+
+      const updatedList = channels.map((c) => {
+        if (c.id === sourceChan.id) return updatedSource;
+        if (c.id === targetChan.id) return updatedTarget;
+        return c;
+      });
+
+      await saveNftChannels(updatedList);
+      await appendCropLifecycleEvent({
+        id: `lifecycle-undo-${Date.now()}`,
+        type: "transferred",
+        timestamp: new Date().toISOString(),
+        cropName: transferEvent.cropName,
+        quantity: moveQty,
+        sourceId: transferEvent.destinationId,
+        sourceName: transferEvent.destinationName,
+        destinationId: transferEvent.sourceId,
+        destinationName: transferEvent.sourceName,
+        location: channelLocation(updatedTarget),
+        notes: `Undo: ${transferEvent.notes || "Transfer reverted"}`,
+      });
+
+      toast.success(`Successfully undone transfer of ${moveQty}x ${transferEvent.cropName}!`);
+      loadData();
+    } catch (e: any) {
+      toast.error("Failed to undo transfer.");
+      console.error(e);
+    }
+  };
+
+  const handleUndoHarvest = async (harvestEntry: any) => {
+    if (!harvestEntry.channelId) {
+      toast.error("Cannot undo this harvest: missing channel data.");
+      return;
+    }
+
+    if (!confirm(`Undo harvest of ${harvestEntry.currentCount}x ${harvestEntry.cropName} from ${harvestEntry.channelName}?`)) {
+      return;
+    }
+
+    try {
+      const channel = channels.find((c) => c.id === harvestEntry.channelId);
+      if (!channel) {
+        toast.error("Channel not found.");
+        return;
+      }
+
+      // Restore channel to growing status with previous harvest count
+      const restoredChannel: NftChannel = {
+        ...channel,
+        status: "growing",
+        currentCount: harvestEntry.currentCount,
+        cropName: harvestEntry.cropName,
+        crops: harvestEntry.crops || [{ cropName: harvestEntry.cropName, count: harvestEntry.currentCount }],
+        harvestedAt: null,
+        incidents: [
+          ...(channel.incidents || []),
+          {
+            timestamp: new Date().toISOString(),
+            type: "incident",
+            description: `[UNDO HARVEST] Restored ${harvestEntry.currentCount}x ${harvestEntry.cropName} (yield: ${harvestEntry.yieldQty}, waste: ${harvestEntry.wasteQty})`,
+          },
+        ],
+      };
+
+      const updatedList = channels.map((c) => (c.id === channel.id ? restoredChannel : c));
+      await saveNftChannels(updatedList);
+
+      await appendCropLifecycleEvent({
+        id: `lifecycle-undo-harvest-${Date.now()}`,
+        type: "planted",
+        timestamp: new Date().toISOString(),
+        cropName: harvestEntry.cropName,
+        quantity: harvestEntry.currentCount,
+        destinationId: channel.id,
+        destinationName: channel.name,
+        location: channelLocation(restoredChannel),
+        notes: `Undo harvest: restored ${harvestEntry.currentCount}x ${harvestEntry.cropName}`,
+      });
+
+      toast.success(`Successfully undone harvest! ${harvestEntry.currentCount}x ${harvestEntry.cropName} restored to ${channel.name}.`);
+      loadData();
+    } catch (e: any) {
+      toast.error("Failed to undo harvest.");
+      console.error(e);
+    }
+  };
+
+  const handleReshiftHarvest = async (harvestEntry: any) => {
+    if (!harvestEntry.channelId || !reshiftTargetId) {
+      toast.error("Please select a target channel.");
+      return;
+    }
+
+    if (!reshiftNotes.trim()) {
+      toast.error("Please add a note explaining the re-shift.");
+      return;
+    }
+
+    try {
+      const sourceChannel = channels.find((c) => c.id === harvestEntry.channelId);
+      const targetChannel = channels.find((c) => c.id === reshiftTargetId);
+
+      if (!sourceChannel || !targetChannel) {
+        toast.error("Source or target channel not found.");
+        return;
+      }
+
+      const moveQty = harvestEntry.currentCount;
+
+      // Mark source as empty with undo note
+      const updatedSource: NftChannel = {
+        ...sourceChannel,
+        status: "empty",
+        currentCount: 0,
+        cropName: "",
+        crops: [],
+        harvestedAt: sourceChannel.harvestedAt,
+        incidents: [
+          ...(sourceChannel.incidents || []),
+          {
+            timestamp: new Date().toISOString(),
+            type: "incident",
+            description: `[RE-SHIFT] ${moveQty}x ${harvestEntry.cropName} re-shifted to ${targetChannel.name}`,
+          },
+        ],
+      };
+
+      // Add harvested plants to target
+      let nextTargetCrops: NftCropEntry[] = [];
+      if (targetChannel.status === "growing") {
+        const baseCrops = targetChannel.crops && targetChannel.crops.length > 0
+          ? targetChannel.crops
+          : [{ cropName: targetChannel.cropName || "Unknown", count: targetChannel.currentCount ?? 0 }];
+        
+        const existingIdx = baseCrops.findIndex((cr) => cr.cropName.toLowerCase() === harvestEntry.cropName.toLowerCase());
+        if (existingIdx > -1) {
+          nextTargetCrops = baseCrops.map((cr, idx) => 
+            idx === existingIdx ? { ...cr, count: cr.count + moveQty } : cr
+          );
+        } else {
+          nextTargetCrops = [...baseCrops, { cropName: harvestEntry.cropName, count: moveQty }];
+        }
+      } else {
+        nextTargetCrops = [{ cropName: harvestEntry.cropName, count: moveQty }];
+      }
+
+      const nextTargetCount = (targetChannel.currentCount ?? 0) + moveQty;
+
+      const updatedTarget: NftChannel = {
+        ...targetChannel,
+        status: "growing",
+        currentCount: nextTargetCount,
+        crops: nextTargetCrops,
+        cropName: nextTargetCrops.map((c) => c.cropName).join(", "),
+        plantedAt: targetChannel.plantedAt || new Date().toISOString(),
+        incidents: [
+          ...(targetChannel.incidents || []),
+          {
+            timestamp: new Date().toISOString(),
+            type: "incident",
+            description: `[RE-SHIFT IN] Received ${moveQty}x ${harvestEntry.cropName} from harvested batch in ${sourceChannel.name}`,
+          },
+        ],
+      };
+
+      const updatedList = channels.map((c) => {
+        if (c.id === sourceChannel.id) return updatedSource;
+        if (c.id === targetChannel.id) return updatedTarget;
+        return c;
+      });
+
+      await saveNftChannels(updatedList);
+
+      await appendCropLifecycleEvent({
+        id: `lifecycle-reshifted-${Date.now()}`,
+        type: "transferred",
+        timestamp: new Date().toISOString(),
+        cropName: harvestEntry.cropName,
+        quantity: moveQty,
+        sourceId: harvestEntry.channelId,
+        sourceName: sourceChannel.name,
+        destinationId: reshiftTargetId,
+        destinationName: targetChannel.name,
+        location: channelLocation(updatedTarget),
+        notes: `Re-shift from harvest: ${reshiftNotes}`,
+      });
+
+      toast.success(`Successfully re-shifted ${moveQty}x ${harvestEntry.cropName} to ${targetChannel.name}!`);
+      setShowReshiftForm(false);
+      setReshiftTargetId("");
+      setReshiftNotes("");
+      setSelectedHarvestToReshifted(null);
+      loadData();
+    } catch (e: any) {
+      toast.error("Failed to re-shift harvest.");
+      console.error(e);
     }
   };
 
@@ -1746,6 +2062,17 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                       </>
                     );
                   })()}
+
+                  <div className="space-y-1">
+                    <Label htmlFor="transfer-notes" className="text-xs font-semibold">Notes (Optional)</Label>
+                    <textarea
+                      id="transfer-notes"
+                      placeholder="e.g., Moved due to space optimization, excellent growth, ready for nursery..."
+                      value={transferNotes}
+                      onChange={(e) => setTransferNotes(e.target.value)}
+                      className="h-16 text-xs border rounded-md border-input bg-background px-3 py-2 font-sans resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-transparent"
+                    />
+                  </div>
                 </>
               )}
 
@@ -1802,6 +2129,7 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                               setTransferTargetId("");
                               setTransferCount(Math.min(5, selectedChannelLogs.currentCount || 5));
                               setTransferCultivar(selectedChannelLogs.crops && selectedChannelLogs.crops.length > 0 ? selectedChannelLogs.crops[0].cropName : selectedChannelLogs.cropName);
+                              setTransferNotes("");
                               setTransferScanQr("");
                               setActionType("transfer");
                             }}
@@ -1883,6 +2211,171 @@ export function NftChannelsTab({ initialChannelId, cropConfigs = [] }: { initial
                       </div>
                     ) : (
                       <span className="text-muted-foreground italic text-[11px] block">No incident events logged in this cycle.</span>
+                    )}
+                  </div>
+
+                  {/* Recent Transfers with Undo */}
+                  <div className="space-y-2">
+                    <span className="font-bold text-foreground block border-b pb-1">Recent Transfers & Reversals</span>
+                    {recentTransfers && recentTransfers.length > 0 ? (
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {recentTransfers.map((transfer) => {
+                          const isRelevant = transfer.sourceId === selectedChannelLogs?.id || transfer.destinationId === selectedChannelLogs?.id;
+                          return (
+                            <div
+                              key={transfer.id}
+                              className={`p-2 rounded-lg border text-[10px] space-y-1 ${
+                                transfer.notes?.includes("Undo")
+                                  ? "border-blue-500/20 bg-blue-500/5"
+                                  : "border-sky-500/20 bg-sky-500/5"
+                              } ${isRelevant ? "ring-1 ring-primary/30" : ""}`}
+                            >
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="flex-1">
+                                  <p className="font-bold text-foreground">
+                                    {transfer.quantity}x {transfer.cropName} → {transfer.destinationName}
+                                  </p>
+                                  <p className="text-[9px] text-muted-foreground">
+                                    From: <span className="font-mono">{transfer.sourceName}</span>
+                                  </p>
+                                  {transfer.notes && !transfer.notes.includes("Undo") && (
+                                    <p className="text-[9px] text-muted-foreground italic mt-0.5">
+                                      📝 {transfer.notes}
+                                    </p>
+                                  )}
+                                </div>
+                                {!transfer.notes?.includes("Undo") && (
+                                  <Button
+                                    onClick={() => handleUndoTransfer(transfer)}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-[9px] text-orange-600 hover:text-orange-700 hover:bg-orange-500/10 shrink-0 flex items-center gap-1"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                    Undo
+                                  </Button>
+                                )}
+                              </div>
+                              <span className="text-[8px] text-muted-foreground block font-mono">
+                                {new Date(transfer.timestamp).toLocaleString()}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground italic text-[11px] block">No recent transfers recorded.</span>
+                    )}
+                  </div>
+
+                  {/* Recent Harvests with Undo/Re-shift */}
+                  <div className="space-y-2">
+                    <span className="font-bold text-foreground block border-b pb-1">Recent Harvests & Recovery</span>
+                    {recentHarvests && recentHarvests.length > 0 ? (
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {recentHarvests.map((harvest) => {
+                          const isRelevant = harvest.channelId === selectedChannelLogs?.id;
+                          const showReshiftUI = selectedHarvestToReshifted?.id === harvest.id && showReshiftForm;
+                          return (
+                            <div
+                              key={harvest.id}
+                              className={`p-2 rounded-lg border space-y-2 text-[10px] ${
+                                isRelevant
+                                  ? "border-green-500/30 bg-green-500/5 ring-1 ring-primary/30"
+                                  : "border-green-500/20 bg-green-500/5"
+                              }`}
+                            >
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="flex-1">
+                                  <p className="font-bold text-foreground">
+                                    ✂️ {harvest.currentCount}x {harvest.cropName}
+                                  </p>
+                                  <p className="text-[9px] text-muted-foreground">
+                                    {harvest.channelName} • Yield: {harvest.yieldQty}, Waste: {harvest.wasteQty}
+                                  </p>
+                                  {harvest.notes && (
+                                    <p className="text-[9px] text-muted-foreground italic mt-0.5">
+                                      📝 {harvest.notes}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex gap-1 shrink-0">
+                                  <Button
+                                    onClick={() => handleUndoHarvest(harvest)}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-[9px] text-blue-600 hover:text-blue-700 hover:bg-blue-500/10 flex items-center gap-1"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                    Undo
+                                  </Button>
+                                  <Button
+                                    onClick={() => {
+                                      setSelectedHarvestToReshifted(harvest);
+                                      setShowReshiftForm(!showReshiftForm);
+                                      setReshiftTargetId("");
+                                      setReshiftNotes("");
+                                    }}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-[9px] text-purple-600 hover:text-purple-700 hover:bg-purple-500/10 flex items-center gap-1"
+                                  >
+                                    <Sprout className="h-3 w-3" />
+                                    Re-shift
+                                  </Button>
+                                </div>
+                              </div>
+                              <span className="text-[8px] text-muted-foreground block font-mono">
+                                {new Date(harvest.harvestedAt).toLocaleString()}
+                              </span>
+
+                              {showReshiftUI && (
+                                <div className="border-t pt-2 mt-2 space-y-1.5 bg-purple-500/5 -mx-2 -mb-2 px-2 pb-2 rounded-b">
+                                  <p className="text-[9px] font-semibold text-foreground">Re-shift to channel:</p>
+                                  <Select value={reshiftTargetId} onValueChange={(val) => setReshiftTargetId(val)}>
+                                    <SelectTrigger className="h-7 text-[9px]"><SelectValue placeholder="Select destination..." /></SelectTrigger>
+                                    <SelectContent>
+                                      {channels.filter((c) => c.id !== harvest.channelId).map((chan) => (
+                                        <SelectItem key={chan.id} value={chan.id}>
+                                          {chan.name} {chan.status === "growing" ? `(${chan.cropName})` : "(Empty)"}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <input
+                                    type="text"
+                                    placeholder="Reason for re-shift..."
+                                    value={reshiftNotes}
+                                    onChange={(e) => setReshiftNotes(e.target.value)}
+                                    className="h-7 text-[9px] border rounded-md border-input bg-background px-2 py-1 w-full font-sans focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                  />
+                                  <div className="flex gap-1">
+                                    <Button
+                                      onClick={() => handleReshiftHarvest(harvest)}
+                                      className="flex-1 h-6 text-[9px] bg-purple-600 hover:bg-purple-700 text-white font-bold px-2 py-0 rounded"
+                                    >
+                                      Confirm Re-shift
+                                    </Button>
+                                    <Button
+                                      onClick={() => {
+                                        setShowReshiftForm(false);
+                                        setSelectedHarvestToReshifted(null);
+                                      }}
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-[9px]"
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground italic text-[11px] block">No recent harvests recorded.</span>
                     )}
                   </div>
 

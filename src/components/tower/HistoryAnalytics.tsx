@@ -389,27 +389,27 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
   return (
     <div className="space-y-6">
       {/* Dynamic Date Filtering Dashboard Toolbar */}
-      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <CalendarRange className="h-4 w-4 text-emerald-500 animate-pulse" />
-            Historical Operations Audits
+      <div className="flex flex-col gap-3 rounded-lg sm:rounded-2xl border border-border bg-card p-3 sm:p-6 shadow-sm md:flex-row md:items-center md:justify-between md:gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground">
+            <CalendarRange className="h-4 w-4 text-emerald-500 animate-pulse flex-shrink-0" />
+            <span className="truncate">Historical Audits</span>
           </div>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight">Sensor History & Trends</h2>
-          <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-            Check historical pH, EC, water temperature, and humidity trends over custom ranges.
+          <h2 className="mt-1 text-lg sm:text-2xl font-bold tracking-tight line-clamp-2">Sensor History & Trends</h2>
+          <p className="mt-0.5 sm:mt-1 text-[9px] sm:text-xs text-muted-foreground line-clamp-2">
+            Check pH, EC, temperature, and humidity trends.
           </p>
         </div>
 
         {/* Date presets and calendar inputs */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-lg border border-border/80">
+        <div className="flex flex-col gap-2 md:gap-3 md:flex-row md:items-center md:justify-end md:flex-wrap">
+          <div className="flex items-center gap-0.5 bg-muted/40 p-0.5 rounded-lg border border-border/80 overflow-x-auto">
             {RANGE_OPTIONS.map((option) => (
               <Button
                 key={option.days}
                 variant={!useCustomRange && days === option.days ? "secondary" : "ghost"}
                 size="sm"
-                className="text-xs h-7 px-2.5 font-bold"
+                className="text-[8px] xs:text-[9px] sm:text-xs h-6 xs:h-7 px-1.5 xs:px-2.5 font-bold whitespace-nowrap flex-shrink-0"
                 onClick={() => {
                   setUseCustomRange(false);
                   setDays(option.days);
@@ -421,23 +421,32 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
             ))}
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border border-border/80 bg-muted/20 px-2.5 py-1">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2 rounded-lg border border-border/80 bg-muted/20 px-2 xs:px-2.5 py-1">
             <div className="flex items-center gap-1">
-              <span className="text-[9px] text-muted-foreground font-bold uppercase">From</span>
+              <span className="text-[7px] xs:text-[8px] text-muted-foreground font-bold uppercase whitespace-nowrap">From</span>
               <input
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="bg-transparent text-xs font-mono font-bold border-none focus:outline-none w-26 h-5"
+                className="bg-transparent text-[8px] xs:text-xs font-mono font-bold border-none focus:outline-none w-auto min-w-20 h-5"
               />
             </div>
-            <div className="flex items-center gap-1 border-l pl-2">
-              <span className="text-[9px] text-muted-foreground font-bold uppercase">To</span>
+            <div className="hidden sm:flex items-center border-l pl-2 gap-1">
+              <span className="text-[7px] xs:text-[8px] text-muted-foreground font-bold uppercase whitespace-nowrap">To</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="bg-transparent text-xs font-mono font-bold border-none focus:outline-none w-26 h-5"
+                className="bg-transparent text-[8px] xs:text-xs font-mono font-bold border-none focus:outline-none w-auto min-w-20 h-5"
+              />
+            </div>
+            <div className="flex sm:hidden items-center gap-1">
+              <span className="text-[7px] xs:text-[8px] text-muted-foreground font-bold uppercase whitespace-nowrap">To</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="bg-transparent text-[8px] xs:text-xs font-mono font-bold border-none focus:outline-none w-auto min-w-20 h-5"
               />
             </div>
             <Button 
@@ -445,7 +454,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
               variant="default" 
               onClick={handleApplyCustomRange} 
               disabled={!customStart || !customEnd} 
-              className="h-6 px-2 text-[10px] font-bold"
+              className="h-5 xs:h-6 px-1.5 xs:px-2 text-[7px] xs:text-[8px] font-bold whitespace-nowrap"
             >
               Apply
             </Button>
@@ -454,7 +463,7 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
                 size="xs" 
                 variant="ghost" 
                 onClick={handleClearCustomRange} 
-                className="h-6 px-2 text-[10px] text-red-500 hover:text-red-600 font-bold"
+                className="h-5 xs:h-6 px-1.5 xs:px-2 text-[7px] xs:text-[8px] text-red-500 hover:text-red-600 font-bold whitespace-nowrap"
               >
                 Clear
               </Button>
@@ -464,73 +473,73 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
           <Button 
             variant="outline" 
             size="sm" 
-            className="text-xs border-emerald-500/30 hover:bg-emerald-50/50 hover:text-emerald-700 font-bold"
+            className="text-[8px] xs:text-[9px] sm:text-xs border-emerald-500/30 hover:bg-emerald-50/50 hover:text-emerald-700 font-bold h-6 xs:h-7 whitespace-nowrap"
             onClick={() => downloadCsv(`sensor_history_${useCustomRange ? customStart + "_to_" + customEnd : days + "d"}.csv`, exportRows)}
           >
-            <Download className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
-            Export Excel (CSV)
+            <Download className="mr-1 h-3 w-3 xs:h-3.5 xs:w-3.5 text-emerald-500 flex-shrink-0" />
+            <span className="hidden xs:inline">Export</span>
           </Button>
         </div>
       </div>
 
       {/* Numerical Averages Summary Cards */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 xs:gap-3 sm:gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <SummaryCard
-          icon={<Gauge className="h-5 w-5 text-indigo-500" />}
-          label="Average pH"
+          icon={<Gauge className="h-4 w-4 xs:h-5 xs:w-5 text-indigo-500" />}
+          label="pH"
           value={avgPh != null ? avgPh.toFixed(2) : "——"}
-          hint="Target range: 5.5 - 6.5"
+          hint="5.5–6.5"
         />
         <SummaryCard
-          icon={<Activity className="h-5 w-5 text-amber-500" />}
-          label="Average EC"
-          value={avgEc != null ? `${avgEc.toFixed(2)} mS` : "——"}
-          hint="Target range: 0.8 - 1.2"
+          icon={<Activity className="h-4 w-4 xs:h-5 xs:w-5 text-amber-500" />}
+          label="EC"
+          value={avgEc != null ? `${avgEc.toFixed(2)}` : "——"}
+          hint="0.8–1.2"
         />
         <SummaryCard
-          icon={<Thermometer className="h-5 w-5 text-sky-500" />}
-          label="Avg Water Temp"
-          value={avgWaterTemp != null ? `${avgWaterTemp.toFixed(1)}°C` : "——"}
-          hint="Comfort band: 20°C - 26°C"
+          icon={<Thermometer className="h-4 w-4 xs:h-5 xs:w-5 text-sky-500" />}
+          label="Tank T°"
+          value={avgWaterTemp != null ? `${avgWaterTemp.toFixed(1)}°` : "——"}
+          hint="20–26°C"
         />
         <SummaryCard
-          icon={<Thermometer className="h-5 w-5 text-amber-500" />}
-          label="Avg NFT Temp"
-          value={avgNftTemp != null ? `${avgNftTemp.toFixed(1)}°C` : "——"}
-          hint="Comfort band: 20°C - 26°C"
+          icon={<Thermometer className="h-4 w-4 xs:h-5 xs:w-5 text-amber-500" />}
+          label="NFT T°"
+          value={avgNftTemp != null ? `${avgNftTemp.toFixed(1)}°` : "——"}
+          hint="20–26°C"
         />
         <SummaryCard
-          icon={<Droplets className="h-5 w-5 text-emerald-500" />}
-          label="Avg Air Humidity"
+          icon={<Droplets className="h-4 w-4 xs:h-5 xs:w-5 text-emerald-500" />}
+          label="Humidity"
           value={avgHumidity != null ? `${avgHumidity.toFixed(1)}%` : "——"}
-          hint="Ideal range: 50% - 70%"
+          hint="50–70%"
         />
         <SummaryCard
-          icon={<AlertCircle className="h-5 w-5 text-indigo-500" />}
-          label="History Window"
-          value={`${chartDays} Days`}
-          hint={`Total Logged: ${filteredSensors.length}`}
+          icon={<AlertCircle className="h-4 w-4 xs:h-5 xs:w-5 text-indigo-500" />}
+          label="Window"
+          value={`${chartDays}d`}
+          hint={`${filteredSensors.length} pts`}
         />
       </div>
 
       {/* Advanced Trend Area Charts */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         {/* pH & EC Historical Balance Chart */}
-        <Card className="p-5 border-border bg-card">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">pH & EC Solution Balance</div>
-              <div className="text-2xs text-muted-foreground mt-0.5">Dual Y-axis chart outlining pH (left) vs Electrical Conductivity (right)</div>
+        <Card className="p-3 sm:p-5 border-border bg-card">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase tracking-wider line-clamp-1">pH & EC Balance</div>
+              <div className="text-[8px] sm:text-2xs text-muted-foreground mt-0.5 line-clamp-2">Dual Y-axis chart: pH (left) vs EC (right)</div>
             </div>
-            <Badge variant="outline" className="text-2xs">Target pH 5.5–6.5 | EC 0.8–1.2</Badge>
+            <Badge variant="outline" className="text-[7px] sm:text-2xs whitespace-nowrap">5.5–6.5 | 0.8–1.2</Badge>
           </div>
           
-          <div className="h-64 w-full">
+          <div className="h-40 w-full xs:h-48 sm:h-64">
             <ChartContainer config={{ 
-              ph: { label: "pH Value", color: "#6366f1" },
-              ec: { label: "EC Index", color: "#f59e0b" }
+              ph: { label: "pH", color: "#6366f1" },
+              ec: { label: "EC", color: "#f59e0b" }
             }} className="h-full w-full">
-              <AreaChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+              <AreaChart data={groupedSensorData} margin={{ left: -20, right: -10, top: 5, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorHistoryPh" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
@@ -542,9 +551,9 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} className="text-[10px] font-semibold" />
-                <YAxis yAxisId="left" domain={[4.5, 7.5]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
-                <YAxis yAxisId="right" orientation="right" domain={[0.4, 2.0]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={18} className="text-[8px] xs:text-[9px] font-semibold" />
+                <YAxis yAxisId="left" domain={[4.5, 7.5]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" width={28} />
+                <YAxis yAxisId="right" orientation="right" domain={[0.4, 2.0]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" width={28} />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Legend content={<ChartLegendContent />} />
                 <ReferenceLine yAxisId="left" y={5.5} stroke="#a5b4fc" strokeDasharray="4 4" />
@@ -559,22 +568,22 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
         </Card>
 
         {/* Water Temperature & Air Humidity Trend Chart */}
-        <Card className="p-5 border-border bg-card">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Temperatures & Air Humidity</div>
-              <div className="text-2xs text-muted-foreground mt-0.5">Water and NFT temperatures (left) plotted against local air humidity (right)</div>
+        <Card className="p-3 sm:p-5 border-border bg-card">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase tracking-wider line-clamp-1">Temperatures & Humidity</div>
+              <div className="text-[8px] sm:text-2xs text-muted-foreground mt-0.5 line-clamp-2">Water and NFT temps (left) vs air humidity (right)</div>
             </div>
-            <Badge variant="outline" className="text-2xs">Comfort: 20–26°C | Humidity 40–90%</Badge>
+            <Badge variant="outline" className="text-[7px] sm:text-2xs whitespace-nowrap">20–26°C | 40–90%</Badge>
           </div>
           
-          <div className="h-64 w-full">
+          <div className="h-40 w-full xs:h-48 sm:h-64">
             <ChartContainer config={{ 
-              temp: { label: "Water Temp", color: "#0ea5e9" },
-              nftTemp: { label: "NFT Temp", color: "#f59e0b" },
-              humidity: { label: "Air Humidity", color: "#10b981" }
+              temp: { label: "Tank T°", color: "#0ea5e9" },
+              nftTemp: { label: "NFT T°", color: "#f59e0b" },
+              humidity: { label: "Humidity %", color: "#10b981" }
             }} className="h-full w-full">
-              <AreaChart data={groupedSensorData} margin={{ left: -10, right: -10, top: 10, bottom: 0 }}>
+              <AreaChart data={groupedSensorData} margin={{ left: -20, right: -10, top: 5, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorHistoryTemp" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.15}/>
@@ -590,16 +599,16 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted/40" />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={24} className="text-[10px] font-semibold" />
-                <YAxis yAxisId="left" domain={[15, 32]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
-                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} allowDecimals={false} tickLine={false} axisLine={false} className="text-[10px] font-mono fill-muted-foreground" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={18} className="text-[8px] xs:text-[9px] font-semibold" />
+                <YAxis yAxisId="left" domain={[15, 32]} allowDecimals={true} tickLine={false} axisLine={false} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" width={28} />
+                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} allowDecimals={false} tickLine={false} axisLine={false} className="text-[8px] xs:text-[9px] font-mono fill-muted-foreground" width={28} />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Legend content={<ChartLegendContent />} />
                 <ReferenceLine yAxisId="right" y={40} stroke="#6ee7b7" strokeDasharray="4 4" />
                 <ReferenceLine yAxisId="right" y={90} stroke="#6ee7b7" strokeDasharray="4 4" />
-                <Area yAxisId="left" type="monotone" dataKey="reservoirTempC" stroke="var(--color-temp)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryTemp)" dot={false} connectNulls />
-                <Area yAxisId="left" type="monotone" dataKey="nftTempC" stroke="var(--color-nftTemp)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryNftTemp)" dot={false} connectNulls />
-                <Area yAxisId="right" type="monotone" dataKey="humidityPct" stroke="var(--color-humidity)" strokeWidth={2} fillOpacity={1} fill="url(#colorHistoryHum)" dot={false} connectNulls />
+                <Area yAxisId="left" type="monotone" dataKey="reservoirTempC" stroke="var(--color-temp)" strokeWidth={1.5} fillOpacity={1} fill="url(#colorHistoryTemp)" dot={false} connectNulls />
+                <Area yAxisId="left" type="monotone" dataKey="nftTempC" stroke="var(--color-nftTemp)" strokeWidth={1.5} fillOpacity={1} fill="url(#colorHistoryNftTemp)" dot={false} connectNulls />
+                <Area yAxisId="right" type="monotone" dataKey="humidityPct" stroke="var(--color-humidity)" strokeWidth={1.5} fillOpacity={1} fill="url(#colorHistoryHum)" dot={false} connectNulls />
               </AreaChart>
             </ChartContainer>
           </div>
@@ -607,124 +616,135 @@ export function HistoryAnalyticsTab({ deviceId }: { deviceId?: string | null }) 
       </div>
 
       {/* Historical Data Tables Audit Logs */}
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-3">
         {/* Sensor Logs Paginated Table */}
-        <Card className="p-5 xl:col-span-2 border-border bg-card">
-          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
+        <Card className="p-3 sm:p-5 xl:col-span-2 border-border bg-card space-y-3">
+          <div className="space-y-3 sm:space-y-0">
+            <div className="flex flex-col gap-2.5">
               <div>
                 <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Historical Sensor Registry</div>
-                <div className="text-2xs text-muted-foreground mt-0.5">Paginated tabular logs of every raw ESP32 sensor transmission</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">Paginated logs of every ESP32 sensor transmission</div>
               </div>
-              <div className="flex items-center gap-1.5 bg-muted/20 px-2 py-0.5 rounded-md border border-border/80">
-                <span className="text-[9px] text-muted-foreground font-bold uppercase">Filter Date:</span>
-                <input
-                  type="date"
-                  value={registryDateFilter}
-                  onChange={(e) => {
-                    setRegistryDateFilter(e.target.value);
-                    setSensorPage(0);
-                  }}
-                  className="bg-transparent text-xs font-mono font-bold border-none focus:outline-none w-26 h-5"
-                />
-                {registryDateFilter && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => {
-                      setRegistryDateFilter("");
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label className="text-[9px] text-muted-foreground font-bold uppercase whitespace-nowrap">Filter Date:</label>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                  <input
+                    type="date"
+                    value={registryDateFilter}
+                    onChange={(e) => {
+                      setRegistryDateFilter(e.target.value);
                       setSensorPage(0);
                     }}
-                    className="h-5 px-1.5 text-[9px] text-red-500 font-bold"
-                  >
-                    Reset
-                  </Button>
-                )}
+                    className="h-8 w-full rounded border border-border/80 bg-muted/20 px-2 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-primary/50 sm:w-40"
+                  />
+                  {registryDateFilter && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => {
+                        setRegistryDateFilter("");
+                        setSensorPage(0);
+                      }}
+                      className="h-8 px-2 text-[9px] font-bold text-red-500"
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
-            
-            {/* Simple Pagination Buttons */}
+
             {totalSensorPages > 1 && (
-              <div className="flex items-center gap-1.5 self-end">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={sensorPage === 0}
-                  onClick={() => setSensorPage((p) => p - 1)}
-                  className="h-6 w-14 text-[10px]"
-                >
-                  Prev
-                </Button>
-                <span className="text-[10px] font-bold text-muted-foreground font-mono">
-                  {sensorPage + 1} / {totalSensorPages}
+              <div className="flex items-center justify-between gap-2 sm:justify-end">
+                <span className="text-[9px] font-bold text-muted-foreground font-mono">
+                  Page {sensorPage + 1} / {totalSensorPages}
                 </span>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={sensorPage >= totalSensorPages - 1}
-                  onClick={() => setSensorPage((p) => p + 1)}
-                  className="h-6 w-14 text-[10px]"
-                >
-                  Next
-                </Button>
+                <div className="flex gap-1">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={sensorPage === 0}
+                    onClick={() => setSensorPage((p) => p - 1)}
+                    className="h-7 px-2 text-[9px]"
+                  >
+                    Prev
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={sensorPage >= totalSensorPages - 1}
+                    onClick={() => setSensorPage((p) => p + 1)}
+                    className="h-7 px-2 text-[9px]"
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             )}
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-border/80">
-            <table className="w-full text-xs">
-              <thead className="bg-secondary text-secondary-foreground">
-                <tr className="font-bold text-2xs uppercase tracking-wider">
-                  <th className="px-3 py-2 text-left">Timestamp</th>
-                  <th className="px-3 py-2 text-center">pH</th>
-                  <th className="px-3 py-2 text-center">EC</th>
-                  <th className="px-3 py-2 text-center">Temp</th>
-                  <th className="px-3 py-2 text-center">Humidity</th>
-                  <th className="px-3 py-2 text-center">Volume (L)</th>
-                  <th className="px-3 py-2 text-right">Distance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedSensors.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
-                      No sensor logs recorded in this date range.
-                    </td>
+          <div className="overflow-x-auto -mx-3 sm:-mx-5">
+            <div className="min-w-[620px] px-3 sm:px-5">
+              <table className="w-full text-[9px] sm:text-xs">
+                <thead className="bg-secondary text-secondary-foreground">
+                  <tr className="font-bold text-[8px] uppercase tracking-wider">
+                    <th className="px-2 py-2 text-left sm:px-3">Time</th>
+                    <th className="px-2 py-2 text-center sm:px-3">pH</th>
+                    <th className="px-2 py-2 text-center sm:px-3">EC</th>
+                    <th className="hidden px-2 py-2 text-center sm:table-cell sm:px-3">Temp</th>
+                    <th className="hidden px-2 py-2 text-center md:table-cell sm:px-3">Humidity</th>
+                    <th className="hidden px-2 py-2 text-center lg:table-cell sm:px-3">Volume</th>
+                    <th className="hidden px-2 py-2 text-right lg:table-cell sm:px-3">Distance</th>
                   </tr>
-                ) : (
-                  paginatedSensors.map((snapshot) => (
-                    <tr key={snapshot.timestamp} className="border-t border-border hover:bg-muted/10 transition-colors">
-                      <td className="px-3 py-2 font-mono text-2xs">
-                        {format(snapshot.timestamp, "yyyy-MM-dd HH:mm:ss")}
-                      </td>
-                      <td className="px-3 py-2 text-center font-bold text-indigo-600">
-                        {snapshot.ph != null ? snapshot.ph.toFixed(2) : "——"}
-                      </td>
-                      <td className="px-3 py-2 text-center font-bold text-amber-600">
-                        {snapshot.ec != null ? snapshot.ec.toFixed(2) : "——"}
-                      </td>
-                      <td className="px-3 py-2 text-center font-semibold text-sky-600">
-                        {snapshot.reservoirTempC != null ? `${snapshot.reservoirTempC.toFixed(1)}°C` : "——"}
-                        {snapshot.nftTempC != null && (
-                          <div className="text-[10px] text-amber-600 font-semibold mt-0.5">
-                            NFT: {snapshot.nftTempC.toFixed(1)}°C
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-center font-semibold text-emerald-600">
-                        {snapshot.humidityPct != null ? `${snapshot.humidityPct.toFixed(1)}%` : "——"}
-                      </td>
-                      <td className="px-3 py-2 text-center font-mono">
-                        {snapshot.waterVolumeLiters != null ? `${snapshot.waterVolumeLiters.toFixed(1)} L` : "——"}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-500">
-                        {snapshot.waterDistanceCm != null ? `${snapshot.waterDistanceCm.toFixed(1)} cm` : "——"}
+                </thead>
+                <tbody>
+                  {paginatedSensors.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground text-xs">
+                        No sensor logs recorded in this date range.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    paginatedSensors.map((snapshot) => (
+                      <tr key={snapshot.timestamp} className="border-t border-border/50 hover:bg-muted/10 transition-colors">
+                        <td className="px-2 py-2 font-mono text-[9px] text-muted-foreground sm:px-3">
+                          <div className="font-semibold text-foreground">{format(snapshot.timestamp, "HH:mm:ss")}</div>
+                          <div className="text-[8px] sm:hidden">{format(snapshot.timestamp, "MM/dd")}</div>
+                        </td>
+                        <td className="px-2 py-2 text-center font-bold text-indigo-600 dark:text-indigo-400 sm:px-3">
+                          {snapshot.ph != null ? snapshot.ph.toFixed(2) : "——"}
+                        </td>
+                        <td className="px-2 py-2 text-center font-bold text-amber-600 dark:text-amber-400 sm:px-3">
+                          {snapshot.ec != null ? snapshot.ec.toFixed(2) : "——"}
+                        </td>
+                        <td className="hidden px-2 py-2 text-center font-semibold text-sky-600 dark:text-sky-400 sm:table-cell sm:px-3">
+                          <div>{snapshot.reservoirTempC != null ? `${snapshot.reservoirTempC.toFixed(1)}°` : "——"}</div>
+                          {snapshot.nftTempC != null && (
+                            <div className="text-[8px] text-amber-600 dark:text-amber-400">
+                              NFT {snapshot.nftTempC.toFixed(1)}°
+                            </div>
+                          )}
+                        </td>
+                        <td className="hidden px-2 py-2 text-center font-semibold text-emerald-600 dark:text-emerald-400 md:table-cell sm:px-3">
+                          {snapshot.humidityPct != null ? `${snapshot.humidityPct.toFixed(1)}%` : "——"}
+                        </td>
+                        <td className="hidden px-2 py-2 text-center font-mono text-muted-foreground lg:table-cell sm:px-3">
+                          {snapshot.waterVolumeLiters != null ? `${snapshot.waterVolumeLiters.toFixed(1)}L` : "——"}
+                        </td>
+                        <td className="hidden px-2 py-2 text-right font-mono text-slate-500 dark:text-slate-400 lg:table-cell sm:px-3">
+                          {snapshot.waterDistanceCm != null ? `${snapshot.waterDistanceCm.toFixed(1)}cm` : "——"}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="border-t border-border/50 pt-2 text-[8px] text-muted-foreground sm:hidden">
+            <div>Tip: swipe horizontally to view more sensor columns.</div>
           </div>
         </Card>
 

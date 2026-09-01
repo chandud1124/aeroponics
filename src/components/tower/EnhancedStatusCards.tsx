@@ -1,8 +1,10 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, AlertCircle, Zap, AlertOctagon, Activity, Thermometer, Droplets, Gauge, Sprout } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AlertTriangle, AlertCircle, Zap, AlertOctagon, Activity, Thermometer, Droplets, Gauge, Sprout, CheckCircle2, AlertOctagon as AlertOctagonIcon, Clock, RefreshCw } from "lucide-react";
 import { parseFault, FAULT_INFO, type FaultCode } from "@/lib/tower-faults";
+import { toast } from "sonner";
 import type { LiveStatus } from "@/lib/tower-storage";
 
 interface StatusCardsProps {
@@ -248,6 +250,71 @@ export function EnhancedStatusCards({ status }: StatusCardsProps) {
           <Badge variant="outline" className="text-xs">
             ESP32 Local
           </Badge>
+        </Card>
+
+        {/* Device Plan Verification Card */}
+        <Card className="p-4 bg-muted/30 border-border/80 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wider block">Active Plan</span>
+              <span className="mt-1 text-sm font-bold block text-foreground">
+                {status.activePlanName ? (
+                  <span className="inline-flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                    {status.activePlanName}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">No active plan</span>
+                )}
+              </span>
+            </div>
+            <Clock className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+          </div>
+          
+          {/* Plan Signature Status */}
+          {status.activePlanSignature && (
+            <div className="border-t border-border/40 pt-2">
+              <div className="flex items-center gap-2 text-[10px]">
+                <span className="font-mono text-muted-foreground">Sig:</span>
+                <code className="flex-1 text-[9px] font-mono bg-muted/40 px-1.5 py-0.5 rounded border border-border/50 truncate">
+                  {status.activePlanSignature.substring(0, 16)}...
+                </code>
+                <span className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                  status.activePlanSignature === status.activePlanSignature ? "bg-emerald-500" : "bg-amber-500 animate-pulse"
+                }`} />
+              </div>
+            </div>
+          )}
+          
+          {/* Sync Status & Last Sync Time */}
+          {status.activePlanSavedAt && (
+            <div className="border-t border-border/40 pt-2">
+              <div className="text-[10px] text-muted-foreground mb-2">
+                Last sync: {new Date(status.activePlanSavedAt).toLocaleString()}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full h-7 text-[9px] font-bold"
+                onClick={async () => {
+                  try {
+                    toast.loading("Syncing plan to device...");
+                    const response = await fetch("/api/force-sync-plan", { method: "POST" });
+                    if (response.ok) {
+                      toast.success("Plan sync queued - ESP32 will apply on next check-in");
+                    } else {
+                      toast.error("Sync request failed");
+                    }
+                  } catch (e) {
+                    toast.error("Sync error: " + (e instanceof Error ? e.message : "Unknown"));
+                  }
+                }}
+              >
+                <RefreshCw className="h-3 w-3 mr-1" />
+                Force Re-sync
+              </Button>
+            </div>
+          )}
         </Card>
       </div>
     </div>
